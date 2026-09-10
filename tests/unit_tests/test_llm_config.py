@@ -4,17 +4,16 @@ import logging
 import pytest
 
 from silnlp.nmt.config import Language
-from silnlp.nmt.example_retrieval import Example, TextExampleFormatter, create_example_formatter
+from silnlp.nmt.example_retrieval import Example, ExampleFormatterFactory
 from silnlp.nmt.llm_config import (
     LLMConfig,
     PromptBuilder,
     PromptMessages,
     PromptTemplate,
-    parse_example_selection,
-    parse_num_examples,
-    read_prompt_template_file,
-    resolve_prompt_defaults,
-    warn_about_examples_placeholder,
+    PlainPromptMessagesFactory,
+    PromptConfig,
+    PromptDefaults,
+    PromptTemplateCollection,
 )
 
 EN = Language("en", "English")
@@ -22,7 +21,15 @@ FR = Language("fr", "French")
 
 
 def _template(instruction_template="{source}", system_message="", example_format="text"):
-    return PromptTemplate(system_message, instruction_template, create_example_formatter(example_format))
+    return PromptTemplate(system_message, instruction_template, ExampleFormatterFactory.create(example_format))
+
+
+def _collection(*templates):
+    return PromptTemplateCollection(list(templates))
+
+
+def _builder(templates, num_examples=0, pool=None):
+    return PromptBuilder(templates, num_examples, pool, PlainPromptMessagesFactory())
 
 
 class _FakePool:
@@ -63,19 +70,21 @@ def test_prompt_messages_fold_the_system_message_into_the_user_turn():
 
 
 def test_prompt_builder_fills_the_instruction_template():
-    builder = PromptBuilder([_template("Translate {src_lang} to {trg_lang}: {source}")], 0, None)
+    builder = _builder(_collection(_template("Translate {src_lang} to {trg_lang}: {source}")), 0, None)
     assert builder.build("hello", EN, FR).instruction == "Translate English to French: hello"
 
 
 def test_prompt_builder_formats_the_system_message_with_the_languages():
-    builder = PromptBuilder([_template(system_message="{src_lang} into {trg_lang}")], 0, None)
+    builder = _builder(_collection(_template(system_message="{src_lang} into {trg_lang}")), 0, None)
     assert builder.build("hello", EN, FR).system_message == "English into French"
 
 
 def test_prompt_builder_renders_examples_into_the_placeholder():
     pool = _FakePool([Example("cat", "chat")])
-    builder = PromptBuilder(
-        [_template("{examples}{source}", example_format={"type": "text", "template": "{source}->{target}\n"})], 1, pool
+    builder = _builder(
+        _collection(_template("{examples}{source}", example_format={"template": "{source}->{target}\n"})),
+        1,
+        pool,
     )
     assert builder.build("hello", EN, FR).instruction == "cat->chat\nhello"
     assert pool.calls == [("hello", 1, None)]
@@ -83,18 +92,18 @@ def test_prompt_builder_renders_examples_into_the_placeholder():
 
 def test_prompt_builder_skips_the_pool_when_no_examples_are_asked_for():
     pool = _FakePool([Example("cat", "chat")])
-    builder = PromptBuilder([_template("{examples}{source}")], 0, pool)
+    builder = _builder(_collection(_template("{examples}{source}")), 0, pool)
     assert builder.build("hello", EN, FR).instruction == "hello"
     assert pool.calls == []
 
 
 def test_prompt_builder_requires_at_least_one_template():
-    with pytest.raises(ValueError, match="at least one template"):
-        PromptBuilder([], 0, None)
+    with pytest.raises(ValueError, match="No valid prompt templates"):
+        _builder(PromptTemplateCollection([]), 0, None)
 
 
 def test_prompt_builder_rotates_templates_by_pool_index():
-    builder = PromptBuilder([_template("A: {source}"), _template("B: {source}")], 0, None)
+    builder = _builder(_collection(_template("A: {source}"), _template("B: {source}")), 0, None)
     assert [builder.build("x", EN, FR, pool_index=i).instruction for i in range(4)] == [
         "A: x",
         "B: x",
@@ -104,43 +113,69 @@ def test_prompt_builder_rotates_templates_by_pool_index():
 
 
 def test_prompt_builder_uses_the_first_template_when_there_is_no_pool_index():
-    builder = PromptBuilder([_template("A: {source}"), _template("B: {source}")], 0, None)
+    builder = _builder(_collection(_template("A: {source}"), _template("B: {source}")), 0, None)
     assert builder.build("x", EN, FR).instruction == "A: x"
 
 
 def test_prompt_builder_reports_whether_it_covers_the_whole_pool():
-    assert not PromptBuilder([_template()], 5, None).covers_whole_pool()
-    assert PromptBuilder([_template()], 5, _FakePool(whole=True)).covers_whole_pool()
+    assert not _builder(_collection(_template()), 5, None).covers_whole_pool()
+    assert _builder(_collection(_template()), 5, _FakePool(whole=True)).covers_whole_pool()
 
 
 def test_prompt_template_reports_its_examples_placeholder():
-    assert _template("{examples}{source}").has_examples_placeholder
-    assert not _template("{source}").has_examples_placeholder
+    assert _template("{examples}{source}").describe_examples_mismatch(2) is None
+    assert _template("{source}").describe_examples_mismatch(2) is not None
 
 
 # --- config parsing ----------------------------------------------------------------------
 
 
-def test_parse_example_selection_reads_the_method_and_the_model():
-    assert parse_example_selection({"example_selection": {"method": "tfidf", "model": "m"}}) == ("tfidf", "m")
+def _prompt_config(**settings):
+    base = {
+        "num_examples": 0,
+        "example_selection": {"method": "tfidf", "model": None},
+        "system_message": "",
+        "instruction_template": "{source}",
+        "example_format": "text",
+    }
+    base.update(settings)
+    return PromptConfig(base, "train.prompt")
 
 
-def test_parse_example_selection_accepts_a_bare_string():
+def test_prompt_config_creates_the_configured_retriever():
+    retriever = _prompt_config(example_selection={"method": "bm25", "model": None}).create_retriever()
+    assert retriever.method == "bm25"
+
+
+def test_prompt_config_accepts_a_bare_string_selection():
     # merge_dict() replaces rather than merges when a bare-string override lands on a dict default.
-    assert parse_example_selection({"example_selection": "embedding"}) == ("embedding", None)
+    assert _prompt_config(example_selection="embedding").create_retriever().method == "embedding"
 
 
-def test_parse_num_examples_rejects_a_negative_count():
+def test_prompt_config_rejects_a_negative_example_count():
     with pytest.raises(ValueError, match="non-negative"):
-        parse_num_examples({"num_examples": -1}, "train.prompt")
+        _prompt_config(num_examples=-1).get_num_examples()
 
 
 # --- default resolution ------------------------------------------------------------------
 
 
+DEFAULTS = PromptDefaults(
+    LLMConfig.DEFAULT_SYSTEM_MESSAGE,
+    LLMConfig.DEFAULT_INSTRUCTION_TEMPLATE,
+    LLMConfig.DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE,
+    LLMConfig.DEFAULT_EXAMPLE_FORMAT,
+)
+
+
+def _resolved(**settings):
+    prompt = {"system_message": None, "instruction_template": None, "example_format": None, **settings}
+    PromptConfig(prompt, "train.prompt").resolve_defaults(DEFAULTS)
+    return prompt
+
+
 def test_resolve_prompt_defaults_uses_the_zero_shot_template_without_examples():
-    prompt = {"system_message": None, "instruction_template": None, "example_format": None, "num_examples": 0}
-    resolve_prompt_defaults(prompt, LLMConfig)
+    prompt = _resolved(num_examples=0)
     assert prompt["instruction_template"] == LLMConfig.DEFAULT_INSTRUCTION_TEMPLATE
     assert "{examples}" not in prompt["instruction_template"]
     assert prompt["system_message"] == LLMConfig.DEFAULT_SYSTEM_MESSAGE
@@ -148,15 +183,14 @@ def test_resolve_prompt_defaults_uses_the_zero_shot_template_without_examples():
 
 
 def test_resolve_prompt_defaults_uses_the_few_shot_template_with_examples():
-    prompt = {"system_message": None, "instruction_template": None, "example_format": None, "num_examples": 3}
-    resolve_prompt_defaults(prompt, LLMConfig)
+    prompt = _resolved(num_examples=3)
     assert prompt["instruction_template"] == LLMConfig.DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE
     assert "{examples}" in prompt["instruction_template"]
 
 
 def test_resolve_prompt_defaults_leaves_the_user_wording_alone():
     prompt = {"system_message": "mine", "instruction_template": "{source}", "example_format": "json", "num_examples": 3}
-    resolve_prompt_defaults(prompt, LLMConfig)
+    PromptConfig(prompt, "train.prompt").resolve_defaults(DEFAULTS)
     assert prompt == {
         "system_message": "mine",
         "instruction_template": "{source}",
@@ -180,33 +214,38 @@ def test_the_two_default_templates_agree_apart_from_the_examples_block():
 
 def test_warns_when_examples_are_requested_but_the_template_has_no_placeholder(caplog):
     with caplog.at_level(logging.WARNING):
-        warn_about_examples_placeholder([_template("{source}")], 2, "train.prompt.instruction_template")
+        PromptTemplateCollection([_template("{source}")]).validate_for_icl(2, "train.prompt.instruction_template")
     assert any("silently discarded" in record.message for record in caplog.records)
 
 
 def test_warns_when_the_template_has_a_placeholder_but_no_examples_are_requested(caplog):
     with caplog.at_level(logging.WARNING):
-        warn_about_examples_placeholder([_template("{examples}{source}")], 0, "train.prompt.instruction_template")
+        collection = PromptTemplateCollection([_template("{examples}{source}")])
+        collection.validate_for_icl(0, "train.prompt.instruction_template")
     assert any("always renders as nothing" in record.message for record in caplog.records)
 
 
 def test_does_not_warn_when_the_template_and_the_count_agree(caplog):
     with caplog.at_level(logging.WARNING):
-        warn_about_examples_placeholder([_template("{examples}{source}")], 2, "x")
-        warn_about_examples_placeholder([_template("{source}")], 0, "x")
+        PromptTemplateCollection([_template("{examples}{source}")]).validate_for_icl(2, "x")
+        PromptTemplateCollection([_template("{source}")]).validate_for_icl(0, "x")
     assert caplog.records == []
 
 
 def test_warning_names_the_offending_template_when_there_are_several(caplog):
     with caplog.at_level(logging.WARNING):
-        warn_about_examples_placeholder([_template("{examples}{source}"), _template("{source}")], 2, "templates.jsonl")
+        collection = PromptTemplateCollection([_template("{examples}{source}"), _template("{source}")])
+        collection.validate_for_icl(2, "templates.jsonl")
     assert any("templates.jsonl[1]" in record.message for record in caplog.records)
 
 
 # --- template files ----------------------------------------------------------------------
 
 
-DEFAULTS = {"system_message": "default system", "instruction_template": "default {source}", "example_format": "text"}
+def _entry(**overrides):
+    entry = {"system_message": "sys", "instruction_template": "{source}", "example_format": "text"}
+    entry.update(overrides)
+    return entry
 
 
 def _write_templates(path, entries):
@@ -214,77 +253,90 @@ def _write_templates(path, entries):
     return path
 
 
-def test_read_prompt_template_file_reads_one_template_per_line(tmp_path):
+def _templates_from(path, count):
+    collection = PromptTemplateCollection.from_file(path)
+    return [collection.template_for(i) for i in range(count)]
+
+
+def test_prompt_template_file_reads_one_template_per_line(tmp_path):
     path = _write_templates(
         tmp_path / "templates.jsonl",
         [
-            {"system_message": "one", "instruction_template": "A: {source}", "example_format": "json"},
-            {"system_message": "two", "instruction_template": "B: {source}", "example_format": "xml"},
+            _entry(system_message="one", instruction_template="A: {source}", example_format="json"),
+            _entry(system_message="two", instruction_template="B: {source}", example_format="xml"),
         ],
     )
-    templates = read_prompt_template_file(path, DEFAULTS)
+    templates = _templates_from(path, 2)
     assert [t.system_message for t in templates] == ["one", "two"]
     assert [t.instruction_template for t in templates] == ["A: {source}", "B: {source}"]
 
 
-def test_read_prompt_template_file_falls_back_to_the_defaults_per_field(tmp_path):
-    path = _write_templates(tmp_path / "templates.jsonl", [{"instruction_template": "A: {source}"}])
-    template = read_prompt_template_file(path, DEFAULTS)[0]
-    assert template.system_message == "default system"
-    assert isinstance(template.formatter, TextExampleFormatter)
+def test_prompt_template_file_keeps_an_explicit_empty_field(tmp_path):
+    path = _write_templates(tmp_path / "templates.jsonl", [_entry(system_message="")])
+    assert PromptTemplateCollection.from_file(path).template_for(None).system_message == ""
 
 
-def test_read_prompt_template_file_ignores_blank_lines(tmp_path):
+def test_prompt_template_file_ignores_blank_lines(tmp_path):
     path = tmp_path / "templates.jsonl"
-    path.write_text('\n{"instruction_template": "A: {source}"}\n\n', encoding="utf-8")
-    assert len(read_prompt_template_file(path, DEFAULTS)) == 1
+    path.write_text("\n" + json.dumps(_entry(instruction_template="A: {source}")) + "\n\n", encoding="utf-8")
+    assert _templates_from(path, 1)[0].instruction_template == "A: {source}"
 
 
-def test_read_prompt_template_file_rejects_a_missing_file(tmp_path):
+def test_prompt_template_file_rejects_a_missing_file(tmp_path):
     with pytest.raises(RuntimeError, match="does not exist"):
-        read_prompt_template_file(tmp_path / "nowhere.jsonl", DEFAULTS)
+        PromptTemplateCollection.from_file(tmp_path / "nowhere.jsonl")
 
 
-def test_read_prompt_template_file_rejects_an_empty_file(tmp_path):
+def test_prompt_template_file_rejects_an_empty_file(tmp_path):
     path = tmp_path / "templates.jsonl"
     path.write_text("\n\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="no templates"):
-        read_prompt_template_file(path, DEFAULTS)
+        PromptTemplateCollection.from_file(path)
 
 
-def test_read_prompt_template_file_reports_the_line_of_a_syntax_error(tmp_path):
+@pytest.mark.parametrize(
+    "bad_line, message",
+    [
+        ("not json", "not valid JSON"),
+        ('["not", "an", "object"]', "must be a JSON object"),
+        ('{"num_examples": 3}', "unknown field"),
+        (json.dumps({"system_message": "s", "instruction_template": "t"}), "missing required field"),
+        (json.dumps({"system_message": "s", "example_format": "text"}), "missing required field"),
+        (json.dumps(_entry(example_format="bogus")), "invalid example_format"),
+    ],
+)
+def test_prompt_template_file_skips_a_bad_line_and_says_why(tmp_path, caplog, bad_line, message):
     path = tmp_path / "templates.jsonl"
-    path.write_text('{"instruction_template": "ok"}\nnot json\n', encoding="utf-8")
-    with pytest.raises(RuntimeError, match="line 2 is not valid JSON"):
-        read_prompt_template_file(path, DEFAULTS)
+    path.write_text(bad_line + "\n" + json.dumps(_entry(instruction_template="ok")) + "\n", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        collection = PromptTemplateCollection.from_file(path)
+
+    assert collection.template_for(None).instruction_template == "ok"
+    assert any(message in record.message for record in caplog.records)
 
 
-def test_read_prompt_template_file_rejects_a_non_object_line(tmp_path):
-    path = tmp_path / "templates.jsonl"
-    path.write_text('["not", "an", "object"]\n', encoding="utf-8")
-    with pytest.raises(RuntimeError, match="must be a JSON object"):
-        read_prompt_template_file(path, DEFAULTS)
-
-
-def test_read_prompt_template_file_rejects_unknown_fields(tmp_path):
-    path = _write_templates(tmp_path / "templates.jsonl", [{"num_examples": 3}])
-    with pytest.raises(RuntimeError, match="unknown field"):
-        read_prompt_template_file(path, DEFAULTS)
+def test_prompt_template_file_names_every_missing_field(tmp_path, caplog):
+    path = _write_templates(tmp_path / "templates.jsonl", [{"system_message": "s"}, _entry()])
+    with caplog.at_level(logging.WARNING):
+        PromptTemplateCollection.from_file(path)
+    warning = next(r.message for r in caplog.records if "missing required field" in r.message)
+    assert "instruction_template" in warning and "example_format" in warning
 
 
 def test_prompt_builder_rotation_index_overrides_the_pool_index():
     pool = _FakePool([Example("cat", "chat")])
-    builder = PromptBuilder([_template("A: {source}"), _template("B: {source}")], 1, pool)
+    builder = _builder(_collection(_template("A: {source}"), _template("B: {source}")), 1, pool)
     # The pool entry is still excluded from its own examples even though another template is used.
     assert builder.build("x", EN, FR, pool_index=0, rotation_index=1).instruction == "B: x"
     assert pool.calls == [("x", 1, 0)]
 
 
 def test_prompt_builder_rotates_rows_outside_the_pool():
-    builder = PromptBuilder([_template("A: {source}"), _template("B: {source}")], 0, None)
+    builder = _builder(_collection(_template("A: {source}"), _template("B: {source}")), 0, None)
     assert [builder.build("x", EN, FR, rotation_index=i).instruction for i in range(3)] == ["A: x", "B: x", "A: x"]
 
 
 def test_prompt_builder_rotation_index_zero_is_not_treated_as_unset():
-    builder = PromptBuilder([_template("A: {source}"), _template("B: {source}")], 0, None)
+    builder = _builder(_collection(_template("A: {source}"), _template("B: {source}")), 0, None)
     assert builder.build("x", EN, FR, pool_index=1, rotation_index=0).instruction == "A: x"

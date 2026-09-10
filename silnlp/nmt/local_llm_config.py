@@ -13,7 +13,7 @@ reuses the model-agnostic parts of the pipeline:
 
 Training supports full fine-tuning as well as low-rank adapters (LoRA and DoRA) via ``peft``,
 optionally with 4-bit quantization via ``bitsandbytes`` (QLoRA/QDoRA), selected with
-``params.finetune_method``. Adapter hyperparameters live under ``params.adapter``. Prompts are
+``params.get_finetune_method()``. Adapter hyperparameters live under ``params.adapter``. Prompts are
 built with the model's native chat template from ``train.prompt`` and ``infer.prompt``.
 """
 
@@ -58,54 +58,22 @@ from .config import (
     write_effective_config,
 )
 from .corpora import read_parallel_text_pairs
-from .example_retrieval import ExampleRetrieverFactory
+from .example_retrieval import ExamplePool, ExampleRetrieverFactory
 from .llm_config import (
     LLMConfig,
     PromptBuilder,
+    PromptConfig,
     PromptMessages,
-    parse_num_examples,
-    read_prompt_template_file,
-    resolve_prompt_defaults,
-    warn_about_examples_placeholder,
+    PromptMessagesFactory,
+    PromptTemplateCollection,
 )
 from .seq2seq_config import batch_sentences, find_executable_batch_size
 
 LOGGER = logging.getLogger(__name__)
 
 
-def _count_nonblank_lines(path: Path) -> int:
-    with path.open("r", encoding="utf-8") as f:
-        return sum(1 for line in f if line.strip())
-
-
-def is_image_text_to_text_model(model_name_or_path: str, trust_remote_code: bool = False) -> bool:
-    """Return True if the checkpoint is a multimodal image-text-to-text model."""
-    config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=trust_remote_code)
-    return type(config) in AutoModelForImageTextToText._model_mapping
-
-
-def build_generation_kwargs(infer: dict, num_return_sequences: int, pad_token_id: Optional[int]) -> Dict[str, Any]:
-    gen_kwargs: Dict[str, Any] = {
-        "max_new_tokens": infer["max_new_tokens"],
-        "num_return_sequences": num_return_sequences,
-        "pad_token_id": pad_token_id,
-    }
-    if infer.get("do_sample"):
-        gen_kwargs["do_sample"] = True
-        gen_kwargs["temperature"] = infer["temperature"]
-    else:
-        num_beams: int = infer["num_beams"]
-        if num_return_sequences > num_beams:
-            raise RuntimeError(
-                f"Beam search cannot return {num_return_sequences} drafts with num_beams set to {num_beams}. "
-                "Increase num_beams to at least num_drafts or set do_sample to true."
-            )
-        gen_kwargs["num_beams"] = num_beams
-    return gen_kwargs
-
-
-class ChatPromptMessages(PromptMessages):
-    """Prompt messages that render through a local model's own chat template."""
+class LocalLLMPromptMessages(PromptMessages):
+    """Prompt messages a local model can render through its own tokenizer's chat template."""
 
     def apply_prompt_template(
         self, tokenizer: PreTrainedTokenizerBase, add_generation_prompt: bool, tokenize: bool
@@ -141,17 +109,14 @@ class ChatPromptMessages(PromptMessages):
         return text
 
 
-class ChatPromptBuilder(PromptBuilder):
-    messages_class = ChatPromptMessages
+class LocalLLMPromptMessagesFactory(PromptMessagesFactory[LocalLLMPromptMessages]):
+    def create(self, system_message: str, instruction: str, target: Optional[str]) -> LocalLLMPromptMessages:
+        return LocalLLMPromptMessages(system_message, instruction, target)
 
 
 @dataclass(init=False)
-class TranslateGemmaPromptMessages(ChatPromptMessages):
-    """TranslateGemma's chat template rejects a plain-text user turn: it requires ``content``
-    to be a single-item list of {type, source_lang_code, target_lang_code, text}, so this
-    subclass carries that structured content instead of a plain-text instruction. It has no
-    system message, and -- since TranslateGemma always ships a chat template -- never needs
-    the system-message-folding or no-chat-template fallbacks of the base class."""
+class TranslateGemmaPromptMessages(LocalLLMPromptMessages):
+    """TranslateGemma is trained with a fixed prompt"""
 
     source_language: Language
     target_language: Language
@@ -202,9 +167,7 @@ class TranslateGemmaPromptMessages(ChatPromptMessages):
                 )
             except UndefinedError:
                 # TranslateGemma's template only recognizes its fixed ~55-language lookup table
-                # and raises UndefinedError for any other code -- which is the common case when
-                # fine-tuning to extend coverage to a new language. Render the same instruction
-                # ourselves, using our own configured language name instead of the template's.
+                # and raises UndefinedError for any other code
                 text = self._render_fallback_prompt(tokenizer, add_generation_prompt)
                 if tokenize:
                     return tokenizer(text, add_special_tokens=False)["input_ids"]
@@ -237,8 +200,7 @@ class TranslateGemmaPromptMessages(ChatPromptMessages):
         return text
 
 
-class LocalLLMConfig(LLMConfig):
-    PROMPT_BUILDER_CLASS = ChatPromptBuilder
+class LocalLLMConfig(LLMConfig[LocalLLMPromptMessages]):
 
     # Config keys renamed in transformers 5.0, can remove after users have gotten used to the transition
     _RENAMED_CONFIG_KEYS = {
@@ -268,6 +230,7 @@ class LocalLLMConfig(LLMConfig):
 
         super().__init__(exp_dir, config, environment)
 
+        self._train_example_pool = self._create_example_pool(PromptConfig(self.train["prompt"], "train.prompt"))
         self._train_prompt_builder = self._create_train_prompt_builder()
         self._disable_eval_if_no_val_split()
 
@@ -334,18 +297,11 @@ class LocalLLMConfig(LLMConfig):
                     "learning_rate": 0.0002,
                     "lr_scheduler_type": "cosine",
                     "warmup_steps": 150,
-                    # Low-rank adapter hyperparameters, shared by all adapter methods
-                    # (lora/qlora/dora/qdora). LoRA vs DoRA is selected via finetune_method.
                     "adapter": {
                         "rank": 16,
                         "alpha": 32,
                         "dropout": 0.05,
                         "target_modules": "all-linear",
-                        # Layers to train in full (unadapted) alongside the adapters. A list of
-                        # module-name suffixes matched against the model's modules; None (or an
-                        # empty list) trains only the adapters. Possible choices are:
-                        #   "embed_tokens" - the input token-embedding matrix
-                        #   "lm_head"      - the output (vocabulary projection) head
                         "modules_to_save": None,
                     },
                 },
@@ -353,42 +309,46 @@ class LocalLLMConfig(LLMConfig):
             },
         )
 
-    def _create_prompt_builder(self, prompt: dict, name: str) -> PromptBuilder:
-        builder = super()._create_prompt_builder(prompt, name)
-        self._reject_examples_for_translate_gemma(builder.num_examples, name)
-        return builder
+    def _create_prompt_builder(
+        self, prompt: PromptConfig, pool: Optional[ExamplePool]
+    ) -> PromptBuilder[LocalLLMPromptMessages]:
+        self._reject_examples_for_translate_gemma(prompt.get_num_examples(), prompt.get_name())
+        return super()._create_prompt_builder(prompt, pool)
 
-    def _create_train_prompt_builder(self) -> PromptBuilder:
-        prompt: dict = self.train["prompt"]
-        prompt_type = str(prompt["type"]).lower()
+    def _create_train_prompt_builder(self) -> PromptBuilder[LocalLLMPromptMessages]:
+        prompt = PromptConfig(self.train["prompt"], "train.prompt")
+        prompt_type = str(prompt.get_setting("type")).lower()
         if prompt_type not in self._VALID_PROMPT_TYPES:
             raise ValueError(
-                f"Unknown train.prompt.type '{prompt['type']}'. Valid options: {', '.join(self._VALID_PROMPT_TYPES)}."
+                f"Unknown train.prompt.type '{prompt.get_setting('type')}'. "
+                f"Valid options: {', '.join(self._VALID_PROMPT_TYPES)}."
             )
 
         if prompt_type == self._PROMPT_TYPE_FIXED:
-            if prompt["template_file"] is not None:
+            if not prompt.is_unset("template_file"):
                 raise ValueError('train.prompt.template_file is only valid with train.prompt.type: "rotating".')
-            resolve_prompt_defaults(prompt, type(self))
-            return self._create_prompt_builder(prompt, "train.prompt")
+            prompt.resolve_defaults(self.prompt_defaults())
+            return self._create_prompt_builder(prompt, self._train_example_pool)
 
-        set_keys = [key for key in self._FIXED_ONLY_PROMPT_KEYS if prompt[key] is not None]
+        set_keys = [key for key in self._FIXED_ONLY_PROMPT_KEYS if not prompt.is_unset(key)]
         if set_keys:
             raise ValueError(
                 f"train.prompt.{', train.prompt.'.join(set_keys)} "
                 f'{"are" if len(set_keys) > 1 else "is"} only valid with train.prompt.type: "fixed"; '
                 "a rotating prompt takes them from its template file."
             )
-        if prompt["template_file"] is None:
+        if prompt.is_unset("template_file"):
             raise ValueError('train.prompt.type: "rotating" requires train.prompt.template_file.')
 
-        num_examples = parse_num_examples(prompt, "train.prompt")
-        self._reject_examples_for_translate_gemma(num_examples, "train.prompt")
-        defaults = dict(prompt)
-        resolve_prompt_defaults(defaults, type(self))
-        templates = read_prompt_template_file(self._resolve_template_file(prompt["template_file"]), defaults)
-        warn_about_examples_placeholder(templates, num_examples, f'{prompt["template_file"]} instruction_template')
-        return self.PROMPT_BUILDER_CLASS(templates, num_examples, self._create_example_pool(prompt, num_examples))
+        template_file = prompt.get_setting("template_file")
+        num_examples = prompt.get_num_examples()
+        self._reject_examples_for_translate_gemma(num_examples, prompt.get_name())
+        templates = PromptTemplateCollection.from_file(self._resolve_template_file(template_file))
+        templates.validate_for_icl(num_examples, f"{template_file} instruction_template")
+        return PromptBuilder(templates, num_examples, self._train_example_pool, self.create_messages_factory())
+
+    def create_messages_factory(self) -> PromptMessagesFactory[LocalLLMPromptMessages]:
+        return LocalLLMPromptMessagesFactory()
 
     def _resolve_template_file(self, template_file: str) -> Path:
         """Resolve against the experiment directory first, so an experiment can ship its own
@@ -398,19 +358,17 @@ class LocalLLMConfig(LLMConfig):
                 return candidate
         return Path(template_file)
 
-    @property
     def has_fixed_prompt(self) -> bool:
         return self.model.lower().startswith(self._FIXED_PROMPT_MODEL_PREFIXES)
 
     def _reject_examples_for_translate_gemma(self, num_examples: int, name: str) -> None:
-        if num_examples > 0 and self.has_fixed_prompt:
+        if num_examples > 0 and self.has_fixed_prompt():
             raise RuntimeError(
                 "TranslateGemma models do not support few-shot examples in the prompt. "
                 f"Set {name}.num_examples to 0 or use a different model."
             )
 
-    @staticmethod
-    def _normalize_deprecated_keys(config: dict) -> None:
+    def _normalize_deprecated_keys(self, config: dict) -> None:
         # ``params.lora`` was renamed to ``params.adapter`` when DoRA was added, since the same
         # hyperparameters now back both LoRA and DoRA. Accept the old key for backward compatibility.
         params = config.get("params")
@@ -419,42 +377,36 @@ class LocalLLMConfig(LLMConfig):
             params["adapter"] = params.pop("lora")
         warn_about_renamed_keys(config, LocalLLMConfig._RENAMED_CONFIG_KEYS)
 
-    @property
-    def finetune_method(self) -> str:
+    def get_finetune_method(self) -> str:
         method = self.params["finetune_method"].lower()
         if method not in self._VALID_FINETUNE_METHODS:
-            raise ValueError(f"Unknown finetune_method '{method}'. Valid options: {', '.join(self._VALID_FINETUNE_METHODS)}.")
+            raise ValueError(
+                f"Unknown finetune_method '{method}'. Valid options: {', '.join(self._VALID_FINETUNE_METHODS)}."
+            )
         return method
 
-    @property
     def uses_full_finetune(self) -> bool:
-        return self.finetune_method == self._FULL_FINETUNE_METHOD
+        return self.get_finetune_method() == self._FULL_FINETUNE_METHOD
 
-    @property
     def uses_quantization(self) -> bool:
-        return self.finetune_method in self._QUANTIZED_METHODS
+        return self.get_finetune_method() in self._QUANTIZED_METHODS
 
-    @property
     def uses_dora(self) -> bool:
-        return self.finetune_method in self._DORA_METHODS
+        return self.get_finetune_method() in self._DORA_METHODS
 
-    @property
-    def adapter(self) -> dict:
+    def get_adapter(self) -> dict:
         return self.params["adapter"]
 
-    @property
-    def instruction_datasets(self) -> List[str]:
+    def get_instruction_datasets(self) -> List[str]:
         return list(self.train["instruction_data"]["datasets"])
 
-    @property
-    def instruction_data_size(self) -> int:
+    def get_instruction_data_size(self) -> int:
         size = int(self.train["instruction_data"]["size"])
         if size < 0:
             raise ValueError(f"train.instruction_data.size must be non-negative, got {size}.")
         return size
 
-    @property
-    def instruction_mix_ratio(self) -> float:
+    def get_instruction_mix_ratio(self) -> float:
         ratio = float(self.train["instruction_data"]["mix_ratio"])
         if ratio < 0:
             raise ValueError(f"train.instruction_data.mix_ratio must be non-negative, got {ratio}.")
@@ -463,18 +415,22 @@ class LocalLLMConfig(LLMConfig):
     def instruction_data_paths(self) -> List[Path]:
         """Resolves each dataset name to its JSONL file under <mt_dir>/instructions -- kept separate from
         src_file_paths/trg_file_paths so it never merges into the translation corpora."""
-        datasets = self.instruction_datasets
+        datasets = self.get_instruction_datasets()
         if not datasets:
             return []
         instructions_dir = self._environment.mt_dir / "instructions"
         return [instructions_dir / f"{name}.jsonl" for name in datasets]
+
+    def _count_nonblank_lines(self, path: Path) -> int:
+        with path.open("r", encoding="utf-8") as f:
+            return sum(1 for line in f if line.strip())
 
     def _write_instruction_data(self) -> int:
         dataset_paths = self.instruction_data_paths()
         if not dataset_paths:
             return 0
 
-        base_share, remainder = divmod(self.instruction_data_size, len(dataset_paths))
+        base_share, remainder = divmod(self.get_instruction_data_size(), len(dataset_paths))
 
         count = 0
         with self._open_append(self.instruction_jsonl_filename()) as out_file:
@@ -487,7 +443,7 @@ class LocalLLMConfig(LLMConfig):
                 # Datasets mix evenly regardless of their original relative sizes; a dataset
                 # smaller than its even share is used in full, without repetition (see split_corpus).
                 share = base_share + (1 if i < remainder else 0)
-                corpus_size = _count_nonblank_lines(dataset_path)
+                corpus_size = self._count_nonblank_lines(dataset_path)
                 selected_indices = split_corpus(corpus_size, share)
 
                 index = 0
@@ -515,6 +471,26 @@ class LocalLLMConfig(LLMConfig):
             pretrained_model_provider_factory = FileCausalLMProviderFactory()
         return LocalLLMModel(self, mixed_precision, num_devices, clearml_queue, pretrained_model_provider_factory)
 
+    def build_generation_kwargs(self, num_return_sequences: int, pad_token_id: Optional[int]) -> Dict[str, Any]:
+        infer = self.infer
+        gen_kwargs: Dict[str, Any] = {
+            "max_new_tokens": infer["max_new_tokens"],
+            "num_return_sequences": num_return_sequences,
+            "pad_token_id": pad_token_id,
+        }
+        if infer.get("do_sample"):
+            gen_kwargs["do_sample"] = True
+            gen_kwargs["temperature"] = infer["temperature"]
+        else:
+            num_beams: int = infer["num_beams"]
+            if num_return_sequences > num_beams:
+                raise RuntimeError(
+                    f"Beam search cannot return {num_return_sequences} drafts with num_beams set to {num_beams}. "
+                    "Increase num_beams to at least num_drafts or set do_sample to true."
+                )
+            gen_kwargs["num_beams"] = num_beams
+        return gen_kwargs
+
     def get_hf_tokenizer(self) -> PreTrainedTokenizerBase:
         if self._hf_tokenizer is None:
             tokenizer = AutoTokenizer.from_pretrained(self.model, trust_remote_code=self.params["trust_remote_code"])
@@ -523,12 +499,10 @@ class LocalLLMConfig(LLMConfig):
             self._hf_tokenizer = tokenizer
         return self._hf_tokenizer
 
-    @property
-    def train_prompt_builder(self) -> PromptBuilder:
-        return self._train_prompt_builder
-
-    def prompt_builders(self) -> List[PromptBuilder]:
-        return [*super().prompt_builders(), self._train_prompt_builder]
+    def example_pools(self) -> List[ExamplePool]:
+        if self._train_example_pool is None:
+            return super().example_pools()
+        return [*super().example_pools(), self._train_example_pool]
 
     def build_prompt_messages(
         self,
@@ -539,8 +513,8 @@ class LocalLLMConfig(LLMConfig):
         example_pool_index: Optional[int] = None,
         rotation_index: Optional[int] = None,
         training: bool = False,
-    ) -> ChatPromptMessages:
-        if self.has_fixed_prompt:
+    ) -> LocalLLMPromptMessages:
+        if self.has_fixed_prompt():
             return TranslateGemmaPromptMessages(
                 source_language=src_lang, target_language=trg_lang, text=source, target=target
             )
@@ -561,8 +535,14 @@ class CausalLMProvider:
             return "auto"
         return getattr(torch, self.config.params["torch_dtype"], torch.bfloat16)
 
+    def _is_image_text_to_text_model(self, model_name_or_path: str) -> bool:
+        config = AutoConfig.from_pretrained(
+            model_name_or_path, trust_remote_code=self.config.params["trust_remote_code"]
+        )
+        return type(config) in AutoModelForImageTextToText._model_mapping
+
     def _determine_auto_model_class(self, model_name_or_path: str) -> type:
-        if is_image_text_to_text_model(model_name_or_path, self.config.params["trust_remote_code"]):
+        if self._is_image_text_to_text_model(model_name_or_path):
             return AutoModelForImageTextToText
         return AutoModelForCausalLM
 
@@ -581,7 +561,7 @@ class CausalLMProvider:
         params = self.config.params
         quantization_config = None
         device_map = None
-        if self.config.uses_quantization:
+        if self.config.uses_quantization():
             from transformers import BitsAndBytesConfig
 
             quantization_config = BitsAndBytesConfig(
@@ -639,10 +619,10 @@ class FileCausalLMProviderFactory(CausalLMProviderFactory):
 
 @dataclass
 class DataCollatorForCausalLM:
-    IGNORED_LABEL_ID = -100
+    _IGNORED_LABEL_ID = -100
 
     tokenizer: PreTrainedTokenizerBase
-    label_pad_token_id: int = IGNORED_LABEL_ID
+    label_pad_token_id: int = _IGNORED_LABEL_ID
     pad_to_multiple_of: Optional[int] = None
 
     def __call__(self, features: List[Dict[str, List[int]]]) -> Dict[str, torch.Tensor]:
@@ -670,6 +650,9 @@ class DataCollatorForCausalLM:
             "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
             "labels": torch.tensor(labels, dtype=torch.long),
         }
+
+    def mask_ignored_ids(self, prompt_ids: List[int], completion_ids: List[int]) -> List[int]:
+        return [self._IGNORED_LABEL_ID] * len(prompt_ids) + completion_ids
 
 
 class InterleavedTrainDataset(TorchDataset):
@@ -742,24 +725,6 @@ class SilCausalTrainer(Trainer):
         )
 
 
-def _render_turns(
-    tokenizer: PreTrainedTokenizerBase, turns: List[Dict[str, str]], add_generation_prompt: bool
-) -> List[int]:
-    """Render turns through the tokenizer's chat template, the same way a live conversation is tokenized."""
-    try:
-        return tokenizer.apply_chat_template(
-            turns, add_generation_prompt=add_generation_prompt, tokenize=True, return_dict=False
-        )
-    except Exception:
-        # Some chat templates (e.g. Gemma) reject a separate system role; fold it into the first user turn and retry.
-        if turns and turns[0]["role"] == "system" and len(turns) > 1:
-            folded = [{"role": "user", "content": f"{turns[0]['content']}\n\n{turns[1]['content']}"}] + list(turns[2:])
-            return tokenizer.apply_chat_template(
-                folded, add_generation_prompt=add_generation_prompt, tokenize=True, return_dict=False
-            )
-        raise
-
-
 class LocalLLMModel(NMTModel):
     # Mirrors TRAINING_ARGS_CONFIG_MAPPING in seq2seq_config.py but without the seq2seq-only
     # generation keys (generation_max_length, generation_num_beams, predict_with_generate).
@@ -822,6 +787,25 @@ class LocalLLMModel(NMTModel):
 
     # --- training -----------------------------------------------------------------
 
+    def _render_turns(
+        self, tokenizer: PreTrainedTokenizerBase, turns: List[Dict[str, str]], add_generation_prompt: bool
+    ) -> List[int]:
+        """Render turns through the tokenizer's chat template, the same way a live conversation is tokenized."""
+        try:
+            return tokenizer.apply_chat_template(
+                turns, add_generation_prompt=add_generation_prompt, tokenize=True, return_dict=False
+            )
+        except Exception:
+            # Some chat templates (e.g. Gemma) reject a separate system role; fold it into the first user turn and retry.
+            if turns and turns[0]["role"] == "system" and len(turns) > 1:
+                folded = [{"role": "user", "content": f"{turns[0]['content']}\n\n{turns[1]['content']}"}] + list(
+                    turns[2:]
+                )
+                return tokenizer.apply_chat_template(
+                    folded, add_generation_prompt=add_generation_prompt, tokenize=True, return_dict=False
+                )
+            raise
+
     def train(self) -> None:
         self._config.check_example_corpora()
         training_args = self._create_training_arguments()
@@ -832,14 +816,18 @@ class LocalLLMModel(NMTModel):
         model = self._apply_finetuning_config(model)
 
         max_seq_length: int = self._config.params["max_seq_length"]
-        src_lang = self._config.language(self._config.train_src_iso)
-        trg_lang = self._config.language(self._config.train_trg_iso)
+        src_lang = self._config.language(self._config.get_train_src_iso())
+        trg_lang = self._config.language(self._config.get_train_trg_iso())
         eos_token_id = tokenizer.eos_token_id
+
+        data_collator = DataCollatorForCausalLM(
+            tokenizer, pad_to_multiple_of=8 if (training_args.fp16 or training_args.bf16) else None
+        )
 
         def encode_completion(prompt_ids: List[int], target: str) -> dict:
             completion_ids = tokenizer(target, add_special_tokens=False)["input_ids"] + [eos_token_id]
             input_ids = (prompt_ids + completion_ids)[:max_seq_length]
-            labels = ([DataCollatorForCausalLM.IGNORED_LABEL_ID] * len(prompt_ids) + completion_ids)[:max_seq_length]
+            labels = data_collator.mask_ignored_ids(prompt_ids, completion_ids)[:max_seq_length]
             return {"input_ids": input_ids, "labels": labels, "attention_mask": [1] * len(input_ids)}
 
         def encode(example: dict, idx: int) -> dict:
@@ -860,7 +848,7 @@ class LocalLLMModel(NMTModel):
             return encode_completion(prompt_ids, example["trg"])
 
         def encode_instruction(example: dict) -> dict:
-            prompt_ids = _render_turns(tokenizer, list(example["turns"]), add_generation_prompt=True)
+            prompt_ids = self._render_turns(tokenizer, list(example["turns"]), add_generation_prompt=True)
             return encode_completion(prompt_ids, example["output"])
 
         train_dataset = self._load_text_dataset(
@@ -874,15 +862,13 @@ class LocalLLMModel(NMTModel):
         if train_dataset is not None:
             train_dataset = train_dataset.map(encode, with_indices=True, remove_columns=train_dataset.column_names)
         if eval_dataset is not None:
-            eval_dataset = eval_dataset.map(
-                encode_eval, with_indices=True, remove_columns=eval_dataset.column_names
-            )
+            eval_dataset = eval_dataset.map(encode_eval, with_indices=True, remove_columns=eval_dataset.column_names)
 
         # Instruction data is mixed into training only
         instruction_dataset = self._load_instruction_dataset(
             self._config.exp_dir / self._config.instruction_jsonl_filename()
         )
-        mix_ratio = self._config.instruction_mix_ratio
+        mix_ratio = self._config.get_instruction_mix_ratio()
         if instruction_dataset is not None and train_dataset is not None and mix_ratio > 0:
             instruction_dataset = instruction_dataset.map(
                 encode_instruction, remove_columns=instruction_dataset.column_names
@@ -893,10 +879,6 @@ class LocalLLMModel(NMTModel):
             train_dataset = InterleavedTrainDataset(
                 train_dataset, instruction_dataset, translation_count, instruction_count, seed=self._config.data["seed"]
             )
-
-        data_collator = DataCollatorForCausalLM(
-            tokenizer, pad_to_multiple_of=8 if (training_args.fp16 or training_args.bf16) else None
-        )
 
         trainer = SilCausalTrainer(
             model=model,
@@ -926,24 +908,23 @@ class LocalLLMModel(NMTModel):
         trainer.save_state()
 
     def _apply_finetuning_config(self, model: PreTrainedModel) -> PreTrainedModel:
-        if self._config.uses_full_finetune:
+        if self._config.uses_full_finetune():
             return model
 
         from peft import get_peft_model, prepare_model_for_kbit_training
 
         gradient_checkpointing = self._config.train["gradient_checkpointing"]
-        if self._config.uses_quantization:
+        if self._config.uses_quantization():
             model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=gradient_checkpointing)
         elif gradient_checkpointing:
             model.enable_input_require_grads()
 
-        peft_config = self._build_adapter_config(self._config.adapter, use_dora=self._config.uses_dora)
+        peft_config = self._build_adapter_config(self._config.get_adapter(), use_dora=self._config.uses_dora())
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
         return model
 
-    @staticmethod
-    def _build_adapter_config(adapter: dict, use_dora: bool) -> Any:
+    def _build_adapter_config(self, adapter: dict, use_dora: bool) -> Any:
         from peft import LoraConfig, TaskType
 
         return LoraConfig(
@@ -1053,8 +1034,8 @@ class LocalLLMModel(NMTModel):
     ) -> None:
         self._config.check_example_corpora()
         tokenizer = self._config.get_hf_tokenizer()
-        src_iso = self._config.train_src_iso
-        trg_iso = self._config.train_trg_iso
+        src_iso = self._config.get_train_src_iso()
+        trg_iso = self._config.get_train_trg_iso()
         src_lang = self._config.language(src_iso)
         trg_lang = self._config.language(trg_iso)
         model = self._get_inference_model(ckpt, src_lang.name, trg_lang.name)
@@ -1108,7 +1089,7 @@ class LocalLLMModel(NMTModel):
         num_return_sequences = num_drafts if (produce_multiple_translations and num_drafts > 1) else 1
 
         infer = self._config.infer
-        gen_kwargs = build_generation_kwargs(infer, num_return_sequences, tokenizer.pad_token_id)
+        gen_kwargs = self._config.build_generation_kwargs(num_return_sequences, tokenizer.pad_token_id)
 
         device = model.device
         for batch in batch_sentences(sentences, infer["infer_batch_size"]):

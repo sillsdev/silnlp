@@ -13,7 +13,7 @@ from silnlp.nmt.example_retrieval import (
     TextExampleFormatter,
     TfidfExampleRetriever,
     XmlExampleFormatter,
-    create_example_formatter,
+    ExampleFormatterFactory,
     ExampleRetrieverFactory,
     RetrievalTokenizer,
 )
@@ -60,8 +60,10 @@ class _StubEmbeddingModel:
 
     def __init__(self, vectors: dict):
         self._vectors = vectors
+        self.encode_calls = 0
 
     def encode(self, texts, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False):
+        self.encode_calls += 1
         return np.array([self._vectors[t] for t in texts], dtype=np.float32)
 
 
@@ -88,19 +90,20 @@ def test_create_example_retriever_is_case_insensitive():
     assert isinstance(ExampleRetrieverFactory.create("TFIDF"), TfidfExampleRetriever)
 
 
-def test_create_example_retriever_passes_the_model_name_through():
-    assert ExampleRetrieverFactory.create("embedding", "some/model").model_name == "some/model"
+def test_create_example_retriever_passes_the_model_name_through(tmp_path):
+    retriever = EmbeddingExampleRetriever("some/model", model=_StubEmbeddingModel({"a": [1.0]}))
+    _fitted(retriever, ["a"]).save(tmp_path)
+    assert json.loads((tmp_path / "retrieval_meta.json").read_text(encoding="utf-8"))["model_name"] == "some/model"
 
 
-def test_create_example_retriever_embedding_defaults_the_model_name():
-    assert ExampleRetrieverFactory.create("embedding").model_name
+def test_embedding_retriever_does_not_touch_its_model_until_it_is_fitted():
+    # Loading the model downloads it, so a config that never draws examples must not trigger one.
+    stub = _StubEmbeddingModel({"cat": [1.0]})
+    retriever = EmbeddingExampleRetriever(model=stub)
+    assert stub.encode_calls == 0
 
-
-def test_create_example_retriever_defers_the_embedding_dependency_until_it_is_fitted():
-    # sentence-transformers ships in the optional 'llm' extra, so constructing must not import it.
-    retriever = ExampleRetrieverFactory.create("embedding")
-    pytest.importorskip("sentence_transformers")
     retriever.fit(["cat"])
+    assert stub.encode_calls == 1
 
 
 def test_create_example_retriever_rejects_unknown_method():
@@ -150,28 +153,28 @@ def test_xml_example_formatter_concatenates_multiple_examples():
 
 
 def test_create_example_formatter_dispatches_text_json_xml():
-    assert isinstance(create_example_formatter({"type": "text", "template": "{source}"}), TextExampleFormatter)
-    assert isinstance(create_example_formatter({"type": "json"}), JsonExampleFormatter)
-    assert isinstance(create_example_formatter({"type": "xml"}), XmlExampleFormatter)
+    assert isinstance(ExampleFormatterFactory.create({"type": "text", "template": "{source}"}), TextExampleFormatter)
+    assert isinstance(ExampleFormatterFactory.create({"type": "json"}), JsonExampleFormatter)
+    assert isinstance(ExampleFormatterFactory.create({"type": "xml"}), XmlExampleFormatter)
 
 
 def test_create_example_formatter_defaults_to_text():
-    assert isinstance(create_example_formatter({"template": "{source}"}), TextExampleFormatter)
+    assert isinstance(ExampleFormatterFactory.create({"template": "{source}"}), TextExampleFormatter)
 
 
 def test_create_example_formatter_rejects_unknown_type():
     with pytest.raises(ValueError, match="Unknown example_format.type"):
-        create_example_formatter({"type": "bogus"})
+        ExampleFormatterFactory.create({"type": "bogus"})
 
 
 def test_create_example_formatter_accepts_bare_string_shorthand():
-    assert isinstance(create_example_formatter("json"), JsonExampleFormatter)
-    assert isinstance(create_example_formatter("xml"), XmlExampleFormatter)
+    assert isinstance(ExampleFormatterFactory.create("json"), JsonExampleFormatter)
+    assert isinstance(ExampleFormatterFactory.create("xml"), XmlExampleFormatter)
 
 
 def test_create_example_formatter_bare_text_string_matches_explicit_default():
     examples = _examples(("cat", "chat"))
-    from_shorthand = create_example_formatter("text").format(examples, "English", "French")
+    from_shorthand = ExampleFormatterFactory.create("text").format(examples, "English", "French")
     explicit_default = TextExampleFormatter().format(examples, "English", "French")
     assert from_shorthand == explicit_default
 
@@ -284,7 +287,6 @@ def test_embedding_retriever_pickles_the_embeddings_but_not_the_model(tmp_path):
 
     loaded = ExampleRetriever.load(tmp_path)
     assert loaded is not None
-    assert loaded.source_count == 2
     # Ranking a known position uses the cached embeddings, so it works without the model that
     # was deliberately left out of the pickle.
     assert loaded.rank_excluding("cat", 0, k=1) == [1]
@@ -309,7 +311,7 @@ def test_example_pool_prefers_the_first_candidate_corpus(tmp_path):
         ],
         ExampleRetrieverFactory.create("tfidf"),
     )
-    assert [ex.source for ex in pool.examples] == ["preferred"]
+    assert [ex.source for ex in pool.all_examples()] == ["preferred"]
 
 
 def test_example_pool_falls_back_to_a_later_candidate_corpus(tmp_path):
@@ -322,7 +324,7 @@ def test_example_pool_falls_back_to_a_later_candidate_corpus(tmp_path):
         ],
         ExampleRetrieverFactory.create("tfidf"),
     )
-    assert [ex.source for ex in pool.examples] == ["fallback"]
+    assert [ex.source for ex in pool.all_examples()] == ["fallback"]
 
 
 def test_example_pool_names_every_candidate_when_none_are_present(tmp_path):
@@ -331,7 +333,7 @@ def test_example_pool_names_every_candidate_when_none_are_present(tmp_path):
         ExampleRetrieverFactory.create("tfidf"),
     )
     with pytest.raises(RuntimeError, match="a.src.txt and .*a.trg.txt or .*b.src.txt and .*b.trg.txt"):
-        pool.examples
+        pool.all_examples()
 
 
 def test_example_pool_ensure_available_reads_the_corpus_up_front(tmp_path):

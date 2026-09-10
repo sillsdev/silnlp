@@ -1,3 +1,4 @@
+import json
 import math
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -10,19 +11,19 @@ import yaml
 
 from silnlp.nmt.config import Language
 from silnlp.nmt.config_utils import is_local_llm_config, is_remote_llm_config
-from silnlp.nmt.example_retrieval import Example, ExampleRetriever
+from silnlp.nmt.example_retrieval import Example
 from silnlp.nmt.remote_llm_config import (
     Completion,
     CompletionClient,
     CompletionClientFactory,
+    CompletionSettings,
     RemoteLLMConfig,
     RemoteLLMModel,
     TokenLogprob,
     UsageTotals,
-    count_tokens,
-    extract_token_logprobs,
-    NumberedReply,
-    group_indices_by_size,
+    LiteLLMCompletionClient,
+    LiteLLMResponse,
+    ModelReply,
 )
 
 EN = Language("en", "English")
@@ -51,54 +52,46 @@ def test_an_remote_llm_config_is_not_claimed_by_the_llm_dispatch():
 
 
 def test_parse_numbered_response_reads_one_translation_per_line():
-    assert NumberedReply.parse("1. uno\n2. dos\n3. tres", 3) == ["uno", "dos", "tres"]
+    assert ModelReply("1. uno\n2. dos\n3. tres").parse(3) == ["uno", "dos", "tres"]
 
 
 @pytest.mark.parametrize("delimiter", [".", ")", ":", "]"])
 def test_parse_numbered_response_accepts_common_delimiters(delimiter: str):
-    assert NumberedReply.parse(f"1{delimiter} uno\n2{delimiter} dos", 2) == ["uno", "dos"]
+    assert ModelReply(f"1{delimiter} uno\n2{delimiter} dos").parse(2) == ["uno", "dos"]
 
 
 def test_parse_numbered_response_ignores_preamble_and_reorders():
-    assert NumberedReply.parse("Certainly! Here you go:\n\n2. dos\n1. uno", 2) == ["uno", "dos"]
+    assert ModelReply("Certainly! Here you go:\n\n2. dos\n1. uno").parse(2) == ["uno", "dos"]
 
 
 def test_parse_numbered_response_strips_code_fences():
-    assert NumberedReply.parse("```text\n1. uno\n2. dos\n```", 2) == ["uno", "dos"]
+    assert ModelReply("```text\n1. uno\n2. dos\n```").parse(2) == ["uno", "dos"]
 
 
 def test_parse_numbered_response_treats_unnumbered_lines_as_continuations():
-    assert NumberedReply.parse("1. uno\nand more\n2. dos", 2) == ["uno and more", "dos"]
+    assert ModelReply("1. uno\nand more\n2. dos").parse(2) == ["uno and more", "dos"]
 
 
 def test_parse_numbered_response_rejects_a_miscount():
-    assert NumberedReply.parse("1. uno\n2. dos", 3) is None
-    assert NumberedReply.parse("1. uno\n2. dos\n3. tres", 2) is None
+    assert ModelReply("1. uno\n2. dos").parse(3) is None
+    assert ModelReply("1. uno\n2. dos\n3. tres").parse(2) is None
 
 
 def test_parse_numbered_response_rejects_gaps_and_duplicates():
-    assert NumberedReply.parse("1. uno\n3. tres", 2) is None
-    assert NumberedReply.parse("1. uno\n1. otro", 2) is None
+    assert ModelReply("1. uno\n3. tres").parse(2) is None
+    assert ModelReply("1. uno\n1. otro").parse(2) is None
 
 
 def test_parse_numbered_response_rejects_unnumbered_prose():
-    assert NumberedReply.parse("uno dos tres", 3) is None
+    assert ModelReply("uno dos tres").parse(3) is None
 
 
 def test_strip_code_fence_leaves_unfenced_text_alone():
-    assert NumberedReply.strip_code_fence("plain text") == "plain text"
-    assert NumberedReply.strip_code_fence("```\nfenced\n```") == "fenced"
+    assert ModelReply("plain text").strip_code_fence() == "plain text"
+    assert ModelReply("```\nfenced\n```").strip_code_fence() == "fenced"
 
 
 # --- batching ---------------------------------------------------------------------------
-
-
-def test_group_indices_by_size():
-    assert group_indices_by_size(5, 2) == [[0, 1], [2, 3], [4]]
-    assert group_indices_by_size(3, 1) == [[0], [1], [2]]
-    assert group_indices_by_size(0, 4) == []
-    # A nonsensical size still yields usable batches rather than an empty or infinite grouping.
-    assert group_indices_by_size(3, 0) == [[0], [1], [2]]
 
 
 # --- config -----------------------------------------------------------------------------
@@ -121,9 +114,9 @@ def make_config(exp_dir: Path, **overrides) -> RemoteLLMConfig:
 
 def test_config_defaults(tmp_path: Path):
     config = make_config(tmp_path)
-    assert config.infer_prompt_builder.pool.method == "tfidf"
-    assert config.num_examples == 10
-    assert config.infer_batch_size == 1
+    assert config.get_prompt()["example_selection"]["method"] == "tfidf"
+    assert config.get_prompt()["num_examples"] == 10
+    assert config.get_infer_batch_size() == 1
     # The hosted model tokenizes for itself, so preprocessing writes raw text.
     assert config.data["tokenize"] is False
     assert config.model_dir == tmp_path / "run"
@@ -138,7 +131,7 @@ def test_config_requires_a_model(tmp_path: Path):
     "infer, message",
     [
         ({"prompt": {"example_selection": {"method": "embeddings"}}}, "Unknown example_selection.method"),
-        ({"infer_batch_size": 0}, "infer.infer_batch_size"),
+        ({"infer_batch_size": 0}, "infer.get_infer_batch_size()"),
         ({"num_drafts": 0}, "infer.num_drafts"),
         ({"concurrency": 0}, "infer.concurrency"),
         ({"prompt": {"num_examples": -1}}, "num_examples"),
@@ -276,10 +269,12 @@ class ScriptedClient(CompletionClient):
         responder: Callable[[List[Dict[str, str]]], str],
         logprobs_supported: bool = False,
         token_logprobs: Optional[List[TokenLogprob]] = None,
+        tokens_per_word: Optional[int] = 1,
     ) -> None:
         self._responder = responder
         self._logprobs_supported = logprobs_supported
         self._token_logprobs = token_logprobs
+        self._tokens_per_word = tokens_per_word
         self.calls: List[List[Dict[str, str]]] = []
         self.logprobs_requested: List[bool] = []
 
@@ -293,6 +288,9 @@ class ScriptedClient(CompletionClient):
 
     def supports_logprobs(self) -> bool:
         return self._logprobs_supported
+
+    def count_tokens(self, text: str) -> Optional[int]:
+        return None if self._tokens_per_word is None else len(text.split()) * self._tokens_per_word
 
 
 class ScriptedClientFactory(CompletionClientFactory):
@@ -318,11 +316,12 @@ def make_model(
     logprobs_supported: bool = False,
     token_logprobs: Optional[List[TokenLogprob]] = None,
     with_corpus: bool = True,
+    tokens_per_word: Optional[int] = 1,
     **overrides,
 ) -> Tuple[RemoteLLMModel, ScriptedClient]:
     if with_corpus and not (tmp_path / "train.src.txt").is_file():
         write_training_corpus(tmp_path)
-    client = ScriptedClient(responder, logprobs_supported, token_logprobs)
+    client = ScriptedClient(responder, logprobs_supported, token_logprobs, tokens_per_word)
     config = make_config(tmp_path, **overrides)
     return RemoteLLMModel(config, ScriptedClientFactory(client)), client
 
@@ -462,8 +461,8 @@ def test_train_builds_and_saves_the_retrieval_index(tmp_path: Path):
 
     checkpoint_dir = tmp_path / "run" / "checkpoint-1"
     assert (checkpoint_dir / "retrieval.pkl").is_file()
-    loaded = ExampleRetriever.load(checkpoint_dir)
-    assert loaded is not None and loaded.source_count == 2
+    meta = json.loads((checkpoint_dir / "retrieval_meta.json").read_text(encoding="utf-8"))
+    assert meta == {"method": "tfidf", "model_name": None, "num_sources": 2}
 
 
 def test_train_writes_a_checkpoint_so_the_last_checkpoint_resolves(tmp_path: Path):
@@ -565,9 +564,13 @@ def test_completion_mean_logprob():
     assert Completion("hola").mean_logprob() is None
 
 
-def test_extract_token_logprobs_reads_the_openai_shape():
+def _response_with(choice) -> LiteLLMResponse:
+    return LiteLLMResponse({"choices": [choice]}, litellm=None)
+
+
+def test_token_logprobs_read_the_openai_shape():
     choice = {"logprobs": {"content": [{"token": "ho", "logprob": -0.2}, {"token": "la", "logprob": -0.4}]}}
-    assert extract_token_logprobs(choice) == SCORES
+    assert _response_with(choice).token_logprobs() == SCORES
 
 
 class _Obj:
@@ -575,10 +578,10 @@ class _Obj:
         self.__dict__.update(kwargs)
 
 
-def test_extract_token_logprobs_reads_pydantic_style_objects():
+def test_token_logprobs_read_pydantic_style_objects():
     # LiteLLM returns model objects rather than plain dicts for most providers.
     choice = _Obj(logprobs=_Obj(content=[_Obj(token="ho", logprob=-0.2), _Obj(token="la", logprob=-0.4)]))
-    assert extract_token_logprobs(choice) == SCORES
+    assert _response_with(choice).token_logprobs() == SCORES
 
 
 @pytest.mark.parametrize(
@@ -590,14 +593,36 @@ def test_extract_token_logprobs_reads_pydantic_style_objects():
         {"logprobs": {"content": []}},
     ],
 )
-def test_extract_token_logprobs_tolerates_a_provider_that_omits_them(choice: dict):
+def test_token_logprobs_tolerate_a_provider_that_omits_them(choice: dict):
     # Providers that do not support logprobs silently omit them rather than failing.
-    assert extract_token_logprobs(choice) == []
+    assert _response_with(choice).token_logprobs() == []
 
 
-def test_extract_token_logprobs_skips_incomplete_entries():
+def test_token_logprobs_skip_incomplete_entries():
     choice = {"logprobs": {"content": [{"token": "ho"}, {"token": "la", "logprob": -0.4}]}}
-    assert extract_token_logprobs(choice) == [TokenLogprob("la", -0.4)]
+    assert _response_with(choice).token_logprobs() == [TokenLogprob("la", -0.4)]
+
+
+def test_response_reads_the_text_and_usage_from_either_shape():
+    raw = {"choices": [{"message": {"content": "hola"}}], "usage": {"prompt_tokens": 7, "completion_tokens": 3}}
+    assert LiteLLMResponse(raw, litellm=None).text() == "hola"
+    assert LiteLLMResponse(raw, litellm=None).prompt_tokens() == 7
+
+    obj = _Obj(choices=[_Obj(message=_Obj(content="hola"))], usage=_Obj(prompt_tokens=7, completion_tokens=3))
+    assert LiteLLMResponse(obj, litellm=None).completion_tokens() == 3
+
+
+def test_response_tolerates_a_missing_usage_block():
+    raw = {"choices": [{"message": {"content": "hola"}}]}
+    assert LiteLLMResponse(raw, litellm=None).prompt_tokens() == 0
+
+
+def test_response_reports_an_unknown_cost_when_litellm_has_no_pricing():
+    class _NoPricing:
+        def completion_cost(self, completion_response):
+            raise Exception("no pricing")
+
+    assert LiteLLMResponse({"choices": []}, _NoPricing()).cost() is None
 
 
 def test_confidence_scores_come_from_the_token_logprobs(tmp_path: Path):
@@ -710,24 +735,27 @@ def test_the_effective_config_records_the_prompts_actually_used(tmp_path: Path):
 # --- token counting -----------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_count_tokens_uses_the_provider_tokenizer():
+    # LiteLLM fetches the encoding over the network, which takes longer than the rest of the suite.
     pytest.importorskip("litellm")
     text = "In the beginning God created the heavens and the earth. " * 20
-    tokens = count_tokens("gpt-4o", text)
+    tokens = LiteLLMCompletionClient("gpt-4o", CompletionSettings(0.0, 16, 0, 10)).count_tokens(text)
     assert tokens is not None
     # A real tokenization, not the character-count approximation it replaced.
     assert 150 < tokens < len(text) // 4
 
 
+@pytest.mark.slow
 def test_count_tokens_falls_back_to_none_for_an_unusable_model():
     pytest.importorskip("litellm")
     # LiteLLM tokenizes unknown models with a default tokenizer rather than failing, so this
     # asserts the contract (an int or None) rather than a specific outcome.
-    assert count_tokens("made-up/nonexistent", "hello") in (None, 1, 2)
+    client = LiteLLMCompletionClient("made-up/nonexistent", CompletionSettings(0.0, 16, 0, 10))
+    assert client.count_tokens("hello") in (None, 1, 2)
 
 
 def test_full_corpus_mode_warns_when_the_corpus_exceeds_the_context_limit(tmp_path: Path, caplog):
-    pytest.importorskip("litellm")
     write_training_corpus(tmp_path)
     model, _ = make_model(
         tmp_path,
@@ -742,7 +770,6 @@ def test_full_corpus_mode_warns_when_the_corpus_exceeds_the_context_limit(tmp_pa
 
 
 def test_full_corpus_mode_is_quiet_when_the_corpus_fits(tmp_path: Path, caplog):
-    pytest.importorskip("litellm")
     write_training_corpus(tmp_path)
     model, _ = make_model(
         tmp_path,
@@ -756,10 +783,26 @@ def test_full_corpus_mode_is_quiet_when_the_corpus_fits(tmp_path: Path, caplog):
     assert "exceeds infer.max_context_tokens" not in caplog.text
 
 
+@pytest.mark.slow
 def test_count_tokens_handles_an_unrecognized_model():
     pytest.importorskip("litellm")
     # LiteLLM tokenizes with a default tokenizer rather than failing on an unknown model.
-    assert count_tokens("made-up/nonexistent", "In the beginning God created the heavens.") is not None
+    client = LiteLLMCompletionClient("made-up/nonexistent", CompletionSettings(0.0, 16, 0, 10))
+    assert client.count_tokens("In the beginning God created the heavens.") is not None
+
+
+def test_a_client_that_cannot_count_tokens_makes_the_caller_skip_the_size_check(tmp_path: Path, caplog):
+    model, _ = make_model(
+        tmp_path,
+        lambda messages: "hola",
+        infer={"prompt": {"num_examples": 1000000}, "max_context_tokens": 1},
+        tokens_per_word=None,
+    )
+
+    with caplog.at_level("WARNING"):
+        list(model.translate(["anything"], "en", "es"))
+
+    assert "exceeds infer.max_context_tokens" not in caplog.text
 
 
 # --- usage and cost reporting ---------------------------------------------------------------
@@ -874,36 +917,46 @@ def test_the_remote_model_prefers_the_detokenized_corpus(tmp_path: Path):
     (tmp_path / "train.trg.detok.txt").write_text("sea la luz\n", encoding="utf-8")
 
     config = make_config(tmp_path, infer={"prompt": {"num_examples": 1}})
-    assert [example.target for example in config.infer_prompt_builder.pool.examples] == ["sea la luz"]
+    selected = config.get_infer_prompt_builder().select_examples("let there be light")
+    assert [example.target for example in selected] == ["sea la luz"]
 
 
 def test_the_remote_model_falls_back_to_the_plain_corpus(tmp_path: Path):
     write_training_corpus(tmp_path)
     config = make_config(tmp_path, infer={"prompt": {"num_examples": 1}})
-    assert [example.target for example in config.infer_prompt_builder.pool.examples] == [
-        "en el principio",
-        "sea la luz",
-    ]
-
-
-def test_the_batch_prompt_shares_the_single_prompt_example_pool(tmp_path: Path):
-    # Two pools would index the corpus twice, and the batch one would never see the saved index.
-    config = make_config(tmp_path, infer={"prompt": {"num_examples": 1}})
-    assert config.prompt_builder_for(1).pool is config.prompt_builder_for(4).pool
+    selected = config.get_infer_prompt_builder().select_examples("let there be light")
+    assert [example.target for example in selected] == ["sea la luz"]
 
 
 def test_a_saved_index_is_reused_for_batched_requests(tmp_path: Path):
     write_training_corpus(tmp_path)
-    model, _ = make_model(
+    model, client = make_model(
         tmp_path, lambda messages: "1. hola\n2. adios", infer={"prompt": {"num_examples": 1}, "infer_batch_size": 2}
     )
     model.train()
 
-    assert ExampleRetriever.load(tmp_path / "run" / "checkpoint-1") is not None
-    pool = model._config.prompt_builder_for(2).pool
-    injected = pool._retriever
+    assert model._config.load_example_index(tmp_path / "run" / "checkpoint-1")
 
-    list(model.translate(["one", "two"], "en", "es"))
+    list(model.translate(["let there be light", "and so on"], "en", "es"))
 
-    # The pool swapped in the index it read from disk rather than fitting the one it was given.
-    assert pool._retriever is not injected
+    # A batched request draws on the same indexed corpus as a single-segment one.
+    assert "sea la luz" in client.calls[0][1]["content"]
+
+
+def test_the_batch_builder_numbers_the_segments_and_states_the_count(tmp_path: Path):
+    model, client = make_model(
+        tmp_path, lambda messages: "1. uno\n2. dos\n3. tres", infer={"infer_batch_size": 3}
+    )
+    list(model.translate(["one", "two", "three"], "en", "es"))
+
+    user = client.calls[0][1]["content"]
+    assert "1. one\n2. two\n3. three" in user
+    # The count is the contract ModelReply.parse checks the reply against.
+    assert "exactly 3 lines" in user
+
+
+def test_a_single_segment_request_does_not_use_the_batch_wording(tmp_path: Path):
+    model, client = make_model(tmp_path, lambda messages: "hola", infer={"infer_batch_size": 1})
+    list(model.translate(["one"], "en", "es"))
+
+    assert "consecutive" not in client.calls[0][1]["content"]

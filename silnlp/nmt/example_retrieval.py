@@ -33,24 +33,7 @@ class _EmbeddingModel(Protocol):
     ) -> np.ndarray: ...
 
 
-def _top_k_indices(scores: np.ndarray, k: int, exclude: Optional[int] = None) -> List[int]:
-    """Indices of the top-k highest scores, most-similar first, optionally excluding one index."""
-    n = scores.shape[0]
-    # Reduces k, not just the excluded index's score, so the excluded index (-inf below) can
-    # never be picked even when k would otherwise cover the whole pool.
-    available = n - 1 if exclude is not None else n
-    k = min(k, available)
-    if k <= 0:
-        return []
-    if exclude is not None:
-        scores = scores.copy()
-        scores[exclude] = -np.inf
-    top = np.argpartition(-scores, k - 1)[:k] if k < n else np.arange(n)
-    return top[np.argsort(-scores[top])].tolist()
-
-
 class ExampleRetriever(ABC):
-    """Ranks source texts by position; ExamplePool owns the examples they came from."""
 
     method: str = ""
 
@@ -60,13 +43,33 @@ class ExampleRetriever(ABC):
     def __init__(self) -> None:
         self._source_count = 0
 
-    @property
-    def model_name(self) -> Optional[str]:
+    def _model_name(self) -> Optional[str]:
         return None
 
-    @property
-    def source_count(self) -> int:
-        return self._source_count
+    def reason_to_rebuild(self, wanted: "ExampleRetriever", corpus_size: int) -> Optional[str]:
+        """Why this saved index cannot stand in for `wanted` over a corpus of `corpus_size`."""
+        if self.method != wanted.method or self._model_name() != wanted._model_name():
+            return f"The saved retrieval index uses '{self.method}' but the config asks for '{wanted.method}'"
+        if self._source_count != corpus_size:
+            return (
+                f"The saved retrieval index covers {self._source_count} examples " f"but the corpus has {corpus_size}"
+            )
+        return None
+
+    def _top_indices(self, scores: np.ndarray, k: int, exclude: Optional[int] = None) -> List[int]:
+        """Indices of the top-k highest scores, most-similar first, optionally excluding one index."""
+        n = scores.shape[0]
+        # Reduces k, not just the excluded index's score, so the excluded index (-inf below) can
+        # never be picked even when k would otherwise cover the whole pool.
+        available = n - 1 if exclude is not None else n
+        k = min(k, available)
+        if k <= 0:
+            return []
+        if exclude is not None:
+            scores = scores.copy()
+            scores[exclude] = -np.inf
+        top = np.argpartition(-scores, k - 1)[:k] if k < n else np.arange(n)
+        return top[np.argsort(-scores[top])].tolist()
 
     def fit(self, sources: Sequence[str]) -> None:
         self._source_count = len(sources)
@@ -98,7 +101,7 @@ class ExampleRetriever(ABC):
         directory.mkdir(parents=True, exist_ok=True)
         with (directory / self._INDEX_FILENAME).open("wb") as file:
             pickle.dump(self, file)
-        meta = {"method": self.method, "model_name": self.model_name, "num_sources": self._source_count}
+        meta = {"method": self.method, "model_name": self._model_name(), "num_sources": self._source_count}
         with (directory / self._META_FILENAME).open("w", encoding="utf-8") as file:
             json.dump(meta, file, indent=2)
 
@@ -135,9 +138,6 @@ class RetrievalTokenizer:
 
 
 class LexicalExampleRetriever(ExampleRetriever):
-    """Shares one tokenizer, so switching between tfidf and bm25 changes the ranking rather than
-    what counts as a word."""
-
     def __init__(self) -> None:
         super().__init__()
         self._tokenizer = RetrievalTokenizer()
@@ -157,9 +157,7 @@ class TfidfExampleRetriever(LexicalExampleRetriever):
             self._vectorizer = None
             self._matrix = None
             return
-        self._vectorizer = TfidfVectorizer(
-            lowercase=False, tokenizer=self._tokenizer.tokenize, token_pattern=None
-        )
+        self._vectorizer = TfidfVectorizer(lowercase=False, tokenizer=self._tokenizer.tokenize, token_pattern=None)
         self._matrix = self._vectorizer.fit_transform(sources)
 
     def _scores_for_vector(self, vector) -> np.ndarray:
@@ -168,12 +166,12 @@ class TfidfExampleRetriever(LexicalExampleRetriever):
     def _top_indices_for_query(self, query: str, k: int) -> List[int]:
         if self._vectorizer is None or self._matrix is None:
             return []
-        return _top_k_indices(self._scores_for_vector(self._vectorizer.transform([query])), k)
+        return self._top_indices(self._scores_for_vector(self._vectorizer.transform([query])), k)
 
     def _top_indices_excluding(self, source: str, index: int, k: int) -> List[int]:
         if self._matrix is None:
             return []
-        return _top_k_indices(self._scores_for_vector(self._matrix[index]), k, exclude=index)
+        return self._top_indices(self._scores_for_vector(self._matrix[index]), k, exclude=index)
 
 
 class BM25ExampleRetriever(LexicalExampleRetriever):
@@ -196,7 +194,7 @@ class BM25ExampleRetriever(LexicalExampleRetriever):
     def _top_indices_for_query(self, query: str, k: int) -> List[int]:
         if self._index is None:
             return []
-        return _top_k_indices(self._index.get_scores(self._tokenizer.tokenize(query)), k)
+        return self._top_indices(self._index.get_scores(self._tokenizer.tokenize(query)), k)
 
 
 class EmbeddingExampleRetriever(ExampleRetriever):
@@ -207,19 +205,18 @@ class EmbeddingExampleRetriever(ExampleRetriever):
     def __init__(self, model_name: Optional[str] = None, model: Optional[_EmbeddingModel] = None) -> None:
         """`model` is the test injection seam; production passes only `model_name`."""
         super().__init__()
-        self._model_name = model_name or self._DEFAULT_MODEL
+        self._name = model_name or self._DEFAULT_MODEL
         self._model = model
         self._embeddings: np.ndarray = np.zeros((0, 0), dtype=np.float32)
 
-    @property
-    def model_name(self) -> Optional[str]:
-        return self._model_name
+    def _model_name(self) -> Optional[str]:
+        return self._name
 
     def _get_model(self) -> _EmbeddingModel:
         if self._model is None:
             from sentence_transformers import SentenceTransformer
 
-            self._model = SentenceTransformer(self._model_name)
+            self._model = SentenceTransformer(self._name)
         return self._model
 
     def _encode(self, texts: Sequence[str]) -> np.ndarray:
@@ -233,10 +230,10 @@ class EmbeddingExampleRetriever(ExampleRetriever):
     def _top_indices_for_query(self, query: str, k: int) -> List[int]:
         if self._embeddings.shape[0] == 0:
             return []
-        return _top_k_indices(self._embeddings @ self._encode([query])[0], k)
+        return self._top_indices(self._embeddings @ self._encode([query])[0], k)
 
     def _top_indices_excluding(self, source: str, index: int, k: int) -> List[int]:
-        return _top_k_indices(self._embeddings @ self._embeddings[index], k, exclude=index)
+        return self._top_indices(self._embeddings @ self._embeddings[index], k, exclude=index)
 
     def __getstate__(self) -> dict:
         # The embeddings are the expensive part worth caching; the model reloads by name.
@@ -248,21 +245,21 @@ class ExampleRetrieverFactory:
 
     DEFAULT_METHOD = TfidfExampleRetriever.method
 
-    _BY_METHOD = {
-        TfidfExampleRetriever.method: lambda model_name: TfidfExampleRetriever(),
-        BM25ExampleRetriever.method: lambda model_name: BM25ExampleRetriever(),
-        EmbeddingExampleRetriever.method: EmbeddingExampleRetriever,
-    }
-
     @classmethod
     def create(cls, method: str, model_name: Optional[str] = None) -> ExampleRetriever:
         """Creates it unfitted; ExamplePool fits it with its own sources."""
-        build = cls._BY_METHOD.get(method.lower())
-        if build is None:
-            raise ValueError(
-                f"Unknown example_selection.method '{method}'. Valid options: {', '.join(cls._BY_METHOD)}."
-            )
-        return build(model_name)
+        normalized = method.lower()
+        if normalized == TfidfExampleRetriever.method:
+            return TfidfExampleRetriever()
+        if normalized == BM25ExampleRetriever.method:
+            return BM25ExampleRetriever()
+        if normalized == EmbeddingExampleRetriever.method:
+            return EmbeddingExampleRetriever(model_name)
+        raise ValueError(f"Unknown example_selection.method '{method}'. Valid options: {cls._method_names()}.")
+
+    @classmethod
+    def _method_names(cls) -> str:
+        return ", ".join((TfidfExampleRetriever.method, BM25ExampleRetriever.method, EmbeddingExampleRetriever.method))
 
 
 class ExampleFormatter(ABC):
@@ -304,18 +301,26 @@ class XmlExampleFormatter(ExampleFormatter):
         )
 
 
-def create_example_formatter(format_params: Union[str, dict]) -> ExampleFormatter:
-    # A bare string is shorthand for {"type": <string>}
-    if isinstance(format_params, str):
-        format_params = {"type": format_params}
-    format_type = str(format_params.get("type", "text")).lower()
-    if format_type == "text":
-        return TextExampleFormatter(format_params.get("template", TextExampleFormatter.DEFAULT_TEMPLATE))
-    if format_type == "json":
-        return JsonExampleFormatter()
-    if format_type == "xml":
-        return XmlExampleFormatter()
-    raise ValueError(f"Unknown example_format.type '{format_type}'. Valid options: text, json, xml.")
+class ExampleFormatterFactory:
+    @classmethod
+    def create(cls, format_params: Union[str, dict]) -> ExampleFormatter:
+        # A bare string is shorthand for {"type": <string>}
+        if isinstance(format_params, str):
+            format_params = {"type": format_params}
+        format_type = str(format_params.get("type", "text")).lower()
+        if format_type == "text":
+            return TextExampleFormatter(format_params.get("template", TextExampleFormatter.DEFAULT_TEMPLATE))
+        if format_type == "json":
+            return JsonExampleFormatter()
+        if format_type == "xml":
+            return XmlExampleFormatter()
+        raise ValueError(f"Unknown example_format.type '{format_type}'. Valid options: text, json, xml.")
+
+
+@dataclass(frozen=True)
+class ExamplePoolSummary:
+    corpus_size: int
+    selection_method: str
 
 
 class ExamplePool:
@@ -328,14 +333,9 @@ class ExamplePool:
         self._fitted = False
 
     def __len__(self) -> int:
-        return len(self.examples)
+        return len(self.all_examples())
 
-    @property
-    def method(self) -> str:
-        return self._retriever.method
-
-    @property
-    def examples(self) -> List[Example]:
+    def all_examples(self) -> List[Example]:
         # Read on first use rather than in __init__, so num_examples: 0 never touches the corpus.
         if self._examples is None:
             pairs = self._read_first_available_corpus()
@@ -357,9 +357,12 @@ class ExamplePool:
     def _describe_corpus_paths(self) -> str:
         return " or ".join(f"{src_path} and {trg_path}" for src_path, trg_path in self._corpus_paths)
 
+    def summarize(self) -> "ExamplePoolSummary":
+        return ExamplePoolSummary(len(self), self._retriever.method)
+
     def ensure_available(self) -> None:
         """Read the corpus now, so a missing one is reported before an expensive step starts."""
-        self.examples
+        self.all_examples()
 
     def covers_whole_pool(self, k: int) -> bool:
         return k > 0 and k >= len(self)
@@ -371,17 +374,17 @@ class ExamplePool:
             return []
         if self.covers_whole_pool(k):
             # Every example fits, so keep them in corpus order and never build an index.
-            return [ex for i, ex in enumerate(self.examples) if i != pool_index]
+            return [ex for i, ex in enumerate(self.all_examples()) if i != pool_index]
         retriever = self.get_retriever()
         if pool_index is None:
             ranked = retriever.rank(query, k)
         else:
-            ranked = retriever.rank_excluding(self.examples[pool_index].source, pool_index, k)
-        return [self.examples[i] for i in reversed(ranked)]
+            ranked = retriever.rank_excluding(self.all_examples()[pool_index].source, pool_index, k)
+        return [self.all_examples()[i] for i in reversed(ranked)]
 
     def get_retriever(self) -> ExampleRetriever:
         if not self._fitted:
-            self._retriever.fit([example.source for example in self.examples])
+            self._retriever.fit([example.source for example in self.all_examples()])
             self._fitted = True
         return self._retriever
 
@@ -393,19 +396,9 @@ class ExamplePool:
         saved = ExampleRetriever.load(directory)
         if saved is None:
             return False
-        if saved.method != self._retriever.method or saved.model_name != self._retriever.model_name:
-            LOGGER.info(
-                "The saved retrieval index uses '%s' but the config asks for '%s'; rebuilding it.",
-                saved.method,
-                self._retriever.method,
-            )
-            return False
-        if saved.source_count != len(self):
-            LOGGER.info(
-                "The saved retrieval index covers %d examples but the corpus has %d; rebuilding it.",
-                saved.source_count,
-                len(self),
-            )
+        reason = saved.reason_to_rebuild(self._retriever, len(self))
+        if reason is not None:
+            LOGGER.info("%s; rebuilding it.", reason)
             return False
         self._retriever = saved
         self._fitted = True

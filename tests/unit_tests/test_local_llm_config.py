@@ -9,21 +9,19 @@ from datasets import Dataset
 from jinja2.exceptions import UndefinedError
 
 from silnlp.common.environment import SilNlpEnv
-from silnlp.nmt.config import CheckpointType, Config
+from silnlp.nmt.config import CheckpointType
 from silnlp.nmt.config import Language
 from silnlp.nmt.config_utils import is_local_llm_config
-from silnlp.nmt.example_retrieval import Example, create_example_formatter
-from silnlp.nmt.llm_config import PromptMessages, PromptTemplate
+from silnlp.nmt.example_retrieval import Example, ExampleFormatterFactory
+from silnlp.nmt.llm_config import PromptBuilder, PromptMessages, PromptTemplate, PromptTemplateCollection
 from silnlp.nmt.local_llm_config import (
-    ChatPromptBuilder,
-    ChatPromptMessages,
+    LocalLLMPromptMessages,
+    LocalLLMPromptMessagesFactory,
     DataCollatorForCausalLM,
     InterleavedTrainDataset,
     LocalLLMConfig,
     LocalLLMModel,
     TranslateGemmaPromptMessages,
-    _render_turns,
-    build_generation_kwargs,
 )
 
 
@@ -42,7 +40,7 @@ def test_is_local_llm_config_prefix_fallback():
 
 
 def test_prompt_messages_to_chat_messages():
-    prompt = ChatPromptMessages(
+    prompt = LocalLLMPromptMessages(
         system_message="You are a translator.", instruction="Translate: hello", target="bonjour"
     )
     assert prompt.to_chat_messages() == [
@@ -53,14 +51,14 @@ def test_prompt_messages_to_chat_messages():
 
 
 def test_prompt_messages_folds_system_message_into_user_turn():
-    prompt = ChatPromptMessages(system_message="You are a translator.", instruction="Translate: hello")
+    prompt = LocalLLMPromptMessages(system_message="You are a translator.", instruction="Translate: hello")
     assert prompt.to_folded_chat_messages() == [
         {"role": "user", "content": "You are a translator.\n\nTranslate: hello"}
     ]
 
 
 def test_prompt_messages_without_system_message():
-    prompt = ChatPromptMessages(system_message="", instruction="Translate: hello")
+    prompt = LocalLLMPromptMessages(system_message="", instruction="Translate: hello")
     assert prompt.to_chat_messages() == [{"role": "user", "content": "Translate: hello"}]
     assert prompt.to_folded_chat_messages() == [{"role": "user", "content": "Translate: hello"}]
 
@@ -101,9 +99,18 @@ def test_data_collator_right_pads_inputs_and_masks_label_padding():
     assert batch["labels"].tolist() == [[-100, 6, 7], [-100, 9, -100]]
 
 
+class _GenerationConfigStub(LocalLLMConfig):
+    def __init__(self, infer: dict) -> None:
+        self.root = {"infer": infer}
+
+
+def _generation_config(infer: dict) -> _GenerationConfigStub:
+    return _GenerationConfigStub(infer)
+
+
 def test_build_generation_kwargs_beam_search():
-    infer = {"max_new_tokens": 256, "num_beams": 4, "do_sample": False, "temperature": 0.7}
-    gen_kwargs = build_generation_kwargs(infer, num_return_sequences=2, pad_token_id=0)
+    config = _generation_config({"max_new_tokens": 256, "num_beams": 4, "do_sample": False, "temperature": 0.7})
+    gen_kwargs = config.build_generation_kwargs(num_return_sequences=2, pad_token_id=0)
     assert gen_kwargs["num_beams"] == 4
     assert gen_kwargs["num_return_sequences"] == 2
     assert "do_sample" not in gen_kwargs
@@ -111,8 +118,8 @@ def test_build_generation_kwargs_beam_search():
 
 
 def test_build_generation_kwargs_sampling_does_not_set_num_beams():
-    infer = {"max_new_tokens": 256, "num_beams": 4, "do_sample": True, "temperature": 0.7}
-    gen_kwargs = build_generation_kwargs(infer, num_return_sequences=3, pad_token_id=0)
+    config = _generation_config({"max_new_tokens": 256, "num_beams": 4, "do_sample": True, "temperature": 0.7})
+    gen_kwargs = config.build_generation_kwargs(num_return_sequences=3, pad_token_id=0)
     assert gen_kwargs["do_sample"] is True
     assert gen_kwargs["temperature"] == 0.7
     assert gen_kwargs["num_return_sequences"] == 3
@@ -120,9 +127,9 @@ def test_build_generation_kwargs_sampling_does_not_set_num_beams():
 
 
 def test_build_generation_kwargs_rejects_more_drafts_than_beams():
-    infer = {"max_new_tokens": 256, "num_beams": 1, "do_sample": False, "temperature": 0.7}
+    config = _generation_config({"max_new_tokens": 256, "num_beams": 1, "do_sample": False, "temperature": 0.7})
     with pytest.raises(RuntimeError, match="num_beams"):
-        build_generation_kwargs(infer, num_return_sequences=2, pad_token_id=0)
+        config.build_generation_kwargs(num_return_sequences=2, pad_token_id=0)
 
 
 def test_data_collator_pad_to_multiple_of():
@@ -159,8 +166,8 @@ def _prompt_builder(
     pool=None,
     example_format="text",
 ):
-    template = PromptTemplate(system_message, instruction_template, create_example_formatter(example_format))
-    return ChatPromptBuilder([template], num_examples, pool)
+    template = PromptTemplate(system_message, instruction_template, ExampleFormatterFactory.create(example_format))
+    return PromptBuilder(PromptTemplateCollection([template]), num_examples, pool, LocalLLMPromptMessagesFactory())
 
 
 class _FakePool:
@@ -206,7 +213,7 @@ def test_build_prompt_messages_translate_gemma_uses_structured_content():
 def test_build_prompt_messages_generic_model_uses_instruction_template():
     config = _stub_config(lang_codes={"en": "English", "fr": "French"})
     prompt = config.build_prompt_messages("hello", config.language("en"), config.language("fr"))
-    assert prompt == ChatPromptMessages(
+    assert prompt == LocalLLMPromptMessages(
         system_message="", instruction="Translate from English to French.\n\nhello", target=None
     )
 
@@ -334,7 +341,7 @@ def test_llm_config_rejects_unknown_example_selection_method(tmp_path):
 
 
 def test_build_adapter_config_plain_lora():
-    peft_config = LocalLLMModel._build_adapter_config(
+    peft_config = _ModelStub()._build_adapter_config(
         {"rank": 16, "alpha": 32, "dropout": 0.05, "target_modules": "all-linear"}, use_dora=False
     )
     assert peft_config.r == 16
@@ -344,7 +351,7 @@ def test_build_adapter_config_plain_lora():
 
 
 def test_build_adapter_config_passes_through_modules_to_save():
-    peft_config = LocalLLMModel._build_adapter_config(
+    peft_config = _ModelStub()._build_adapter_config(
         {
             "rank": 64,
             "alpha": 256,
@@ -361,7 +368,7 @@ def test_build_adapter_config_passes_through_modules_to_save():
 
 def test_build_adapter_config_dora():
     adapter = {"rank": 64, "alpha": 256, "dropout": 0.05, "target_modules": "all-linear"}
-    peft_config = LocalLLMModel._build_adapter_config(adapter, use_dora=True)
+    peft_config = _ModelStub()._build_adapter_config(adapter, use_dora=True)
     assert peft_config.use_dora is True
 
 
@@ -381,53 +388,47 @@ def test_finetune_method_axes():
     ]
     for method, quantized, dora in cases:
         stub = _MethodStub(params={"finetune_method": method})
-        assert stub.finetune_method == method
-        assert stub.uses_quantization is quantized
-        assert stub.uses_dora is dora
+        assert stub.get_finetune_method() == method
+        assert stub.uses_quantization() is quantized
+        assert stub.uses_dora() is dora
 
 
 def test_finetune_method_is_case_insensitive():
-    assert _MethodStub(params={"finetune_method": "QDoRA"}).uses_dora is True
+    assert _MethodStub(params={"finetune_method": "QDoRA"}).uses_dora() is True
 
 
 def test_finetune_method_invalid_raises():
     with pytest.raises(ValueError, match="Unknown finetune_method"):
-        _ = _MethodStub(params={"finetune_method": "bogus"}).finetune_method
+        _ = _MethodStub(params={"finetune_method": "bogus"}).get_finetune_method()
 
 
 def test_normalize_deprecated_keys_renames_lora_to_adapter():
     config = {"params": {"finetune_method": "lora", "lora": {"rank": 8}}}
-    LocalLLMConfig._normalize_deprecated_keys(config)
+    _MethodStub(params={})._normalize_deprecated_keys(config)
     assert "lora" not in config["params"]
     assert config["params"]["adapter"] == {"rank": 8}
 
 
 def test_normalize_deprecated_keys_prefers_explicit_adapter():
     config = {"params": {"lora": {"rank": 8}, "adapter": {"rank": 64}}}
-    LocalLLMConfig._normalize_deprecated_keys(config)
+    _MethodStub(params={})._normalize_deprecated_keys(config)
     # An explicit adapter wins; the deprecated lora key is left untouched rather than clobbering it.
     assert config["params"]["adapter"] == {"rank": 64}
 
 
-@dataclass
-class _InstructionDataStub:
-    train: dict
-    _environment: SilNlpEnv
-    exp_dir: Path = Path(".")
+class _InstructionDataStub(LocalLLMConfig):
+    """Skips Config.__init__, which would need a corpus, and supplies only the instruction data."""
 
-    instruction_datasets = LocalLLMConfig.instruction_datasets
-    instruction_data_size = LocalLLMConfig.instruction_data_size
-    instruction_mix_ratio = LocalLLMConfig.instruction_mix_ratio
-    instruction_data_paths = LocalLLMConfig.instruction_data_paths
-    instruction_jsonl_filename = Config.instruction_jsonl_filename
-    _open_append = Config._open_append
-    _write_instruction_data = LocalLLMConfig._write_instruction_data
+    def __init__(self, train: dict, _environment: SilNlpEnv, exp_dir: Path = Path(".")) -> None:
+        self.root = {"train": train}
+        self._environment = _environment
+        self.exp_dir = exp_dir
 
 
 def test_instruction_datasets_defaults_to_empty():
     stub = _InstructionDataStub(train={"instruction_data": {"datasets": [], "size": 100000}}, _environment=None)
-    assert stub.instruction_datasets == []
-    assert stub.instruction_data_size == 100000
+    assert stub.get_instruction_datasets() == []
+    assert stub.get_instruction_data_size() == 100000
     assert stub.instruction_data_paths() == []
     assert stub._write_instruction_data() == 0
 
@@ -447,18 +448,25 @@ def test_instruction_data_paths_resolved_under_mt_dir_instructions(tmp_path):
 def test_instruction_data_size_rejects_negative():
     stub = _InstructionDataStub(train={"instruction_data": {"datasets": [], "size": -1}}, _environment=None)
     with pytest.raises(ValueError, match="non-negative"):
-        stub.instruction_data_size
+        stub.get_instruction_data_size()
 
 
 def test_instruction_mix_ratio_default():
     stub = _InstructionDataStub(train={"instruction_data": {"mix_ratio": 0.1}}, _environment=None)
-    assert stub.instruction_mix_ratio == 0.1
+    assert stub.get_instruction_mix_ratio() == 0.1
 
 
 def test_instruction_mix_ratio_rejects_negative():
     stub = _InstructionDataStub(train={"instruction_data": {"mix_ratio": -0.1}}, _environment=None)
     with pytest.raises(ValueError, match="non-negative"):
-        stub.instruction_mix_ratio
+        stub.get_instruction_mix_ratio()
+
+
+class _ModelStub(LocalLLMModel):
+    """Skips the real __init__, which would load a model, to exercise one method."""
+
+    def __init__(self) -> None:
+        pass
 
 
 class _StubRejectingSystemTokenizer:
@@ -474,7 +482,7 @@ class _StubRejectingSystemTokenizer:
 
 def test_render_turns_happy_path():
     turns = [{"role": "user", "content": "hi"}]
-    assert _render_turns(_StubRejectingSystemTokenizer(), turns, add_generation_prompt=True) == [2]
+    assert _ModelStub()._render_turns(_StubRejectingSystemTokenizer(), turns, add_generation_prompt=True) == [2]
 
 
 def test_render_turns_folds_leading_system_turn_into_first_user_turn_on_failure():
@@ -483,7 +491,7 @@ def test_render_turns_folds_leading_system_turn_into_first_user_turn_on_failure(
         {"role": "user", "content": "hi"},
         {"role": "assistant", "content": "yo"},
     ]
-    result = _render_turns(_StubRejectingSystemTokenizer(), turns, add_generation_prompt=True)
+    result = _ModelStub()._render_turns(_StubRejectingSystemTokenizer(), turns, add_generation_prompt=True)
     # folded: [{"role": "user", "content": "sys\n\nhi"}, {"role": "assistant", "content": "yo"}]
     assert result == [len("sys\n\nhi"), len("yo")]
 
@@ -497,12 +505,12 @@ class _AlwaysFailingTokenizer:
 
 def test_render_turns_reraises_when_there_is_no_system_turn_to_fold():
     with pytest.raises(RuntimeError, match="boom"):
-        _render_turns(_AlwaysFailingTokenizer(), [{"role": "user", "content": "hi"}], add_generation_prompt=True)
+        _ModelStub()._render_turns(_AlwaysFailingTokenizer(), [{"role": "user", "content": "hi"}], add_generation_prompt=True)
 
 
 def test_render_turns_reraises_when_system_turn_has_nothing_to_fold_into():
     with pytest.raises(RuntimeError, match="boom"):
-        _render_turns(
+        _ModelStub()._render_turns(
             _AlwaysFailingTokenizer(), [{"role": "system", "content": "sys"}], add_generation_prompt=True
         )
 
@@ -711,20 +719,35 @@ def test_create_inference_model_falls_back_to_base_model_with_no_checkpoints(tmp
 # --- train.prompt ------------------------------------------------------------------------
 
 
+def _train_instruction(config, source, rotation_index=None):
+    return config.build_prompt_messages(
+        source, config.language("en"), config.language("fr"), rotation_index=rotation_index, training=True
+    ).instruction
+
+
+def _infer_instruction(config, source):
+    return config.build_prompt_messages(source, config.language("en"), config.language("fr")).instruction
+
+
 def _write_templates(path: Path, entries) -> Path:
-    path.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
+    # A template file line has to carry every field, so fill in the ones a case does not vary.
+    complete = [{"system_message": "", "example_format": "text", **entry} for entry in entries]
+    path.write_text("".join(json.dumps(entry) + "\n" for entry in complete), encoding="utf-8")
     return path
 
 
 def test_train_prompt_defaults_to_a_fixed_zero_shot_prompt(tmp_path):
+    # No corpus is written, so drawing examples would raise; the default asks for none.
     config = _construct_llm_config(tmp_path, {})
-    builder = config.train_prompt_builder
-    assert builder.num_examples == 0
-    assert builder.templates[0].instruction_template == LocalLLMConfig.DEFAULT_INSTRUCTION_TEMPLATE
-    assert builder.pool is None
+    instruction = _train_instruction(config, "hello")
+    assert instruction == LocalLLMConfig.DEFAULT_INSTRUCTION_TEMPLATE.format(
+        src_lang="en", trg_lang="fr", source="hello"
+    )
 
 
 def test_train_and_infer_prompts_are_configured_independently(tmp_path):
+    (tmp_path / "train.src.txt").write_text("".join(f"source {i}\n" for i in range(6)), encoding="utf-8")
+    (tmp_path / "train.trg.txt").write_text("".join(f"target {i}\n" for i in range(6)), encoding="utf-8")
     environment = SilNlpEnv.create_environment_with_mt_dir(tmp_path)
     config = LocalLLMConfig(
         tmp_path,
@@ -736,8 +759,8 @@ def test_train_and_infer_prompts_are_configured_independently(tmp_path):
         },
         environment,
     )
-    assert config.train_prompt_builder.num_examples == 4
-    assert config.infer_prompt_builder.num_examples == 1
+    assert _train_instruction(config, "one").count("Source (") == 4
+    assert _infer_instruction(config, "one").count("Source (") == 1
 
 
 def test_train_prompt_rejects_an_unknown_type(tmp_path):
@@ -768,7 +791,7 @@ def test_rotating_train_prompt_reads_its_templates_from_the_file(tmp_path):
         [{"instruction_template": "A: {source}"}, {"instruction_template": "B: {source}"}],
     )
     config = _construct_llm_config(tmp_path, {"type": "rotating", "template_file": "templates.jsonl"})
-    assert [t.instruction_template for t in config.train_prompt_builder.templates] == ["A: {source}", "B: {source}"]
+    assert [_train_instruction(config, "x", rotation_index=i) for i in range(2)] == ["A: x", "B: x"]
 
 
 def test_rotating_train_prompt_rotates_across_training_rows(tmp_path):
@@ -801,7 +824,7 @@ def test_rotating_train_prompt_resolves_the_template_file_under_the_mt_dir(tmp_p
         },
         SilNlpEnv.create_environment_with_mt_dir(mt_dir),
     )
-    assert config.train_prompt_builder.templates[0].instruction_template == "shared: {source}"
+    assert _train_instruction(config, "x") == "shared: x"
 
 
 def test_rotating_train_prompt_warns_when_a_file_template_disagrees_with_num_examples(tmp_path, caplog):
@@ -852,7 +875,7 @@ def test_prompts_can_always_be_rendered_through_the_chat_template(tmp_path, prom
     config = _construct_llm_config(tmp_path, overrides)
     for training in (True, False):
         prompt = config.build_prompt_messages("hello", config.language("en"), config.language("fr"), training=training)
-        assert isinstance(prompt, ChatPromptMessages)
+        assert isinstance(prompt, LocalLLMPromptMessages)
 
 
 def test_the_local_model_reads_the_plain_training_corpus(tmp_path):
@@ -864,7 +887,7 @@ def test_the_local_model_reads_the_plain_training_corpus(tmp_path):
     (tmp_path / "train.trg.detok.txt").write_text("autre chose\n", encoding="utf-8")
 
     config = _construct_llm_config(tmp_path, {"num_examples": 1})
-    assert [example.target for example in config.train_prompt_builder.pool.examples] == ["le chat"]
+    assert "le chat" in _train_instruction(config, "the cat sat too")
 
 
 def test_rotating_train_prompt_rotates_eval_rows_too(tmp_path):

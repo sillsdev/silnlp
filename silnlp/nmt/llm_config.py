@@ -4,9 +4,10 @@
 
 import json
 import logging
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Generic, List, Optional, Sequence, Tuple, TypeVar, Union
 
 from ..common.environment import SilNlpEnv
 from ..common.utils import merge_dict
@@ -15,9 +16,11 @@ from .corpora import DataFile
 from .example_retrieval import (
     Example,
     ExampleFormatter,
+    ExampleFormatterFactory,
     ExamplePool,
+    ExamplePoolSummary,
+    ExampleRetriever,
     ExampleRetrieverFactory,
-    create_example_formatter,
 )
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -54,57 +57,172 @@ class PromptMessages:
     def to_plain_text(self) -> str:
         return "".join(f"{m['content']}\n" for m in self.to_chat_messages())
 
+    def with_additional_context(self, context: str) -> "PromptMessages":
+        """Context goes first, so the prompt prefix a provider can cache does not vary per request."""
+        system_message = f"{self.system_message}\n\n{context}" if self.system_message else context
+        return PromptMessages(system_message, self.instruction, self.target)
+
+
+TPromptMessages = TypeVar("TPromptMessages", bound=PromptMessages)
+
+
+class PromptMessagesFactory(ABC, Generic[TPromptMessages]):
+    """Creates the PromptMessages a model needs, so PromptBuilder need not know which that is."""
+
+    @abstractmethod
+    def create(self, system_message: str, instruction: str, target: Optional[str]) -> TPromptMessages: ...
+
+
+class PlainPromptMessagesFactory(PromptMessagesFactory[PromptMessages]):
+    def create(self, system_message: str, instruction: str, target: Optional[str]) -> PromptMessages:
+        return PromptMessages(system_message, instruction, target)
+
+
+class MalformedPromptTemplateException(Exception):
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self._message = message
+
+    def get_message(self) -> str:
+        return self._message
+
 
 @dataclass(frozen=True)
 class PromptTemplate:
     _EXAMPLES_PLACEHOLDER = "{examples}"
+    _REQUIRED_FIELDS = ("system_message", "instruction_template", "example_format")
 
     system_message: str
     instruction_template: str
     formatter: ExampleFormatter
 
-    @property
-    def has_examples_placeholder(self) -> bool:
+    def _has_examples_placeholder(self) -> bool:
         return self._EXAMPLES_PLACEHOLDER in self.instruction_template
 
     def describe_examples_mismatch(self, num_examples: int) -> Optional[str]:
-        """How this template disagrees with num_examples about few-shot examples, if it does."""
-        if num_examples > 0 and not self.has_examples_placeholder:
+        """A description to appear in the error message"""
+        if num_examples > 0 and not self._has_examples_placeholder():
             return f"has no '{self._EXAMPLES_PLACEHOLDER}', so the retrieved examples are silently discarded"
-        if num_examples == 0 and self.has_examples_placeholder:
+        if num_examples == 0 and self._has_examples_placeholder():
             return f"has an '{self._EXAMPLES_PLACEHOLDER}', which always renders as nothing"
         return None
 
+    def to_prompt_message(
+        self,
+        source_text: str,
+        target_text: Optional[str],
+        src_lang: Language,
+        trg_lang: Language,
+        examples: Sequence[Example],
+        messages_factory: PromptMessagesFactory[TPromptMessages],
+        num_segments: int = 1,
+    ) -> TPromptMessages:
+        examples_str = self.render_examples(examples, src_lang, trg_lang)
+        formatted_instruction = self.instruction_template.format(
+            src_lang=src_lang.name,
+            trg_lang=trg_lang.name,
+            source=source_text,
+            examples=examples_str,
+            num_segments=num_segments,
+        )
+        formatted_system_message = self.system_message.format(src_lang=src_lang.name, trg_lang=trg_lang.name)
+        return messages_factory.create(formatted_system_message, formatted_instruction, target_text)
 
-class PromptBuilder:
-    """Builds the messages for one translation from a fixed or rotating set of prompt templates."""
+    def render_examples(self, examples: Sequence[Example], src_lang: Language, trg_lang: Language) -> str:
+        return self.formatter.format(examples, src_lang.name, trg_lang.name)
 
-    messages_class = PromptMessages
+    @classmethod
+    def from_json(cls, json_str: str) -> "PromptTemplate":
+        entry = cls._parse_json_object(json_str)
+        try:
+            formatter = ExampleFormatterFactory.create(entry["example_format"])
+        except ValueError as e:
+            raise MalformedPromptTemplateException(f"Prompt template {json_str} has an invalid example_format: {e}")
+        return PromptTemplate(entry["system_message"], entry["instruction_template"], formatter)
 
-    def __init__(self, templates: Sequence[PromptTemplate], num_examples: int, pool: Optional[ExamplePool]) -> None:
-        if len(templates) == 0:
-            raise ValueError("A prompt needs at least one template.")
-        self._templates = list(templates)
-        self._num_examples = num_examples
-        self._pool = pool
+    @classmethod
+    def _parse_json_object(cls, json_str: str) -> dict:
+        try:
+            entry = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            raise MalformedPromptTemplateException(f"Prompt template {json_str} is not valid JSON: {e}") from e
+        if not isinstance(entry, dict):
+            raise MalformedPromptTemplateException(f"Prompt template {json_str} must be a JSON object.")
+        unknown_fields = set(entry) - set(cls._REQUIRED_FIELDS)
+        if unknown_fields:
+            raise MalformedPromptTemplateException(
+                f"Prompt template {json_str} has unknown field(s) {', '.join(sorted(unknown_fields))}. "
+                f"Valid fields: {', '.join(cls._REQUIRED_FIELDS)}."
+            )
+        missing = [field for field in cls._REQUIRED_FIELDS if field not in entry]
+        if missing:
+            raise MalformedPromptTemplateException(
+                f"Prompt template {json_str} is missing required field(s) {', '.join(missing)}."
+            )
+        return entry
 
-    @property
-    def num_examples(self) -> int:
-        return self._num_examples
 
-    @property
-    def templates(self) -> List[PromptTemplate]:
-        return self._templates
+class PromptTemplateCollection:
+    def __init__(self, prompt_templates: List[PromptTemplate]) -> None:
+        self._templates = prompt_templates
 
-    @property
-    def pool(self) -> Optional[ExamplePool]:
-        return self._pool
+    def is_empty(self) -> bool:
+        return len(self._templates) == 0
 
     def template_for(self, rotation_index: Optional[int]) -> PromptTemplate:
-        # Keyed off the row index so a re-run, and each evaluation, renders the same prompts.
-        if rotation_index is None or len(self._templates) == 1:
+        if rotation_index is None:
             return self._templates[0]
         return self._templates[rotation_index % len(self._templates)]
+
+    def validate_for_icl(self, num_examples: int, source: str) -> None:
+        for i, template in enumerate(self._templates):
+            mismatch = template.describe_examples_mismatch(num_examples)
+            if mismatch is not None:
+                where = f"{source}[{i}]" if len(self._templates) > 1 else source
+                LOGGER.warning("num_examples is %d but %s %s.", num_examples, where, mismatch)
+
+    @classmethod
+    def from_fixed_prompt_template(cls, prompt_template: PromptTemplate) -> "PromptTemplateCollection":
+        return cls([prompt_template])
+
+    @classmethod
+    def from_file(cls, prompt_file_path: Path) -> "PromptTemplateCollection":
+        if not prompt_file_path.is_file():
+            raise RuntimeError(f"The prompt template file {prompt_file_path} does not exist.")
+        templates: List[PromptTemplate] = []
+        with prompt_file_path.open("r", encoding="utf-8") as file:
+            for line in file:
+                if line.strip() == "":
+                    continue
+                try:
+                    templates.append(PromptTemplate.from_json(line))
+                except MalformedPromptTemplateException as e:
+                    LOGGER.warning(e.get_message())
+        if len(templates) == 0:
+            raise RuntimeError(f"The prompt template file {prompt_file_path} has no templates.")
+
+        return cls(templates)
+
+
+class PromptBuilder(Generic[TPromptMessages]):
+    """Builds the messages for one translation from a fixed or rotating set of prompt templates."""
+
+    def __init__(
+        self,
+        templates: PromptTemplateCollection,
+        num_examples: int,
+        pool: Optional[ExamplePool],
+        messages_factory: PromptMessagesFactory[TPromptMessages],
+    ) -> None:
+        if templates.is_empty():
+            raise ValueError("No valid prompt templates were supplied.")
+        self._templates = templates
+        self._num_examples = num_examples
+        self._pool = pool
+        self._messages_factory = messages_factory
+
+    def get_num_examples(self) -> int:
+        return self._num_examples
 
     def covers_whole_pool(self) -> bool:
         return self._pool is not None and self._pool.covers_whole_pool(self._num_examples)
@@ -114,11 +232,6 @@ class PromptBuilder:
             return []
         return self._pool.select(query, self._num_examples, pool_index)
 
-    def render_examples(
-        self, examples: Sequence[Example], src_lang: Language, trg_lang: Language, rotation_index: Optional[int] = None
-    ) -> str:
-        return self.template_for(rotation_index).formatter.format(examples, src_lang.name, trg_lang.name)
-
     def build(
         self,
         source: str,
@@ -127,81 +240,107 @@ class PromptBuilder:
         target: Optional[str] = None,
         pool_index: Optional[int] = None,
         rotation_index: Optional[int] = None,
-        **instruction_fields: Any,
-    ) -> PromptMessages:
+        examples: Optional[Sequence[Example]] = None,
+    ) -> TPromptMessages:
+        return self._build(
+            source,
+            src_lang,
+            trg_lang,
+            target=target,
+            pool_index=pool_index,
+            rotation_index=rotation_index,
+            examples=examples,
+        )
+
+    def _build(
+        self,
+        source: str,
+        src_lang: Language,
+        trg_lang: Language,
+        num_segments: int = 1,
+        target: Optional[str] = None,
+        pool_index: Optional[int] = None,
+        rotation_index: Optional[int] = None,
+        examples: Optional[Sequence[Example]] = None,
+    ) -> TPromptMessages:
         # Separate indices so rows outside the pool, which get no pool_index, still rotate.
         if rotation_index is None:
             rotation_index = pool_index
-        template = self.template_for(rotation_index)
-        examples = self.select_examples(source, pool_index)
-        instruction = template.instruction_template.format(
-            src_lang=src_lang.name,
-            trg_lang=trg_lang.name,
-            source=source,
-            examples=self.render_examples(examples, src_lang, trg_lang, rotation_index),
-            **instruction_fields,
+        template = self._templates.template_for(rotation_index)
+        if examples is None:
+            examples = self.select_examples(source, pool_index)
+        return template.to_prompt_message(
+            source, target, src_lang, trg_lang, examples, self._messages_factory, num_segments
         )
-        system_message = template.system_message.format(src_lang=src_lang.name, trg_lang=trg_lang.name)
-        return self.messages_class(system_message, instruction, target)
+
+    def render_pool(self, src_lang: Language, trg_lang: Language) -> str:
+        if self._pool is None:
+            return ""
+        return self._templates.template_for(None).render_examples(self._pool.all_examples(), src_lang, trg_lang)
 
 
-def warn_about_examples_placeholder(templates: Sequence[PromptTemplate], num_examples: int, source: str) -> None:
-    for i, template in enumerate(templates):
-        mismatch = template.describe_examples_mismatch(num_examples)
-        if mismatch is not None:
-            where = f"{source}[{i}]" if len(templates) > 1 else source
-            LOGGER.warning("num_examples is %d but %s %s.", num_examples, where, mismatch)
+@dataclass(frozen=True)
+class PromptDefaults:
+    system_message: str
+    instruction_template: str
+    few_shot_instruction_template: str
+    example_format: Union[str, dict]
+
+    def instruction_template_for(self, num_examples: int) -> str:
+        return self.few_shot_instruction_template if num_examples > 0 else self.instruction_template
 
 
-def read_prompt_template_file(path: Path, defaults: dict) -> List[PromptTemplate]:
-    """One {system_message, instruction_template, example_format} object per line."""
-    if not path.is_file():
-        raise RuntimeError(f"The prompt template file {path} does not exist.")
-    templates: List[PromptTemplate] = []
-    with path.open("r", encoding="utf-8") as file:
-        for line_number, line in enumerate(file, 1):
-            if line.strip() == "":
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError as e:
-                raise RuntimeError(f"{path} line {line_number} is not valid JSON: {e}") from e
-            if not isinstance(entry, dict):
-                raise RuntimeError(f"{path} line {line_number} must be a JSON object.")
-            unknown = set(entry) - {"system_message", "instruction_template", "example_format"}
-            if unknown:
-                raise RuntimeError(
-                    f"{path} line {line_number} has unknown field(s) {', '.join(sorted(unknown))}. "
-                    "Valid fields: system_message, instruction_template, example_format."
-                )
-            templates.append(
-                PromptTemplate(
-                    system_message=entry.get("system_message", defaults["system_message"]),
-                    instruction_template=entry.get("instruction_template", defaults["instruction_template"]),
-                    formatter=create_example_formatter(entry.get("example_format", defaults["example_format"])),
-                )
+class PromptConfig:
+    """A prompt section of an experiment config, e.g., infer.prompt."""
+
+    def __init__(self, settings: dict, name: str) -> None:
+        self._settings = settings
+        self._name = name
+
+    def get_name(self) -> str:
+        return self._name
+
+    def get_num_examples(self) -> int:
+        num_examples = int(self._settings["num_examples"])
+        if num_examples < 0:
+            raise ValueError(f"{self._name}.num_examples must be non-negative, got {num_examples}.")
+        return num_examples
+
+    def create_retriever(self) -> ExampleRetriever:
+        selection = self._settings["example_selection"]
+        # merge_dict() replaces rather than merges when a bare-string override lands on a dict default.
+        if isinstance(selection, str):
+            selection = {"method": selection}
+        return ExampleRetrieverFactory.create(str(selection["method"]), selection.get("model"))
+
+    def create_template(self, instruction_template: Optional[str] = None) -> PromptTemplate:
+        return PromptTemplate(
+            system_message=self._settings["system_message"],
+            instruction_template=instruction_template or self._settings["instruction_template"],
+            formatter=ExampleFormatterFactory.create(self._settings["example_format"]),
+        )
+
+    def get_setting(self, key: str) -> Any:
+        return self._settings[key]
+
+    def is_unset(self, key: str) -> bool:
+        return self._settings.get(key) is None
+
+    def set_batch_instruction_template(self, template: str) -> None:
+        self._settings["batch_instruction_template"] = template
+
+    def resolve_defaults(self, defaults: PromptDefaults) -> None:
+        if self.is_unset("system_message"):
+            self._settings["system_message"] = defaults.system_message
+        if self.is_unset("example_format"):
+            self._settings["example_format"] = defaults.example_format
+        if self.is_unset("instruction_template"):
+            self._settings["instruction_template"] = defaults.instruction_template_for(
+                int(self._settings.get("num_examples", 0))
             )
-    if len(templates) == 0:
-        raise RuntimeError(f"The prompt template file {path} has no templates.")
-    return templates
 
 
-def parse_example_selection(prompt: dict) -> Tuple[str, Optional[str]]:
-    selection = prompt["example_selection"]
-    # merge_dict() replaces rather than merges when a bare-string override lands on a dict default.
-    if isinstance(selection, str):
-        selection = {"method": selection}
-    return str(selection["method"]), selection.get("model")
-
-
-def parse_num_examples(prompt: dict, name: str) -> int:
-    num_examples = int(prompt["num_examples"])
-    if num_examples < 0:
-        raise ValueError(f"{name}.num_examples must be non-negative, got {num_examples}.")
-    return num_examples
-
-
-class LLMConfig(Config):
+class LLMConfig(Config, Generic[TPromptMessages]):
     """An experiment that translates by prompting an LLM, fine-tuned locally or hosted."""
 
     DEFAULT_SYSTEM_MESSAGE = ""
@@ -213,11 +352,10 @@ class LLMConfig(Config):
         "Now translate this text:\n\n{source}"
     )
     DEFAULT_EXAMPLE_FORMAT: Union[str, dict] = "text"
-    PROMPT_BUILDER_CLASS = PromptBuilder
 
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
         config = merge_dict(self._default_config(exp_dir), config)
-        self._resolve_infer_prompt_defaults(config["infer"]["prompt"])
+        self._resolve_infer_prompt_defaults(PromptConfig(config["infer"]["prompt"], "infer.prompt"))
 
         super().__init__(exp_dir, config, environment)
 
@@ -226,10 +364,20 @@ class LLMConfig(Config):
                 f"{type(self).__name__} experiments only support a single source language and a single "
                 "target language."
             )
-        self._infer_prompt_builder = self._create_prompt_builder(self.infer["prompt"], "infer.prompt")
+        infer_prompt = PromptConfig(self.infer["prompt"], "infer.prompt")
+        self._infer_example_pool = self._create_example_pool(infer_prompt)
+        self._infer_prompt_builder = self._create_prompt_builder(infer_prompt, self._infer_example_pool)
 
-    def _resolve_infer_prompt_defaults(self, prompt: dict) -> None:
-        resolve_prompt_defaults(prompt, type(self))
+    def prompt_defaults(self) -> PromptDefaults:
+        return PromptDefaults(
+            self.DEFAULT_SYSTEM_MESSAGE,
+            self.DEFAULT_INSTRUCTION_TEMPLATE,
+            self.DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE,
+            self.DEFAULT_EXAMPLE_FORMAT,
+        )
+
+    def _resolve_infer_prompt_defaults(self, prompt: PromptConfig) -> None:
+        prompt.resolve_defaults(self.prompt_defaults())
 
     def _default_config(self, exp_dir: Path) -> dict:
         return {
@@ -257,38 +405,44 @@ class LLMConfig(Config):
             },
         }
 
-    def _create_prompt_builder(self, prompt: dict, name: str) -> PromptBuilder:
-        num_examples = parse_num_examples(prompt, name)
-        templates = [
-            PromptTemplate(
-                system_message=prompt["system_message"],
-                instruction_template=prompt["instruction_template"],
-                formatter=create_example_formatter(prompt["example_format"]),
-            )
-        ]
-        warn_about_examples_placeholder(templates, num_examples, f"{name}.instruction_template")
-        return self.PROMPT_BUILDER_CLASS(templates, num_examples, self._create_example_pool(prompt, num_examples))
+    def _create_prompt_builder(
+        self, prompt: PromptConfig, pool: Optional[ExamplePool]
+    ) -> PromptBuilder[TPromptMessages]:
+        num_examples = prompt.get_num_examples()
+        templates = PromptTemplateCollection.from_fixed_prompt_template(prompt.create_template())
+        templates.validate_for_icl(num_examples, f"{prompt.get_name()}.instruction_template")
+        return PromptBuilder(templates, num_examples, pool, self.create_messages_factory())
 
-    def _create_example_pool(self, prompt: dict, num_examples: int) -> Optional[ExamplePool]:
-        if num_examples <= 0:
+    @abstractmethod
+    def create_messages_factory(self) -> PromptMessagesFactory[TPromptMessages]: ...
+
+    def _create_example_pool(self, prompt: PromptConfig) -> Optional[ExamplePool]:
+        if prompt.get_num_examples() <= 0:
             return None
-        method, model_name = parse_example_selection(prompt)
-        return ExamplePool(self._example_corpus_paths(), ExampleRetrieverFactory.create(method, model_name))
+        return ExamplePool(self._example_corpus_paths(), prompt.create_retriever())
 
     def _example_corpus_paths(self) -> List[Tuple[Path, Path]]:
         return [(self.exp_dir / self.train_src_filename(), self.exp_dir / self.train_trg_filename())]
 
-    @property
-    def infer_prompt_builder(self) -> PromptBuilder:
+    def get_infer_prompt_builder(self) -> PromptBuilder[TPromptMessages]:
         return self._infer_prompt_builder
 
-    def prompt_builders(self) -> List[PromptBuilder]:
-        return [self._infer_prompt_builder]
+    def example_pools(self) -> List[ExamplePool]:
+        return [pool for pool in (self._infer_example_pool,) if pool is not None]
 
     def check_example_corpora(self) -> None:
-        for builder in self.prompt_builders():
-            if builder.pool is not None:
-                builder.pool.ensure_available()
+        for pool in self.example_pools():
+            pool.ensure_available()
+
+    def save_example_index(self, directory: Path) -> None:
+        if self._infer_example_pool is not None:
+            self._infer_example_pool.save_index(directory)
+
+    def load_example_index(self, directory: Path) -> bool:
+        return self._infer_example_pool is not None and self._infer_example_pool.load_index(directory)
+
+    def summarize_example_pool(self) -> Optional[ExamplePoolSummary]:
+        return None if self._infer_example_pool is None else self._infer_example_pool.summarize()
 
     def lang_name(self, iso: str) -> str:
         return self.data["lang_codes"].get(iso, iso)
@@ -296,12 +450,10 @@ class LLMConfig(Config):
     def language(self, iso: str) -> Language:
         return Language(iso=iso, name=self.lang_name(iso))
 
-    @property
-    def train_src_iso(self) -> str:
+    def get_train_src_iso(self) -> str:
         return self.default_test_src_iso or (next(iter(self.src_isos)) if len(self.src_isos) > 0 else "")
 
-    @property
-    def train_trg_iso(self) -> str:
+    def get_train_trg_iso(self) -> str:
         return self.default_test_trg_iso or (next(iter(self.trg_isos)) if len(self.trg_isos) > 0 else "")
 
     def create_tokenizer(self) -> Tokenizer:
@@ -319,18 +471,3 @@ class LLMConfig(Config):
         trg_terms_files: List[Tuple[DataFile, List[str]]],
     ) -> int:
         return 0
-
-
-def resolve_prompt_defaults(prompt: dict, config_class: type) -> None:
-    """The default instruction template depends on num_examples, so a zero-shot prompt has no
-    dangling examples placeholder."""
-    if prompt.get("system_message") is None:
-        prompt["system_message"] = config_class.DEFAULT_SYSTEM_MESSAGE
-    if prompt.get("example_format") is None:
-        prompt["example_format"] = config_class.DEFAULT_EXAMPLE_FORMAT
-    if prompt.get("instruction_template") is None:
-        prompt["instruction_template"] = (
-            config_class.DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE
-            if int(prompt.get("num_examples", 0)) > 0
-            else config_class.DEFAULT_INSTRUCTION_TEMPLATE
-        )
