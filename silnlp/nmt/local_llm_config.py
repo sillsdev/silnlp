@@ -1,0 +1,1143 @@
+"""Fine-tuning and inference for decoder-only LLMs (e.g. TranslateGemma, Hy-MT2).
+
+This module provides a parallel implementation of the :class:`Config`/:class:`NMTModel`
+abstractions for decoder-only causal language models, alongside the existing seq2seq
+(NLLB/MADLAD) implementation in :mod:`silnlp.nmt.seq2seq_config`. It deliberately
+reuses the model-agnostic parts of the pipeline:
+
+* data preparation (``Config.preprocess`` and the corpus writers), by setting
+  ``data.tokenize: false`` so the raw detokenized parallel text is used directly and the
+  model's own tokenizer handles tokenization;
+* evaluation (:mod:`silnlp.nmt.test`) and inference orchestration
+  (:mod:`silnlp.nmt.translate`), which depend only on the :class:`NMTModel` interface.
+
+Training supports full fine-tuning as well as low-rank adapters (LoRA and DoRA) via ``peft``,
+optionally with 4-bit quantization via ``bitsandbytes`` (QLoRA/QDoRA), selected with
+``params.get_finetune_method()``. Adapter hyperparameters live under ``params.adapter``. Prompts are
+built with the model's native chat template from ``train.prompt`` and ``infer.prompt``.
+"""
+
+import logging
+import random
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple, Union
+
+import torch
+from datasets import Dataset
+from jinja2.exceptions import UndefinedError
+from torch.utils.data import Dataset as TorchDataset
+from transformers import (
+    AutoConfig,
+    AutoModelForCausalLM,
+    AutoModelForImageTextToText,
+    AutoTokenizer,
+    EarlyStoppingCallback,
+    HfArgumentParser,
+    PreTrainedModel,
+    PreTrainedTokenizerBase,
+    Trainer,
+    TrainingArguments,
+    set_seed,
+)
+
+from ..common.corpus import split_corpus
+from ..common.environment import SilNlpEnv
+from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
+from ..common.translator import generate_confidence_files
+from ..common.utils import merge_dict
+from .config import (
+    CheckpointType,
+    InferenceModelParams,
+    Language,
+    NMTModel,
+    collect_training_args,
+    find_last_checkpoint,
+    warn_about_renamed_keys,
+    write_effective_config,
+)
+from .corpora import read_parallel_text_pairs
+from .example_retrieval import ExamplePool, ExampleRetrieverFactory
+from .llm_config import (
+    LLMConfig,
+    PromptBuilder,
+    PromptConfig,
+    PromptMessages,
+    PromptMessagesFactory,
+    PromptTemplateCollection,
+)
+from .seq2seq_config import batch_sentences, find_executable_batch_size
+
+LOGGER = logging.getLogger(__name__)
+
+
+class LocalLLMPromptMessages(PromptMessages):
+    """Prompt messages a local model can render through its own tokenizer's chat template."""
+
+    def apply_prompt_template(
+        self, tokenizer: PreTrainedTokenizerBase, add_generation_prompt: bool, tokenize: bool
+    ) -> Union[str, List[int]]:
+        """Apply the model's chat template, with fallbacks for templates that lack a
+        system role and for base checkpoints with no chat template at all."""
+        if tokenizer.chat_template is not None:
+            try:
+                return tokenizer.apply_chat_template(
+                    self.to_chat_messages(),
+                    add_generation_prompt=add_generation_prompt,
+                    tokenize=tokenize,
+                    return_dict=False,
+                )
+            except Exception:
+                # Some chat templates (e.g. Gemma) reject a separate system role; fold the
+                # system message into the first user turn and retry.
+                if self.system_message:
+                    return tokenizer.apply_chat_template(
+                        self.to_folded_chat_messages(),
+                        add_generation_prompt=add_generation_prompt,
+                        tokenize=tokenize,
+                        return_dict=False,
+                    )
+                raise
+
+        LOGGER.warning(
+            "Tokenizer for %s has no chat template; falling back to a plain text prompt.", tokenizer.name_or_path
+        )
+        text = self.to_plain_text()
+        if tokenize:
+            return tokenizer(text, add_special_tokens=True)["input_ids"]
+        return text
+
+
+class LocalLLMPromptMessagesFactory(PromptMessagesFactory[LocalLLMPromptMessages]):
+    def create(self, system_message: str, instruction: str, target: Optional[str]) -> LocalLLMPromptMessages:
+        return LocalLLMPromptMessages(system_message, instruction, target)
+
+
+@dataclass(init=False)
+class TranslateGemmaPromptMessages(LocalLLMPromptMessages):
+    """TranslateGemma is trained with a fixed prompt"""
+
+    source_language: Language
+    target_language: Language
+    text: str
+
+    def __init__(
+        self, source_language: Language, target_language: Language, text: str, target: Optional[str] = None
+    ) -> None:
+        super().__init__(system_message="", instruction="", target=target)
+        self.source_language = source_language
+        self.target_language = target_language
+        self.text = text
+
+    def to_chat_messages(self) -> List[Dict[str, Any]]:
+        messages: List[Dict[str, Any]] = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "source_lang_code": self.source_language.iso,
+                        "target_lang_code": self.target_language.iso,
+                        "text": self.text,
+                    }
+                ],
+            }
+        ]
+        if self.target is not None:
+            messages.append({"role": "assistant", "content": self.target})
+        return messages
+
+    def to_folded_chat_messages(self) -> List[Dict[str, str]]:
+        raise NotImplementedError("TranslateGemma's structured content is never folded.")
+
+    def to_plain_text(self) -> str:
+        raise NotImplementedError("TranslateGemma always has a chat template; there is no plain-text fallback.")
+
+    def apply_prompt_template(
+        self, tokenizer: PreTrainedTokenizerBase, add_generation_prompt: bool, tokenize: bool
+    ) -> Union[str, List[int]]:
+        if tokenizer.chat_template is not None:
+            try:
+                return tokenizer.apply_chat_template(
+                    self.to_chat_messages(),
+                    add_generation_prompt=add_generation_prompt,
+                    tokenize=tokenize,
+                    return_dict=False,
+                )
+            except UndefinedError:
+                # TranslateGemma's template only recognizes its fixed ~55-language lookup table
+                # and raises UndefinedError for any other code
+                text = self._render_fallback_prompt(tokenizer, add_generation_prompt)
+                if tokenize:
+                    return tokenizer(text, add_special_tokens=False)["input_ids"]
+                return text
+
+        LOGGER.warning(
+            "Tokenizer for %s has no chat template; falling back to a plain text prompt.", tokenizer.name_or_path
+        )
+        text = self._render_fallback_prompt(tokenizer, add_generation_prompt)
+        if tokenize:
+            return tokenizer(text, add_special_tokens=False)["input_ids"]
+        return text
+
+    def _render_fallback_prompt(self, tokenizer: PreTrainedTokenizerBase, add_generation_prompt: bool) -> str:
+        """Reimplementation of TranslateGemma's chat template, minus its language-code lookup
+        table, for language codes that table doesn't recognize (see apply_prompt_template)."""
+        src, trg = self.source_language, self.target_language
+        instruction = (
+            f"You are a professional {src.name} ({src.iso}) to {trg.name} ({trg.iso}) translator. Your goal is "
+            f"to accurately convey the meaning and nuances of the original {src.name} text while adhering to "
+            f"{trg.name} grammar, vocabulary, and cultural sensitivities.\n"
+            f"Produce only the {trg.name} translation, without any additional explanations or commentary. "
+            f"Please translate the following {src.name} text into {trg.name}:\n\n\n{self.text.strip()}"
+        )
+        text = (tokenizer.bos_token or "") + f"<start_of_turn>user\n{instruction}<end_of_turn>\n"
+        if self.target is not None:
+            text += f"<start_of_turn>model\n{self.target.strip()}<end_of_turn>\n"
+        if add_generation_prompt:
+            text += "<start_of_turn>model\n"
+        return text
+
+
+class LocalLLMConfig(LLMConfig[LocalLLMPromptMessages]):
+
+    # Config keys renamed in transformers 5.0, can remove after users have gotten used to the transition
+    _RENAMED_CONFIG_KEYS = {
+        "train": {"group_by_length": "train_sampling_strategy"},
+        "params": {"warmup_ratio": "warmup_steps"},
+    }
+
+    _FULL_FINETUNE_METHOD = "full"
+    _ADAPTER_METHODS = ("lora", "qlora", "dora", "qdora")
+    _QUANTIZED_METHODS = ("qlora", "qdora")
+    _DORA_METHODS = ("dora", "qdora")
+    _VALID_FINETUNE_METHODS = (_FULL_FINETUNE_METHOD,) + _ADAPTER_METHODS
+
+    _PROMPT_TYPE_FIXED = "fixed"
+    _PROMPT_TYPE_ROTATING = "rotating"
+    _VALID_PROMPT_TYPES = (_PROMPT_TYPE_FIXED, _PROMPT_TYPE_ROTATING)
+
+    # Only meaningful for a fixed prompt; a rotating one takes them from its template file.
+    _FIXED_ONLY_PROMPT_KEYS = ("system_message", "instruction_template", "example_format")
+
+    # These build the prompt from their own chat template, so a configured one cannot be used.
+    _FIXED_PROMPT_MODEL_PREFIXES = ("google/translate-gemma", "google/translategemma")
+
+    def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
+        self._normalize_deprecated_keys(config)
+        self._hf_tokenizer: Optional[PreTrainedTokenizerBase] = None
+
+        super().__init__(exp_dir, config, environment)
+
+        self._train_example_pool = self._create_example_pool(PromptConfig(self.train["prompt"], "train.prompt"))
+        self._train_prompt_builder = self._create_train_prompt_builder()
+        self._disable_eval_if_no_val_split()
+
+    def _default_config(self, exp_dir: Path) -> dict:
+        return merge_dict(
+            super()._default_config(exp_dir),
+            {
+                "train": {
+                    "gradient_checkpointing": True,
+                    "gradient_checkpointing_kwargs": {"use_reentrant": False},
+                    "save_steps": 1000,
+                    "per_device_train_batch_size": 4,
+                    "save_strategy": "steps",
+                    "save_total_limit": 2,
+                    "gradient_accumulation_steps": 8,
+                    "auto_grad_acc": False,
+                    "max_steps": 5000,
+                    "train_sampling_strategy": "group_by_length",
+                    "output_dir": str(exp_dir / "run"),
+                    "log_level": "info",
+                    # None means "unset"; resolve_prompt_defaults() fills these in.
+                    "prompt": {
+                        "type": self._PROMPT_TYPE_FIXED,
+                        "system_message": None,
+                        "instruction_template": None,
+                        "example_format": None,
+                        "num_examples": 0,
+                        "example_selection": {"method": ExampleRetrieverFactory.DEFAULT_METHOD, "model": None},
+                        "template_file": None,
+                    },
+                    "instruction_data": {
+                        # Each name must have a matching <name>.jsonl under <mt_dir>/instructions
+                        # (see scripts/prepare_instruction_data.py).
+                        "datasets": [],
+                        "size": 100000,
+                        "mix_ratio": 0.1,
+                    },
+                },
+                "eval": {
+                    "eval_strategy": "steps",
+                    "eval_steps": 1000,
+                    "early_stopping": None,
+                    "load_best_model_at_end": True,
+                    "metric_for_best_model": "eval_loss",
+                    "greater_is_better": False,
+                    "per_device_eval_batch_size": 4,
+                    "multi_ref_eval": False,
+                },
+                "infer": {
+                    "infer_batch_size": 8,
+                    "max_new_tokens": 256,
+                    "num_beams": 1,
+                    "num_drafts": 1,
+                    "do_sample": False,
+                    "temperature": 0.7,
+                },
+                "params": {
+                    "finetune_method": "qlora",  # full | lora | qlora | dora | qdora
+                    "torch_dtype": "bfloat16",
+                    "attn_implementation": "sdpa",
+                    "trust_remote_code": False,
+                    "max_seq_length": 1024,
+                    "optim": "adamw_torch",
+                    "learning_rate": 0.0002,
+                    "lr_scheduler_type": "cosine",
+                    "warmup_steps": 150,
+                    "adapter": {
+                        "rank": 16,
+                        "alpha": 32,
+                        "dropout": 0.05,
+                        "target_modules": "all-linear",
+                        "modules_to_save": None,
+                    },
+                },
+                "model": "google/gemma-2-2b-it",
+            },
+        )
+
+    def _create_prompt_builder(
+        self, prompt: PromptConfig, pool: Optional[ExamplePool]
+    ) -> PromptBuilder[LocalLLMPromptMessages]:
+        self._reject_examples_for_translate_gemma(prompt.get_num_examples(), prompt.get_name())
+        return super()._create_prompt_builder(prompt, pool)
+
+    def _create_train_prompt_builder(self) -> PromptBuilder[LocalLLMPromptMessages]:
+        prompt = PromptConfig(self.train["prompt"], "train.prompt")
+        prompt_type = str(prompt.get_setting("type")).lower()
+        if prompt_type not in self._VALID_PROMPT_TYPES:
+            raise ValueError(
+                f"Unknown train.prompt.type '{prompt.get_setting('type')}'. "
+                f"Valid options: {', '.join(self._VALID_PROMPT_TYPES)}."
+            )
+
+        if prompt_type == self._PROMPT_TYPE_FIXED:
+            if not prompt.is_unset("template_file"):
+                raise ValueError('train.prompt.template_file is only valid with train.prompt.type: "rotating".')
+            prompt.resolve_defaults(self.prompt_defaults())
+            return self._create_prompt_builder(prompt, self._train_example_pool)
+
+        set_keys = [key for key in self._FIXED_ONLY_PROMPT_KEYS if not prompt.is_unset(key)]
+        if set_keys:
+            raise ValueError(
+                f"train.prompt.{', train.prompt.'.join(set_keys)} "
+                f'{"are" if len(set_keys) > 1 else "is"} only valid with train.prompt.type: "fixed"; '
+                "a rotating prompt takes them from its template file."
+            )
+        if prompt.is_unset("template_file"):
+            raise ValueError('train.prompt.type: "rotating" requires train.prompt.template_file.')
+
+        template_file = prompt.get_setting("template_file")
+        num_examples = prompt.get_num_examples()
+        self._reject_examples_for_translate_gemma(num_examples, prompt.get_name())
+        templates = PromptTemplateCollection.from_file(self._resolve_template_file(template_file))
+        templates.validate_for_icl(num_examples, f"{template_file} instruction_template")
+        return PromptBuilder(templates, num_examples, self._train_example_pool, self.create_messages_factory())
+
+    def create_messages_factory(self) -> PromptMessagesFactory[LocalLLMPromptMessages]:
+        return LocalLLMPromptMessagesFactory()
+
+    def _resolve_template_file(self, template_file: str) -> Path:
+        """Resolve against the experiment directory first, so an experiment can ship its own
+        templates, then against the MT directory, so several can share one file."""
+        for candidate in (self.exp_dir / template_file, self._environment.mt_dir / template_file):
+            if candidate.is_file():
+                return candidate
+        return Path(template_file)
+
+    def has_fixed_prompt(self) -> bool:
+        return self.model.lower().startswith(self._FIXED_PROMPT_MODEL_PREFIXES)
+
+    def _reject_examples_for_translate_gemma(self, num_examples: int, name: str) -> None:
+        if num_examples > 0 and self.has_fixed_prompt():
+            raise RuntimeError(
+                "TranslateGemma models do not support few-shot examples in the prompt. "
+                f"Set {name}.num_examples to 0 or use a different model."
+            )
+
+    def _normalize_deprecated_keys(self, config: dict) -> None:
+        # ``params.lora`` was renamed to ``params.adapter`` when DoRA was added, since the same
+        # hyperparameters now back both LoRA and DoRA. Accept the old key for backward compatibility.
+        params = config.get("params")
+        if isinstance(params, dict) and "lora" in params and "adapter" not in params:
+            LOGGER.warning("params.lora is deprecated; rename it to params.adapter.")
+            params["adapter"] = params.pop("lora")
+        warn_about_renamed_keys(config, LocalLLMConfig._RENAMED_CONFIG_KEYS)
+
+    def get_finetune_method(self) -> str:
+        method = self.params["finetune_method"].lower()
+        if method not in self._VALID_FINETUNE_METHODS:
+            raise ValueError(
+                f"Unknown finetune_method '{method}'. Valid options: {', '.join(self._VALID_FINETUNE_METHODS)}."
+            )
+        return method
+
+    def uses_full_finetune(self) -> bool:
+        return self.get_finetune_method() == self._FULL_FINETUNE_METHOD
+
+    def uses_quantization(self) -> bool:
+        return self.get_finetune_method() in self._QUANTIZED_METHODS
+
+    def uses_dora(self) -> bool:
+        return self.get_finetune_method() in self._DORA_METHODS
+
+    def get_adapter(self) -> dict:
+        return self.params["adapter"]
+
+    def get_instruction_datasets(self) -> List[str]:
+        return list(self.train["instruction_data"]["datasets"])
+
+    def get_instruction_data_size(self) -> int:
+        size = int(self.train["instruction_data"]["size"])
+        if size < 0:
+            raise ValueError(f"train.instruction_data.size must be non-negative, got {size}.")
+        return size
+
+    def get_instruction_mix_ratio(self) -> float:
+        ratio = float(self.train["instruction_data"]["mix_ratio"])
+        if ratio < 0:
+            raise ValueError(f"train.instruction_data.mix_ratio must be non-negative, got {ratio}.")
+        return ratio
+
+    def instruction_data_paths(self) -> List[Path]:
+        """Resolves each dataset name to its JSONL file under <mt_dir>/instructions -- kept separate from
+        src_file_paths/trg_file_paths so it never merges into the translation corpora."""
+        datasets = self.get_instruction_datasets()
+        if not datasets:
+            return []
+        instructions_dir = self._environment.mt_dir / "instructions"
+        return [instructions_dir / f"{name}.jsonl" for name in datasets]
+
+    def _count_nonblank_lines(self, path: Path) -> int:
+        with path.open("r", encoding="utf-8") as f:
+            return sum(1 for line in f if line.strip())
+
+    def _write_instruction_data(self) -> int:
+        dataset_paths = self.instruction_data_paths()
+        if not dataset_paths:
+            return 0
+
+        base_share, remainder = divmod(self.get_instruction_data_size(), len(dataset_paths))
+
+        count = 0
+        with self._open_append(self.instruction_jsonl_filename()) as out_file:
+            for i, dataset_path in enumerate(dataset_paths):
+                if not dataset_path.is_file():
+                    raise RuntimeError(
+                        f"Instruction data file {dataset_path} does not exist. Run "
+                        "scripts/prepare_instruction_data.py to generate it."
+                    )
+                # Datasets mix evenly regardless of their original relative sizes; a dataset
+                # smaller than its even share is used in full, without repetition (see split_corpus).
+                share = base_share + (1 if i < remainder else 0)
+                corpus_size = self._count_nonblank_lines(dataset_path)
+                selected_indices = split_corpus(corpus_size, share)
+
+                index = 0
+                with dataset_path.open("r", encoding="utf-8") as in_file:
+                    for raw_line in in_file:
+                        line = raw_line.strip()
+                        if not line:
+                            continue
+                        if selected_indices is None or index in selected_indices:
+                            out_file.write(line + "\n")
+                            count += 1
+                        index += 1
+
+        LOGGER.info(f"instruction data size: {count}")
+        return count
+
+    def create_model(
+        self,
+        mixed_precision: bool = True,
+        num_devices: int = 1,
+        clearml_queue: Optional[str] = None,
+        pretrained_model_provider_factory: Optional["CausalLMProviderFactory"] = None,
+    ) -> NMTModel:
+        if pretrained_model_provider_factory is None:
+            pretrained_model_provider_factory = FileCausalLMProviderFactory()
+        return LocalLLMModel(self, mixed_precision, num_devices, clearml_queue, pretrained_model_provider_factory)
+
+    def build_generation_kwargs(self, num_return_sequences: int, pad_token_id: Optional[int]) -> Dict[str, Any]:
+        infer = self.infer
+        gen_kwargs: Dict[str, Any] = {
+            "max_new_tokens": infer["max_new_tokens"],
+            "num_return_sequences": num_return_sequences,
+            "pad_token_id": pad_token_id,
+        }
+        if infer.get("do_sample"):
+            gen_kwargs["do_sample"] = True
+            gen_kwargs["temperature"] = infer["temperature"]
+        else:
+            num_beams: int = infer["num_beams"]
+            if num_return_sequences > num_beams:
+                raise RuntimeError(
+                    f"Beam search cannot return {num_return_sequences} drafts with num_beams set to {num_beams}. "
+                    "Increase num_beams to at least num_drafts or set do_sample to true."
+                )
+            gen_kwargs["num_beams"] = num_beams
+        return gen_kwargs
+
+    def get_hf_tokenizer(self) -> PreTrainedTokenizerBase:
+        if self._hf_tokenizer is None:
+            tokenizer = AutoTokenizer.from_pretrained(self.model, trust_remote_code=self.params["trust_remote_code"])
+            if tokenizer.pad_token_id is None:
+                tokenizer.pad_token = tokenizer.eos_token
+            self._hf_tokenizer = tokenizer
+        return self._hf_tokenizer
+
+    def example_pools(self) -> List[ExamplePool]:
+        if self._train_example_pool is None:
+            return super().example_pools()
+        return [*super().example_pools(), self._train_example_pool]
+
+    def build_prompt_messages(
+        self,
+        source: str,
+        src_lang: Language,
+        trg_lang: Language,
+        target: Optional[str] = None,
+        example_pool_index: Optional[int] = None,
+        rotation_index: Optional[int] = None,
+        training: bool = False,
+    ) -> LocalLLMPromptMessages:
+        if self.has_fixed_prompt():
+            return TranslateGemmaPromptMessages(
+                source_language=src_lang, target_language=trg_lang, text=source, target=target
+            )
+        builder = self._train_prompt_builder if training else self._infer_prompt_builder
+        return builder.build(source, src_lang, trg_lang, target, example_pool_index, rotation_index)
+
+
+@dataclass
+class CausalLMProvider:
+    """Loads the underlying causal LM for training and inference. Indirected so tests can
+    substitute a mock provider (mirrors PreTrainedModelProvider in seq2seq_config.py)."""
+
+    config: "LocalLLMConfig"
+    mixed_precision: bool
+
+    def _dtype(self) -> Any:
+        if not self.mixed_precision:
+            return "auto"
+        return getattr(torch, self.config.params["torch_dtype"], torch.bfloat16)
+
+    def _is_image_text_to_text_model(self, model_name_or_path: str) -> bool:
+        config = AutoConfig.from_pretrained(
+            model_name_or_path, trust_remote_code=self.config.params["trust_remote_code"]
+        )
+        return type(config) in AutoModelForImageTextToText._model_mapping
+
+    def _determine_auto_model_class(self, model_name_or_path: str) -> type:
+        if self._is_image_text_to_text_model(model_name_or_path):
+            return AutoModelForImageTextToText
+        return AutoModelForCausalLM
+
+    def _set_use_cache(self, model: PreTrainedModel, use_cache: bool) -> None:
+        # Composite configs (e.g. Gemma3's image-text-to-text wrapper) only expose use_cache on
+        # the nested text_config, not on the top-level config, so passing use_cache directly to
+        # from_pretrained() leaves it unconsumed there and it gets forwarded as an invalid
+        # constructor kwarg to models whose __init__ takes only `config`.
+        if hasattr(model.config, "use_cache"):
+            model.config.use_cache = use_cache
+        text_config = getattr(model.config, "text_config", None)
+        if text_config is not None and hasattr(text_config, "use_cache"):
+            text_config.use_cache = use_cache
+
+    def create_model_for_training(self) -> PreTrainedModel:
+        params = self.config.params
+        quantization_config = None
+        device_map = None
+        if self.config.uses_quantization():
+            from transformers import BitsAndBytesConfig
+
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=self._dtype(),
+                bnb_4bit_use_double_quant=True,
+            )
+            device_map = {"": 0}
+        model_class = self._determine_auto_model_class(self.config.model)
+        model = model_class.from_pretrained(
+            self.config.model,
+            quantization_config=quantization_config,
+            torch_dtype=self._dtype(),
+            attn_implementation=params["attn_implementation"],
+            trust_remote_code=params["trust_remote_code"],
+            device_map=device_map,
+        )
+        self._set_use_cache(model, not self.config.train["gradient_checkpointing"])
+        return model
+
+    def create_model_for_inference(self, checkpoint_path: Optional[Path]) -> PreTrainedModel:
+        params = self.config.params
+        load_kwargs = dict(
+            torch_dtype=self._dtype(),
+            attn_implementation=params["attn_implementation"],
+            trust_remote_code=params["trust_remote_code"],
+        )
+        if checkpoint_path is None:
+            model_class = self._determine_auto_model_class(self.config.model)
+            return model_class.from_pretrained(self.config.model, **load_kwargs)
+
+        if (checkpoint_path / "adapter_config.json").is_file():
+            from peft import PeftModel
+
+            model_class = self._determine_auto_model_class(self.config.model)
+            base_model = model_class.from_pretrained(self.config.model, **load_kwargs)
+            base_dtype = next(base_model.parameters()).dtype
+            model = PeftModel.from_pretrained(base_model, str(checkpoint_path))
+            merged = model.merge_and_unload()
+            return merged.to(base_dtype)
+        model_class = self._determine_auto_model_class(str(checkpoint_path))
+        return model_class.from_pretrained(str(checkpoint_path), **load_kwargs)
+
+
+class CausalLMProviderFactory:
+    def create(self, config: "LocalLLMConfig", mixed_precision: bool) -> CausalLMProvider:
+        raise NotImplementedError
+
+
+class FileCausalLMProviderFactory(CausalLMProviderFactory):
+    def create(self, config: "LocalLLMConfig", mixed_precision: bool) -> CausalLMProvider:
+        return CausalLMProvider(config, mixed_precision)
+
+
+@dataclass
+class DataCollatorForCausalLM:
+    _IGNORED_LABEL_ID = -100
+
+    tokenizer: PreTrainedTokenizerBase
+    label_pad_token_id: int = _IGNORED_LABEL_ID
+    pad_to_multiple_of: Optional[int] = None
+
+    def __call__(self, features: List[Dict[str, List[int]]]) -> Dict[str, torch.Tensor]:
+        max_length = max(len(f["input_ids"]) for f in features)
+        if self.pad_to_multiple_of is not None:
+            max_length = (
+                (max_length + self.pad_to_multiple_of - 1) // self.pad_to_multiple_of
+            ) * self.pad_to_multiple_of
+
+        pad_token_id = self.tokenizer.pad_token_id
+        input_ids: List[List[int]] = []
+        attention_mask: List[List[int]] = []
+        labels: List[List[int]] = []
+        for feature in features:
+            ids = feature["input_ids"]
+            mask = feature.get("attention_mask", [1] * len(ids))
+            label = feature["labels"]
+            pad_len = max_length - len(ids)
+            # Right padding for training.
+            input_ids.append(ids + [pad_token_id] * pad_len)
+            attention_mask.append(mask + [0] * pad_len)
+            labels.append(label + [self.label_pad_token_id] * pad_len)
+        return {
+            "input_ids": torch.tensor(input_ids, dtype=torch.long),
+            "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
+            "labels": torch.tensor(labels, dtype=torch.long),
+        }
+
+    def mask_ignored_ids(self, prompt_ids: List[int], completion_ids: List[int]) -> List[int]:
+        return [self._IGNORED_LABEL_ID] * len(prompt_ids) + completion_ids
+
+
+class InterleavedTrainDataset(TorchDataset):
+    """Combines two datasets of different lengths into one, reshuffling each whenever it's exhausted."""
+
+    def __init__(
+        self,
+        translation_dataset: Dataset,
+        instruction_dataset: Dataset,
+        translation_count: int,
+        instruction_count: int,
+        seed: Optional[int] = None,
+    ) -> None:
+        self._translation_dataset = translation_dataset
+        self._instruction_dataset = instruction_dataset
+        self._translation_count = translation_count
+        self._instruction_count = instruction_count
+        self._seed = random.randrange(2**31) if seed is None else seed
+        self._lap_cache: Dict[Tuple[int, int], List[int]] = {}
+
+    def __len__(self) -> int:
+        return self._translation_count + self._instruction_count
+
+    def __getitem__(self, index: int) -> dict:
+        if index < 0 or index >= len(self):
+            raise IndexError(index)
+        if index < self._translation_count:
+            return self._lap_item(self._translation_dataset, salt=0, index=index)
+        return self._lap_item(self._instruction_dataset, salt=1, index=index - self._translation_count)
+
+    def _lap_item(self, dataset: Dataset, salt: int, index: int) -> dict:
+        pool_size = len(dataset)
+        lap, position = divmod(index, pool_size)
+        return dataset[self._lap_permutation(pool_size, salt, lap)[position]]
+
+    def _lap_permutation(self, pool_size: int, salt: int, lap: int) -> List[int]:
+        key = (salt, lap)
+        permutation = self._lap_cache.get(key)
+        if permutation is None:
+            rng = random.Random(self._seed + salt * 2_147_483_647 + lap * 999_999_937)
+            permutation = list(range(pool_size))
+            rng.shuffle(permutation)
+            self._lap_cache[key] = permutation
+        return permutation
+
+
+class SilCausalTrainer(Trainer):
+    def __init__(self, *args, auto_grad_acc: bool = False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._auto_grad_acc = auto_grad_acc
+
+    def _inner_training_loop(
+        self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
+    ):
+        if self._auto_grad_acc and args is not None:
+            args.auto_find_batch_size = True
+            inner_training_loop = find_executable_batch_size(super()._inner_training_loop, batch_size, self.accelerator)
+            return inner_training_loop(
+                args=args,
+                resume_from_checkpoint=resume_from_checkpoint,
+                trial=trial,
+                ignore_keys_for_eval=ignore_keys_for_eval,
+            )
+        return super()._inner_training_loop(
+            batch_size=batch_size,
+            args=args,
+            resume_from_checkpoint=resume_from_checkpoint,
+            trial=trial,
+            ignore_keys_for_eval=ignore_keys_for_eval,
+        )
+
+
+class LocalLLMModel(NMTModel):
+    # Mirrors TRAINING_ARGS_CONFIG_MAPPING in seq2seq_config.py but without the seq2seq-only
+    # generation keys (generation_max_length, generation_num_beams, predict_with_generate).
+    _TRAINING_ARGS_CONFIG_MAPPING = {
+        "train": {
+            "gradient_accumulation_steps",
+            "gradient_checkpointing",
+            "gradient_checkpointing_kwargs",
+            "log_level",
+            "logging_first_step",
+            "logging_steps",
+            "logging_strategy",
+            "max_steps",
+            "num_train_epochs",
+            "output_dir",
+            "per_device_train_batch_size",
+            "save_steps",
+            "save_strategy",
+            "save_total_limit",
+            "train_sampling_strategy",
+        },
+        "eval": {
+            "eval_accumulation_steps",
+            "eval_delay",
+            "eval_steps",
+            "eval_strategy",
+            "greater_is_better",
+            "load_best_model_at_end",
+            "metric_for_best_model",
+            "per_device_eval_batch_size",
+        },
+        "params": {
+            "adam_beta1",
+            "adam_beta2",
+            "adam_epsilon",
+            "learning_rate",
+            "lr_scheduler_type",
+            "max_grad_norm",
+            "optim",
+            "warmup_steps",
+            "weight_decay",
+        },
+    }
+
+    def __init__(
+        self,
+        config: LocalLLMConfig,
+        mixed_precision: bool,
+        num_devices: int,
+        clearml_queue: Optional[str] = None,
+        pretrained_model_provider_factory: CausalLMProviderFactory = FileCausalLMProviderFactory(),
+    ) -> None:
+        super().__init__(config)
+        self._config: LocalLLMConfig = config
+        self._mixed_precision = mixed_precision
+        self._num_devices = num_devices
+        self._clearml_queue = clearml_queue
+        set_seed(self._config.data["seed"])
+        self._provider = pretrained_model_provider_factory.create(config, mixed_precision)
+
+    # --- training -----------------------------------------------------------------
+
+    def _render_turns(
+        self, tokenizer: PreTrainedTokenizerBase, turns: List[Dict[str, str]], add_generation_prompt: bool
+    ) -> List[int]:
+        """Render turns through the tokenizer's chat template, the same way a live conversation is tokenized."""
+        try:
+            return tokenizer.apply_chat_template(
+                turns, add_generation_prompt=add_generation_prompt, tokenize=True, return_dict=False
+            )
+        except Exception:
+            # Some chat templates (e.g. Gemma) reject a separate system role; fold it into the first user turn and retry.
+            if turns and turns[0]["role"] == "system" and len(turns) > 1:
+                folded = [{"role": "user", "content": f"{turns[0]['content']}\n\n{turns[1]['content']}"}] + list(
+                    turns[2:]
+                )
+                return tokenizer.apply_chat_template(
+                    folded, add_generation_prompt=add_generation_prompt, tokenize=True, return_dict=False
+                )
+            raise
+
+    def train(self) -> None:
+        self._config.check_example_corpora()
+        training_args = self._create_training_arguments()
+        tokenizer = self._config.get_hf_tokenizer()
+        tokenizer.padding_side = "right"
+
+        model = self._provider.create_model_for_training()
+        model = self._apply_finetuning_config(model)
+
+        max_seq_length: int = self._config.params["max_seq_length"]
+        src_lang = self._config.language(self._config.get_train_src_iso())
+        trg_lang = self._config.language(self._config.get_train_trg_iso())
+        eos_token_id = tokenizer.eos_token_id
+
+        data_collator = DataCollatorForCausalLM(
+            tokenizer, pad_to_multiple_of=8 if (training_args.fp16 or training_args.bf16) else None
+        )
+
+        def encode_completion(prompt_ids: List[int], target: str) -> dict:
+            completion_ids = tokenizer(target, add_special_tokens=False)["input_ids"] + [eos_token_id]
+            input_ids = (prompt_ids + completion_ids)[:max_seq_length]
+            labels = data_collator.mask_ignored_ids(prompt_ids, completion_ids)[:max_seq_length]
+            return {"input_ids": input_ids, "labels": labels, "attention_mask": [1] * len(input_ids)}
+
+        def encode(example: dict, idx: int) -> dict:
+            # idx locates this row in the example pool (same corpus, same order) for leave-one-out.
+            prompt = self._config.build_prompt_messages(
+                example["src"], src_lang, trg_lang, example_pool_index=idx, training=True
+            )
+            prompt_ids = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=True)
+            return encode_completion(prompt_ids, example["trg"])
+
+        def encode_eval(example: dict, idx: int) -> dict:
+            # Eval rows aren't in the example pool, so idx only rotates the prompt template here,
+            # where in encode() above it also drives leave-one-out.
+            prompt = self._config.build_prompt_messages(
+                example["src"], src_lang, trg_lang, rotation_index=idx, training=True
+            )
+            prompt_ids = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=True)
+            return encode_completion(prompt_ids, example["trg"])
+
+        def encode_instruction(example: dict) -> dict:
+            prompt_ids = self._render_turns(tokenizer, list(example["turns"]), add_generation_prompt=True)
+            return encode_completion(prompt_ids, example["output"])
+
+        train_dataset = self._load_text_dataset(
+            self._config.exp_dir / self._config.train_src_filename(),
+            self._config.exp_dir / self._config.train_trg_filename(),
+        )
+        eval_dataset = self._load_text_dataset(
+            self._config.exp_dir / self._config.val_src_filename(),
+            self._config.exp_dir / self._config.val_trg_filename(),
+        )
+        if train_dataset is not None:
+            train_dataset = train_dataset.map(encode, with_indices=True, remove_columns=train_dataset.column_names)
+        if eval_dataset is not None:
+            eval_dataset = eval_dataset.map(encode_eval, with_indices=True, remove_columns=eval_dataset.column_names)
+
+        # Instruction data is mixed into training only
+        instruction_dataset = self._load_instruction_dataset(
+            self._config.exp_dir / self._config.instruction_jsonl_filename()
+        )
+        mix_ratio = self._config.get_instruction_mix_ratio()
+        if instruction_dataset is not None and train_dataset is not None and mix_ratio > 0:
+            instruction_dataset = instruction_dataset.map(
+                encode_instruction, remove_columns=instruction_dataset.column_names
+            )
+            total_length = self._estimate_total_train_examples(training_args, len(train_dataset))
+            translation_count = round(total_length / (1 + mix_ratio))
+            instruction_count = total_length - translation_count
+            train_dataset = InterleavedTrainDataset(
+                train_dataset, instruction_dataset, translation_count, instruction_count, seed=self._config.data["seed"]
+            )
+
+        trainer = SilCausalTrainer(
+            model=model,
+            args=training_args,
+            data_collator=data_collator,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            processing_class=tokenizer,
+            auto_grad_acc=self._config.train.get("auto_grad_acc", False),
+        )
+        early_stopping: Optional[dict] = self._config.eval["early_stopping"]
+        if early_stopping:
+            trainer.add_callback(
+                EarlyStoppingCallback(
+                    early_stopping_patience=early_stopping["steps"],
+                    early_stopping_threshold=early_stopping["min_improvement"],
+                )
+            )
+
+        last_checkpoint = find_last_checkpoint(Path(training_args.output_dir))
+        train_result = trainer.train(resume_from_checkpoint=str(last_checkpoint) if last_checkpoint else None)
+
+        metrics = train_result.metrics
+        metrics["train_samples"] = len(train_dataset) if train_dataset is not None else 0
+        trainer.log_metrics("train", metrics)
+        trainer.save_metrics("train", metrics)
+        trainer.save_state()
+
+    def _apply_finetuning_config(self, model: PreTrainedModel) -> PreTrainedModel:
+        if self._config.uses_full_finetune():
+            return model
+
+        from peft import get_peft_model, prepare_model_for_kbit_training
+
+        gradient_checkpointing = self._config.train["gradient_checkpointing"]
+        if self._config.uses_quantization():
+            model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=gradient_checkpointing)
+        elif gradient_checkpointing:
+            model.enable_input_require_grads()
+
+        peft_config = self._build_adapter_config(self._config.get_adapter(), use_dora=self._config.uses_dora())
+        model = get_peft_model(model, peft_config)
+        model.print_trainable_parameters()
+        return model
+
+    def _build_adapter_config(self, adapter: dict, use_dora: bool) -> Any:
+        from peft import LoraConfig, TaskType
+
+        return LoraConfig(
+            r=adapter["rank"],
+            lora_alpha=adapter["alpha"],
+            lora_dropout=adapter["dropout"],
+            target_modules=adapter["target_modules"],
+            modules_to_save=adapter.get("modules_to_save"),
+            use_dora=use_dora,
+            bias="none",
+            task_type=TaskType.CAUSAL_LM,
+        )
+
+    def _estimate_total_train_examples(self, training_args: TrainingArguments, translation_size: int) -> int:
+        """Estimate the total number of training examples the run will consume."""
+        num_devices = max(1, self._num_devices)
+        effective_batch_size = (
+            training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps * num_devices
+        )
+        if training_args.max_steps and training_args.max_steps > 0:
+            return training_args.max_steps * effective_batch_size
+        return round(training_args.num_train_epochs * translation_size)
+
+    def _load_text_dataset(self, src_path: Path, trg_path: Path) -> Optional[Dataset]:
+        pairs = read_parallel_text_pairs(src_path, trg_path)
+        if pairs is None:
+            return None
+        sources, targets = pairs
+        return Dataset.from_dict({"src": sources, "trg": targets})
+
+    def _load_instruction_dataset(self, path: Path) -> Optional[Dataset]:
+        if not path.is_file() or path.stat().st_size == 0:
+            return None
+        return Dataset.from_json(str(path))
+
+    def _create_training_arguments(self) -> TrainingArguments:
+        dtype = self._config.params["torch_dtype"]
+        args = collect_training_args(
+            self._config.root,
+            self._TRAINING_ARGS_CONFIG_MAPPING,
+            {
+                "bf16": self._mixed_precision and dtype == "bfloat16",
+                "fp16": self._mixed_precision and dtype == "float16",
+            },
+            self._clearml_queue,
+        )
+        return HfArgumentParser(TrainingArguments).parse_dict(args)[0]
+
+    def save_effective_config(self, path: Path) -> None:
+        write_effective_config(
+            path, self._config.root, self._create_training_arguments(), self._TRAINING_ARGS_CONFIG_MAPPING
+        )
+
+    # --- inference ----------------------------------------------------------------
+
+    def _create_inference_model(self, ckpt: Union[CheckpointType, str, int]) -> PreTrainedModel:
+        if self._config.model_dir.exists():
+            checkpoint_path, _ = self.get_checkpoint_path(ckpt)
+        else:
+            LOGGER.warning("Model has no checkpoints. Using base model.")
+            checkpoint_path = None
+        model = self._provider.create_model_for_inference(checkpoint_path)
+        if torch.cuda.is_available():
+            model = model.to("cuda")
+        model.eval()
+        return model
+
+    def load_for_inference(
+        self, ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST
+    ) -> Tuple[PreTrainedModel, PreTrainedTokenizerBase]:
+        """Loads the model and tokenizer for a checkpoint without any translation-specific prompt building."""
+        return self._create_inference_model(ckpt), self._config.get_hf_tokenizer()
+
+    def _get_inference_model(
+        self, ckpt: Union[CheckpointType, str, int], src_lang: str, trg_lang: str
+    ) -> PreTrainedModel:
+        params = InferenceModelParams(ckpt, src_lang, trg_lang)
+        if self._inference_model_params == params and self._cached_inference_model is not None:
+            return self._cached_inference_model
+        model = self._create_inference_model(ckpt)
+        self._cached_inference_model = model
+        self._inference_model_params = params
+        return model
+
+    def translate(
+        self,
+        sentences: Iterable[str],
+        src_iso: str,
+        trg_iso: str,
+        produce_multiple_translations: bool = False,
+        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
+    ) -> Generator[SentenceTranslationGroup, None, None]:
+        self._config.check_example_corpora()
+        src_lang = self._config.language(src_iso)
+        trg_lang = self._config.language(trg_iso)
+        model = self._get_inference_model(ckpt, src_lang.name, trg_lang.name)
+        tokenizer = self._config.get_hf_tokenizer()
+        yield from self._generate(model, tokenizer, sentences, src_lang, trg_lang, produce_multiple_translations, False)
+
+    def translate_test_files(
+        self,
+        input_paths: List[Path],
+        translation_paths: List[Path],
+        produce_multiple_translations: bool = False,
+        save_confidences: bool = False,
+        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
+    ) -> None:
+        self._config.check_example_corpora()
+        tokenizer = self._config.get_hf_tokenizer()
+        src_iso = self._config.get_train_src_iso()
+        trg_iso = self._config.get_train_trg_iso()
+        src_lang = self._config.language(src_iso)
+        trg_lang = self._config.language(trg_iso)
+        model = self._get_inference_model(ckpt, src_lang.name, trg_lang.name)
+
+        for input_path, translation_path in zip(input_paths, translation_paths):
+            file_src_iso, file_trg_iso = self._isos_for_test_file(input_path, src_iso, trg_iso)
+            file_src_lang = self._config.language(file_src_iso)
+            file_trg_lang = self._config.language(file_trg_iso)
+            with open(input_path, "r", encoding="utf-8-sig") as src_file:
+                sentences = [line.strip() for line in src_file]
+            sentence_translation_groups = list(
+                self._generate(
+                    model,
+                    tokenizer,
+                    sentences,
+                    file_src_lang,
+                    file_trg_lang,
+                    produce_multiple_translations,
+                    save_confidences,
+                )
+            )
+            draft_group = DraftGroup(sentence_translation_groups)
+            for draft_index, translated_draft in enumerate(draft_group.get_drafts(), 1):
+                if produce_multiple_translations:
+                    translation_draft_path = translation_path.with_suffix(f".{draft_index}{translation_path.suffix}")
+                else:
+                    translation_draft_path = translation_path
+                with translation_draft_path.open("w", encoding="utf-8", newline="\n") as out_file:
+                    out_file.write("\n".join(translated_draft.get_all_tokenized_translations()) + "\n")
+                if save_confidences:
+                    generate_confidence_files(translated_draft, translation_draft_path)
+
+    def _isos_for_test_file(self, input_path: Path, default_src_iso: str, default_trg_iso: str) -> Tuple[str, str]:
+        match = re.match(r"^test\.([a-z]{2,3})\.([a-z]{2,3})\..*", input_path.name)
+        if match:
+            return match.groups()
+        return default_src_iso, default_trg_iso
+
+    def _generate(
+        self,
+        model: PreTrainedModel,
+        tokenizer: PreTrainedTokenizerBase,
+        sentences: Iterable[str],
+        src_lang: Language,
+        trg_lang: Language,
+        produce_multiple_translations: bool,
+        save_confidences: bool,
+    ) -> Iterable[SentenceTranslationGroup]:
+        tokenizer.padding_side = "left"
+        num_drafts = self.get_num_drafts()
+        num_return_sequences = num_drafts if (produce_multiple_translations and num_drafts > 1) else 1
+
+        infer = self._config.infer
+        gen_kwargs = self._config.build_generation_kwargs(num_return_sequences, tokenizer.pad_token_id)
+
+        device = model.device
+        for batch in batch_sentences(sentences, infer["infer_batch_size"]):
+            prompts = [
+                self._config.build_prompt_messages(sentence, src_lang, trg_lang).apply_prompt_template(
+                    tokenizer, add_generation_prompt=True, tokenize=False
+                )
+                for sentence in batch
+            ]
+            inputs = tokenizer(prompts, return_tensors="pt", padding=True, add_special_tokens=False).to(device)
+            with torch.no_grad():
+                output = model.generate(
+                    **inputs,
+                    return_dict_in_generate=True,
+                    output_scores=save_confidences,
+                    **gen_kwargs,
+                )
+            prompt_length = inputs["input_ids"].shape[1]
+            generated = output.sequences[:, prompt_length:]
+
+            transition_scores = None
+            beam_indices = None
+            if save_confidences and getattr(output, "scores", None) is not None:
+                beam_indices = getattr(output, "beam_indices", None)
+                transition_scores = model.compute_transition_scores(
+                    output.sequences, output.scores, beam_indices, normalize_logits=True
+                )
+
+            for i in range(len(batch)):
+                translations: List[SentenceTranslation] = []
+                for j in range(num_return_sequences):
+                    seq_index = i * num_return_sequences + j
+                    token_ids = generated[seq_index]
+                    text = tokenizer.decode(token_ids, skip_special_tokens=True).strip()
+                    token_scores: List[float] = []
+                    sequence_score: Optional[float] = None
+                    if transition_scores is not None:
+                        scores_row = transition_scores[seq_index].tolist()
+                        if beam_indices is not None:
+                            # With beam search, compute_transition_scores() marks padded positions
+                            # with a beam index of -1 and a transition score of 0.
+                            valid = [s for s, b in zip(scores_row, beam_indices[seq_index].tolist()) if b >= 0]
+                        else:
+                            valid = [s for s in scores_row if s != float("-inf")]
+                        token_scores = valid
+                        if len(valid) > 0:
+                            sequence_score = sum(valid) / len(valid)
+                    translations.append(
+                        SentenceTranslation(text, [text], token_scores, sequence_score, starts_with_special_token=False)
+                    )
+                yield SentenceTranslationGroup(translations)

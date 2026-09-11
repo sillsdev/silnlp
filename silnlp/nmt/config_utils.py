@@ -24,34 +24,31 @@ def load_config_from_exp_dir(exp_dir: Path, environment: SilNlpEnv) -> Config:
     return create_config(exp_dir, config, environment)
 
 
-# Decoder-only LLM model name prefixes used as a fallback when "model_type" is not set.
-LLM_MODEL_PREFIXES = (
-    "google/gemma",
-    "google/translate-gemma",
-    "google/translategemma",
-    "tencent/Hunyuan",
-    "Hunyuan-MT",
-)
-
-
-def is_llm_config(config: dict) -> bool:
-    """Decide whether a config targets a decoder-only LLM.
-
-    An explicit ``model_type: llm`` wins; otherwise fall back to a string prefix match on the
-    model name. Detection is string-only by design - we never load the model's AutoConfig here,
-    since create_config is on the hot path of every CLI command.
-    """
+def is_local_llm_config(config: dict) -> bool:
     model_type = config.get("model_type")
     if model_type is not None:
-        return str(model_type).lower() == "llm"
+        # "local_llm" is the preferred label, but "llm" is supported for backward compatibility
+        return str(model_type).lower() in ("local_llm", "llm")
+    # Matching the model name is a fallback when "model_type" is not set.
     model: str = config.get("model", "")
-    return any(model.startswith(prefix) for prefix in LLM_MODEL_PREFIXES)
+    return model.startswith(
+        ("google/gemma", "google/translate-gemma", "google/translategemma", "tencent/Hunyuan", "Hunyuan-MT")
+    )
+
+
+def is_remote_llm_config(config: dict) -> bool:
+    return str(config.get("model_type", "")).lower() == "remote_llm"
 
 
 def create_config(exp_dir: Path, config: dict, environment: SilNlpEnv) -> Config:
-    if is_llm_config(config):
-        # Imported lazily so the peft/bitsandbytes import cost is only paid for LLM experiments.
-        from .llm_config import LLMConfig
+    if is_remote_llm_config(config):
+        # Imported lazily so the litellm import cost is only paid for remote LLM experiments.
+        from .remote_llm_config import RemoteLLMConfig
 
-        return LLMConfig(exp_dir, config, environment)
+        return RemoteLLMConfig(exp_dir, config, environment)
+    if is_local_llm_config(config):
+        # Imported lazily so the peft/bitsandbytes import cost is only paid for LLM experiments.
+        from .local_llm_config import LocalLLMConfig
+
+        return LocalLLMConfig(exp_dir, config, environment)
     return Seq2SeqConfig(exp_dir, config, environment)
