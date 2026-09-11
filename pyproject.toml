@@ -81,7 +81,7 @@ attrs = "^24.3.0"
 jsonschema = "^4.18.0"
 requests = "^2.31"
 openpyxl = "^3.1.2"
-packaging = "^22.0"
+packaging = "^24.0"
 hanzidentifier = "^1.2.0"
 jarowinkler = "^2.0.1"
 wildebeest-nlp = ">=0.9.0"
@@ -107,6 +107,3 @@ llm = ["bitsandbytes"]
 name = "torch"
 url = "https://download.pytorch.org/whl/cu124"
 priority = "explicit"
-
-[tool.poetry.requires-plugins]
-poetry-plugin-export = ">=1.8"
