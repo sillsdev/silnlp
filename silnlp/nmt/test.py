@@ -18,7 +18,14 @@ from ..common.utils import get_git_revision_hash
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import CheckpointType, Config, NMTModel, find_all_checkpoints
 from .config_utils import load_config
-from .scoring_metrics import CORPUS_SCORERS, SENTENCE_SCORERS, PairScore, compute_corpus_scores, iter_verse_scores
+from .scoring_metrics import (
+    CORPUS_SCORERS,
+    SENTENCE_SCORERS,
+    PairScore,
+    Scores,
+    compute_corpus_scores,
+    iter_verse_scores,
+)
 from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger((__package__ or "") + ".test")
@@ -48,9 +55,7 @@ def score_pair(
     pair_confs: Optional[List[float]] = None,
     linregress_file_name: Optional[str] = None,
 ) -> PairScore:
-    bleu_score, other_scores = compute_corpus_scores(
-        pair_sys, pair_refs, scorers, config.data.get("sacrebleu_tokenize")
-    )
+    scores = compute_corpus_scores(pair_sys, pair_refs, scorers, config.data.get("sacrebleu_tokenize"))
 
     if "confidence" in scorers:
         if pair_confs is not None:
@@ -64,7 +69,7 @@ def score_pair(
                     "Cannot use confidence as a scorer because the confidences file is missing. "
                     "Include the --save-confidences option to generate the file and enable confidence scoring."
                 ) from e
-        other_scores["Confidence"] = gmean(confidences)
+        scores.other_scores["Confidence"] = gmean(confidences)
 
     if book == "ALL":
         write_pair_verse_scores(
@@ -73,13 +78,13 @@ def score_pair(
             trg_iso,
             predictions_detok_file_name,
             scorers,
-            other_scores,
+            scores.other_scores,
             config,
             confidences if "confidence" in scorers else None,
             linregress_file_name,
         )
 
-    return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores, draft_index)
+    return PairScore(book, src_iso, trg_iso, scores, len(pair_sys), ref_projects, draft_index)
 
 
 def write_pair_verse_scores(
@@ -118,18 +123,18 @@ def write_pair_verse_scores(
         compute_linregress = "chrf3" in scorers and "confidence" in scorers and confidences is not None
         linregress_chrf3_scores: List[float] = []
         linregress_confidence_scores: List[float] = []
-        for index, pred, sentences, bleu_verse_score, other_verse_scores in iter_verse_scores(
-            pair_sys, pair_refs, scorers, config.data.get("sacrebleu_tokenize")
-        ):
+        for verse_score in iter_verse_scores(pair_sys, pair_refs, scorers, config.data.get("sacrebleu_tokenize")):
+            other_verse_scores = verse_score.scores.other_scores
             if "confidence" in scorers and confidences is not None:
-                other_verse_scores["Confidence"] = confidences[index]
+                other_verse_scores["Confidence"] = confidences[verse_score.index]
 
             if compute_linregress:
                 linregress_chrf3_scores.append(other_verse_scores["chrF3"])
                 linregress_confidence_scores.append(other_verse_scores["Confidence"])
 
-            row: List[str] = [f"{index + 1}"]
+            row: List[str] = [f"{verse_score.index + 1}"]
 
+            bleu_verse_score = verse_score.scores.bleu
             if "bleu" in scorers:
                 assert bleu_verse_score is not None
                 row += [
@@ -146,8 +151,8 @@ def write_pair_verse_scores(
                 else:
                     row.append(f"{val:.2f}")
 
-            row.append(pred.rstrip("\n"))
-            for sentence in sentences:
+            row.append(verse_score.pred.rstrip("\n"))
+            for sentence in verse_score.sentences:
                 row.append(sentence.rstrip("\n"))
             writer.writerow(row)
 
@@ -540,7 +545,7 @@ def test_checkpoint(
                 LOGGER.error("Error: book_dict did not load correctly. Not scoring individual books.")
     if len(config.test_src_isos) > 1 or len(config.test_trg_isos) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)
-        scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), ref_projects))
+        scores.append(PairScore("ALL", "ALL", "ALL", Scores(bleu, {}), len(overall_sys), ref_projects))
 
     scores_file_root = f"scores-{suffix_str}"
     if len(ref_projects) > 0:
@@ -715,19 +720,8 @@ def test(
             checkpoint_name = f"checkpoint {step}"
         books_str = "ALL" if len(books_nums) == 0 else ", ".join(sorted(str(num) for num in books_nums.keys()))
         LOGGER.info(f"Test results for {checkpoint_name} ({num_refs} reference(s), books: {books_str})")
-        header = "book,draft_index,src_iso,trg_iso,num_refs,references,sent_len"
         if len(results[step]) > 0:
-            pair_score = results[step][0]
-            header += (
-                (
-                    ",BLEU,BLEU_1gram_prec,BLEU_2gram_prec,BLEU_3gram_prec,BLEU_4gram_prec,BLEU_brevity_penalty,BLEU_total_sys_len,BLEU_total_ref_len"
-                    if pair_score.bleu is not None
-                    else ""
-                )
-                + ("," if len(pair_score.other_scores) > 0 else "")
-                + ",".join(pair_score.other_scores.keys())
-            )
-        LOGGER.info(header)
+            LOGGER.info(",".join(results[step][0].header_fields()))
         for score in results[step]:
             output = StringIO()
             score.write(output)
