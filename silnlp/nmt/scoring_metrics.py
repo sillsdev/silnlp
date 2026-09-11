@@ -1,4 +1,5 @@
-from typing import Dict, Iterator, List, Optional, Set, TextIO, Tuple
+from dataclasses import dataclass
+from typing import Dict, Iterator, List, Optional, Set, TextIO
 
 import sacrebleu
 from sacrebleu.metrics import BLEUScore
@@ -28,59 +29,88 @@ SENTENCE_SCORERS = [
 DEFAULT_SACREBLEU_TOKENIZE = "13a"
 
 
+@dataclass
+class Scores:
+    bleu: Optional[BLEUScore]
+    other_scores: Dict[str, float]
+
+    def header_fields(self) -> List[str]:
+        fields: List[str] = []
+        if self.bleu is not None:
+            fields += [
+                "BLEU",
+                "BLEU_1gram_prec",
+                "BLEU_2gram_prec",
+                "BLEU_3gram_prec",
+                "BLEU_4gram_prec",
+                "BLEU_brevity_penalty",
+                "BLEU_total_sys_len",
+                "BLEU_total_ref_len",
+            ]
+        fields += list(self.other_scores.keys())
+        return fields
+
+    def row_fields(self) -> List[str]:
+        fields: List[str] = []
+        if self.bleu is not None:
+            fields += [
+                f"{self.bleu.score:.2f}",
+                f"{self.bleu.precisions[0]:.2f}",
+                f"{self.bleu.precisions[1]:.2f}",
+                f"{self.bleu.precisions[2]:.2f}",
+                f"{self.bleu.precisions[3]:.2f}",
+                f"{self.bleu.bp:.3f}",
+                str(self.bleu.sys_len),
+                str(self.bleu.ref_len),
+            ]
+        for scorer, val in self.other_scores.items():
+            fields.append(f"{val:.8f}" if scorer.lower() == "confidence" else f"{val:.2f}")
+        return fields
+
+
 class PairScore:
     def __init__(
         self,
         book: str,
         src_iso: str,
         trg_iso: str,
-        bleu: Optional[BLEUScore],
+        scores: Scores,
         sent_len: int,
         projects: Set[str],
-        other_scores: Dict[str, float] = {},
         draft_index: int = 1,
     ) -> None:
         self.src_iso = src_iso
         self.trg_iso = trg_iso
-        self.bleu = bleu
+        self.scores = scores
         self.sent_len = sent_len
         self.num_refs = len(projects)
         self.refs = "_".join(sorted(projects))
-        self.other_scores = other_scores
         self.book = book
         self.draft_index = draft_index
 
+    def header_fields(self) -> List[str]:
+        fields = ["book", "draft_index", "src_iso", "trg_iso", "num_refs", "references", "sent_len"]
+        fields += self.scores.header_fields()
+        return fields
+
+    def row_fields(self) -> List[str]:
+        fields = [
+            self.book,
+            str(self.draft_index),
+            self.src_iso,
+            self.trg_iso,
+            str(self.num_refs),
+            self.refs,
+            str(self.sent_len),
+        ]
+        fields += self.scores.row_fields()
+        return fields
+
     def writeHeader(self, file: TextIO) -> None:
-        header = (
-            "book,draft_index,src_iso,trg_iso,num_refs,references,sent_len"
-            + (
-                ",BLEU,BLEU_1gram_prec,BLEU_2gram_prec,BLEU_3gram_prec,BLEU_4gram_prec,BLEU_brevity_penalty,BLEU_total_sys_len,BLEU_total_ref_len"
-                if self.bleu is not None
-                else ""
-            )
-            + ("," if len(self.other_scores) > 0 else "")
-            + ",".join(self.other_scores.keys())
-            + "\n"
-        )
-        file.write(header)
+        file.write(",".join(self.header_fields()) + "\n")
 
     def write(self, file: TextIO) -> None:
-        file.write(
-            f"{self.book},{self.draft_index},{self.src_iso},{self.trg_iso},"
-            f"{self.num_refs},{self.refs},{self.sent_len:d}"
-        )
-        if self.bleu is not None:
-            file.write(
-                f",{self.bleu.score:.2f},{self.bleu.precisions[0]:.2f},{self.bleu.precisions[1]:.2f}"
-                f",{self.bleu.precisions[2]:.2f},{self.bleu.precisions[3]:.2f},{self.bleu.bp:.3f}"
-                f",{self.bleu.sys_len:d},{self.bleu.ref_len:d}"
-            )
-        for scorer, val in self.other_scores.items():
-            if scorer.lower() == "confidence":
-                file.write(f",{val:.8f}")
-            else:
-                file.write(f",{val:.2f}")
-        file.write("\n")
+        file.write(",".join(self.row_fields()) + "\n")
 
 
 def compute_corpus_scores(
@@ -88,7 +118,7 @@ def compute_corpus_scores(
     pair_refs: List[List[str]],
     scorers: Set[str],
     sacrebleu_tokenize: Optional[str] = None,
-) -> Tuple[Optional[BLEUScore], Dict[str, float]]:
+) -> Scores:
     sacrebleu_tokenize = sacrebleu_tokenize or DEFAULT_SACREBLEU_TOKENIZE
     bleu_score = None
     if "bleu" in scorers:
@@ -187,7 +217,15 @@ def compute_corpus_scores(
         if ter_score.score >= 0:
             other_scores["TER"] = ter_score.score
 
-    return bleu_score, other_scores
+    return Scores(bleu_score, other_scores)
+
+
+@dataclass
+class VerseScore:
+    index: int
+    pred: str
+    sentences: List[str]
+    scores: Scores
 
 
 def iter_verse_scores(
@@ -195,7 +233,7 @@ def iter_verse_scores(
     pair_refs: List[List[str]],
     scorers: Set[str],
     sacrebleu_tokenize: Optional[str] = None,
-) -> Iterator[Tuple[int, str, List[str], Optional[BLEUScore], Dict[str, float]]]:
+) -> Iterator[VerseScore]:
     sacrebleu_tokenize = sacrebleu_tokenize or DEFAULT_SACREBLEU_TOKENIZE
     spbleu_metric = sacrebleu.metrics.BLEU(tokenize="flores200", lowercase=True) if "spbleu" in scorers else None
     for index, pred in enumerate(pair_sys):
@@ -238,4 +276,4 @@ def iter_verse_scores(
             if ter_verse_score.score >= 0:
                 other_verse_scores["TER"] = ter_verse_score.score
 
-        yield index, pred, sentences, bleu_verse_score, other_verse_scores
+        yield VerseScore(index, pred, sentences, Scores(bleu_verse_score, other_verse_scores))
