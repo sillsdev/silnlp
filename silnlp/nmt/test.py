@@ -54,6 +54,22 @@ VERSE_SCORES_SUFFIX = ".scores.tsv"
 LINREGRESS_PREFIX = "linregress"
 
 
+def read_sequence_confidences(conf_file: TextIO) -> List[float]:
+    confidences: List[float] = []
+    for line in conf_file:
+        columns = line.strip().split("\t")
+        if not columns:
+            continue
+        try:
+            confidence = float(columns[0])
+            for column in columns[1:]:
+                float(column)
+        except ValueError:
+            continue
+        confidences.append(confidence)
+    return confidences
+
+
 class PairScore:
     def __init__(
         self,
