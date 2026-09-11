@@ -14,7 +14,7 @@ import torch
 
 from silnlp.common.environment import SilNlpEnv
 from silnlp.nmt.config_utils import load_config
-from silnlp.nmt.llm_config import TRANSLATE_GEMMA_MODEL_PREFIXES, LLMConfig, LLMModel
+from silnlp.nmt.local_llm_config import LocalLLMConfig, LocalLLMModel
 
 EXIT_COMMANDS = {"/exit", "/quit"}
 RESET_COMMANDS = {"/reset", "/new"}
@@ -36,24 +36,24 @@ def main() -> None:
 
     if is_experiment:
         config = load_config(args.target, environment)
-        if not isinstance(config, LLMConfig):
-            parser.error(f"Experiment '{args.target}' is not an LLM experiment.")
+        if not isinstance(config, LocalLLMConfig):
+            parser.error(f"Experiment '{args.target}' is not a local LLM experiment.")
         label = f"'{args.target}' (checkpoint={args.checkpoint})"
     else:
         # A config for a bare model name, with no experiment directory behind it: its model_dir
         # can never exist, so load_for_inference naturally loads the pristine pretrained model
         # instead of looking for a checkpoint.
-        config = LLMConfig(Path(tempfile.gettempdir()) / "silnlp-chat-base", {"model": args.target}, environment)
+        config = LocalLLMConfig(Path(tempfile.gettempdir()) / "silnlp-chat-base", {"model": args.target}, environment)
         label = f"base model '{args.target}'"
 
-    if config.model.lower().startswith(TRANSLATE_GEMMA_MODEL_PREFIXES):
+    if config.has_fixed_prompt():
         print(
             "Warning: this model's chat template only supports its structured translation format "
             "and may not respond sensibly to a plain-text conversation.\n"
         )
 
     model_wrapper = config.create_model()
-    assert isinstance(model_wrapper, LLMModel)
+    assert isinstance(model_wrapper, LocalLLMModel)
     model, tokenizer = model_wrapper.load_for_inference(args.checkpoint)
     if tokenizer.chat_template is None:
         parser.error(f"The tokenizer for '{config.model}' has no chat template; can't hold a conversation with it.")
