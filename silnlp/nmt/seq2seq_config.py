@@ -37,7 +37,6 @@ from transformers import (
     EarlyStoppingCallback,
     EvalPrediction,
     HfArgumentParser,
-    M2M100ForConditionalGeneration,
     M2M100Tokenizer,
     MBart50Tokenizer,
     MBartTokenizer,
@@ -76,29 +75,13 @@ from .config import (
     write_effective_config,
 )
 from .corpora import DataFile
+from .decoder_inputs import DecoderInputs
 from .model_name import ModelName
 from .token_occurrence_logger import TokenOccurrenceLogger
 from .tokenizer import NullTokenizer, Tokenizer
 
 LOGGER = logging.getLogger(__name__)
 
-
-def prepare_decoder_input_ids_from_labels(self: M2M100ForConditionalGeneration, labels: Tensor) -> Tensor:
-    # shift ids to the right
-    shifted_input_ids = labels.new_zeros(labels.shape)
-    shifted_input_ids[:, 1:] = labels[:, :-1].clone()
-    assert self.config.decoder_start_token_id is not None
-    shifted_input_ids[:, 0] = self.config.decoder_start_token_id
-
-    if self.config.pad_token_id is None:
-        raise ValueError("self.model.config.pad_token_id has to be defined.")
-    # replace possible -100 values in labels by `pad_token_id`
-    shifted_input_ids.masked_fill_(shifted_input_ids == -100, self.config.pad_token_id)
-
-    return shifted_input_ids
-
-
-M2M100ForConditionalGeneration.prepare_decoder_input_ids_from_labels = prepare_decoder_input_ids_from_labels
 
 TRAINING_ARGS_CONFIG_MAPPING = {
     "train": {
@@ -950,7 +933,7 @@ class Seq2SeqNMTModel(NMTModel):
 
         data_collator = DataCollatorForSeq2SeqNoising(
             tokenizer,
-            model,
+            DecoderInputs(model),
             label_pad_token_id=-100,
             pad_to_multiple_of=8 if training_args.fp16 or training_args.bf16 else None,
             src_noise=src_noise,
@@ -1683,7 +1666,7 @@ class DataCollatorForSeq2SeqNoising:
     def __init__(
         self,
         tokenizer: PreTrainedTokenizerBase,
-        model: Optional[Any] = None,
+        decoder_inputs: DecoderInputs,
         padding: Union[bool, str, PaddingStrategy] = True,
         max_length: Optional[int] = None,
         pad_to_multiple_of: Optional[int] = None,
@@ -1691,9 +1674,12 @@ class DataCollatorForSeq2SeqNoising:
         src_noise: List[NoiseMethod] = [],
         return_tensors: str = "pt",
     ):
+        # No model is passed on, so that the decoder inputs are built in one place rather than
+        # depending on whether the model happens to carry a shift of its own.
         self._data_collator = DataCollatorForSeq2Seq(
-            tokenizer, model, padding, max_length, pad_to_multiple_of, label_pad_token_id, return_tensors
+            tokenizer, None, padding, max_length, pad_to_multiple_of, label_pad_token_id, return_tensors
         )
+        self._decoder_inputs = decoder_inputs
         self._src_noise = src_noise
 
     def __call__(self, features, return_tensors=None):
@@ -1705,7 +1691,10 @@ class DataCollatorForSeq2SeqNoising:
                 feature["input_ids"] = input_ids + feature["input_ids"][-2:]
                 feature["attention_mask"] = feature["attention_mask"][: len(feature["input_ids"])]
 
-        return self._data_collator(features, return_tensors)
+        batch = self._data_collator(features, return_tensors)
+        if batch.get("labels") is not None:
+            batch["decoder_input_ids"] = self._decoder_inputs.from_labels(batch["labels"])
+        return batch
 
 
 class SilSeq2SeqTrainer(Seq2SeqTrainer):
