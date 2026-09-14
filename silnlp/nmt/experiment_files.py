@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Iterable, TextIO
+from typing import Iterable, List, TextIO
 
 from ..common.corpus import write_corpus
 from .corpora import BASIC_DATA_PROJECT
@@ -65,6 +65,24 @@ class ExperimentFiles:
 
     def dictionary_vref(self) -> Path:
         return self._exp_dir / "dict.vref.txt"
+
+    def statistics_report(self) -> Path:
+        return self._exp_dir / "tokenization_stats.csv"
+
+    def statistics_spreadsheet(self) -> Path:
+        return self.statistics_report().with_suffix(".xlsx")
+
+    def tokenized_source_files(self) -> List[Path]:
+        return sorted(self._exp_dir.glob("*.src.txt"))
+
+    def tokenized_target_files(self) -> List[Path]:
+        return sorted(self._exp_dir.glob("*.trg.txt"))
+
+    def detokenized_source_files(self) -> List[Path]:
+        return sorted(self._exp_dir.glob("*.src.detok.txt"))
+
+    def detokenized_target_files(self) -> List[Path]:
+        return sorted(self._exp_dir.glob("*.trg.detok.txt"))
 
     def delete_data_sets(self) -> None:
         for pattern in self._DATA_SET_PATTERNS:

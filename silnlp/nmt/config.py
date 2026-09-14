@@ -5,16 +5,13 @@ from abc import ABC, abstractmethod
 from contextlib import ExitStack
 from copy import deepcopy
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 from pathlib import Path
-from statistics import mean, median, stdev
 from typing import Any, Dict, Generator, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
 
 import pandas as pd
 import yaml
 from machine.scripture import get_books
-from machine.tokenization import LatinWordTokenizer
 from tqdm import tqdm
 
 from ..alignment.config import get_aligner_name
@@ -49,6 +46,7 @@ from .experiment_files import ExperimentFiles
 from .sentence_noiser import SentenceNoiser
 from .shared_test_set import SharedTestSet
 from .terms import GlossLanguage, TermCategories
+from .tokenization_statistics import TokenizationStatistics
 from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger((__package__ or "") + ".config")
@@ -299,116 +297,9 @@ class Config(ABC):
             LOGGER.info(f"dictionary size: {dict_count}")
 
         if stats and self.data["tokenize"]:
-            self._calculate_tokenization_stats()
+            TokenizationStatistics(self.files).write()
 
         return train_count
-
-    def _calculate_tokenization_stats(self) -> None:
-        LOGGER.info("Calculating tokenization statistics")
-
-        stats_path = self.exp_dir / "tokenization_stats.csv"
-        if stats_path.is_file():
-            existing_stats = pd.read_csv(stats_path, header=[0, 1])
-        else:
-            existing_stats = pd.DataFrame({(" ", "Translation Side"): ["Source", "Target"]})
-
-        src_tokens_per_verse: List[int] = []
-        src_chars_per_token: List[int] = []
-        for src_tok_file in self.exp_dir.glob("*.src.txt"):
-            src_tok_file = src_tok_file.name
-            with open(self.exp_dir / src_tok_file, "r+", encoding="utf-8") as f:
-                for line in f:
-                    src_tokens_per_verse.append(len(line.split()))
-                    src_chars_per_token.extend([len(token) for token in line.split()])
-
-        trg_tokens_per_verse: List[int] = []
-        trg_chars_per_token: List[int] = []
-        for trg_tok_file in self.exp_dir.glob("*.trg.txt"):
-            trg_tok_file = trg_tok_file.name
-            with open(self.exp_dir / trg_tok_file, "r+", encoding="utf-8") as f:
-                for line in f:
-                    trg_tokens_per_verse.append(len(line.split()))
-                    trg_chars_per_token.extend([len(token) for token in line.split()])
-
-        src_chars_per_verse: List[int] = []
-        src_words_per_verse: List[int] = []
-        src_chars_per_word: List[int] = []
-        for src_detok_file in self.exp_dir.glob("*.src.detok.txt"):
-            src_detok_file = src_detok_file.name
-            with open(self.exp_dir / src_detok_file, "r+", encoding="utf-8") as f:
-                for line in f:
-                    src_chars_per_verse.append(len(line))
-                    word_line = " ".join(LatinWordTokenizer().tokenize(line))
-                    src_words_per_verse.append(len(word_line.split()))
-                    src_chars_per_word.extend([len(word) for word in word_line.split()])
-
-        trg_chars_per_verse: List[int] = []
-        trg_words_per_verse: List[int] = []
-        trg_chars_per_word: List[int] = []
-        for trg_detok_file in self.exp_dir.glob("*.trg.detok.txt"):
-            trg_detok_file = trg_detok_file.name
-            with open(self.exp_dir / trg_detok_file, "r+", encoding="utf-8") as f:
-                for line in f:
-                    trg_chars_per_verse.append(len(line))
-                    word_line = " ".join(LatinWordTokenizer().tokenize(line))
-                    trg_words_per_verse.append(len(word_line.split()))
-                    trg_chars_per_word.extend([len(word) for word in word_line.split()])
-
-        def distribution_df(
-            top_header: str,
-            src_data: List[int],
-            trg_data: List[int],
-        ) -> pd.DataFrame:
-            columns = pd.MultiIndex.from_product([[top_header], ["Min", "Max", "Median", "Mean", "Std Dev"]])
-            distribution_data = [
-                [
-                    min(src_data),
-                    max(src_data),
-                    median(src_data),
-                    Decimal(str(mean(src_data))).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP),
-                    Decimal(str(stdev(src_data))).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP),
-                ],
-                [
-                    min(trg_data),
-                    max(trg_data),
-                    median(trg_data),
-                    Decimal(str(mean(trg_data))).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP),
-                    Decimal(str(stdev(trg_data))).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP),
-                ],
-            ]
-            return pd.DataFrame(distribution_data, columns=columns)
-
-        top_header = "Tokens/Verse"
-        tokens_verse_df = distribution_df(top_header, src_tokens_per_verse, trg_tokens_per_verse)
-        num_verses_200_df = pd.DataFrame(
-            {
-                (top_header, "Num Verses >= 200 Tokens"): [
-                    sum(seg_length >= 200 for seg_length in src_tokens_per_verse),
-                    sum(seg_length >= 200 for seg_length in trg_tokens_per_verse),
-                ]
-            }
-        )
-        tokens_verse_df = pd.concat([tokens_verse_df, num_verses_200_df], axis=1)
-        existing_stats = pd.concat([existing_stats, tokens_verse_df], axis=1)
-
-        top_header = "Characters/Verse"
-        chars_verse_df = distribution_df(top_header, src_chars_per_verse, trg_chars_per_verse)
-        existing_stats = pd.concat([existing_stats, chars_verse_df], axis=1)
-
-        top_header = "Characters/Token"
-        chars_token_df = distribution_df(top_header, src_chars_per_token, trg_chars_per_token)
-        existing_stats = pd.concat([existing_stats, chars_token_df], axis=1)
-
-        top_header = "Words/Verse"
-        words_verse_df = distribution_df(top_header, src_words_per_verse, trg_words_per_verse)
-        existing_stats = pd.concat([existing_stats, words_verse_df], axis=1)
-
-        top_header = "Characters/Word"
-        chars_word_df = distribution_df(top_header, src_chars_per_word, trg_chars_per_word)
-        existing_stats = pd.concat([existing_stats, chars_word_df], axis=1)
-
-        existing_stats.to_csv(stats_path, index=False)
-        existing_stats.to_excel(stats_path.with_suffix(".xlsx"))
 
     def _write_scripture_data_sets(
         self,
