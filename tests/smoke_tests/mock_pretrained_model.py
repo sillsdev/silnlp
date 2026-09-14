@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Callable, Iterator, List, Optional, cast
+from typing import Callable, Iterator, List, Optional, Union, cast
 from unittest.mock import Mock, create_autospec
 
 import torch
@@ -49,11 +49,13 @@ def create_mock_pretrained_model(
         *args,
         **kwargs,
     ) -> Seq2SeqLMOutput:
-        model_stats.num_forward_calls += 1
-        model_stats.observed_training_batch_sizes.append(input_ids.shape[0] if input_ids is not None else 0)
-        model_stats.total_number_of_training_data_elements += (
-            input_ids.shape[0] * input_ids.shape[1] if input_ids is not None else 0
-        )
+        # The evaluation pass runs forward too, so only the training steps are counted.
+        if underlying_model.training:
+            model_stats.num_forward_calls += 1
+            model_stats.observed_training_batch_sizes.append(input_ids.shape[0] if input_ids is not None else 0)
+            model_stats.total_number_of_training_data_elements += (
+                input_ids.shape[0] * input_ids.shape[1] if input_ids is not None else 0
+            )
         kwargs.pop("num_items_in_batch", None)
         return underlying_model_forward(
             input_ids=input_ids,
@@ -61,9 +63,13 @@ def create_mock_pretrained_model(
             **kwargs,
         )
 
-    def mock_generate(*args, **kwargs) -> GenerateBeamEncoderDecoderOutput:
+    def mock_generate(*args, **kwargs) -> Union[GenerateBeamEncoderDecoderOutput, torch.Tensor]:
         nonlocal last_transition_scores
         output = generate(*args, **kwargs)
+
+        # The evaluation pass during training asks for token ids alone, not the scored output.
+        if not kwargs.get("return_dict_in_generate", False):
+            return output.sequences
 
         # SilTranslator calls compute_transition_scores and requires a shape that
         # matches the generated sequences/scores
@@ -200,7 +206,8 @@ class FixedTranslationPretrainedModelProvider(PreTrainedModelProvider):
     def create_model_for_training(
         self, model_name: str, model_config: PretrainedConfig, device_map: dict[str, int]
     ) -> PreTrainedModel:
-        return create_mock_pretrained_model(model_stats=self._model_stats)
+        # Training ends with an evaluation pass, which generates because predict_with_generate is set.
+        return create_fixed_translation_mock_pretrained_model(self._get_translation_token_ids, self._model_stats)
 
     def create_model_for_inference(self, model_name: str) -> PreTrainedModel:
         self._inference_model_names.append(model_name)
