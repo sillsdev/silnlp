@@ -111,9 +111,9 @@ class TranslationTask:
         confidence_files: List[Path] = []
         with translator:
             if src_project is None:
-                if len(config.src_projects) != 1:
+                if len(config.inventory.source_projects()) != 1:
                     raise RuntimeError("A source project must be specified.")
-                src_project = next(iter(config.src_projects))
+                src_project = next(iter(config.inventory.source_projects()))
 
             src_project_dir = self.environment.get_paratext_project_dir(src_project)
             if not src_project_dir.is_dir():
@@ -130,9 +130,9 @@ class TranslationTask:
                 trg_project = None
 
             if trg_iso is None:
-                trg_iso = config.default_test_trg_iso
-                if trg_iso == "" and len(config.trg_isos) > 0:
-                    trg_iso = next(iter(config.trg_isos))
+                trg_iso = config.inventory.default_test_target_iso()
+                if trg_iso == "" and len(config.inventory.target_isos()) > 0:
+                    trg_iso = next(iter(config.inventory.target_isos()))
             if trg_iso == "":
                 LOGGER.warning("No language code was set for the target language")
 
@@ -203,15 +203,15 @@ class TranslationTask:
         confidence_files: List[Path] = []
         with translator:
             if src_iso is None:
-                src_iso = config.default_test_src_iso
-                if src_iso == "" and len(config.src_iso) > 0:
-                    src_iso = next(iter(config.src_iso))
+                src_iso = config.inventory.default_test_source_iso()
+                if src_iso == "" and len(config.inventory.source_isos()) > 0:
+                    src_iso = next(iter(config.inventory.source_isos()))
             if src_iso == "":
                 LOGGER.warning("No language code was set for the source language")
             if trg_iso is None:
-                trg_iso = config.default_test_trg_iso
-                if trg_iso == "" and len(config.trg_isos) > 0:
-                    trg_iso = next(iter(config.trg_isos))
+                trg_iso = config.inventory.default_test_target_iso()
+                if trg_iso == "" and len(config.inventory.target_isos()) > 0:
+                    trg_iso = next(iter(config.inventory.target_isos()))
             if trg_iso == "":
                 LOGGER.warning("No language code was set for the target language")
 

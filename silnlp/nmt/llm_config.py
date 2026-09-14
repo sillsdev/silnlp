@@ -21,7 +21,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Generator, Iterable, List, Optional, Set, Tuple, Union
 
 import torch
 from datasets import Dataset
@@ -400,7 +400,7 @@ class LLMConfig(Config):
 
         super().__init__(exp_dir, config, environment)
 
-        if len(self.src_isos) > 1 or len(self.trg_isos) > 1:
+        if len(self.inventory.source_isos()) > 1 or len(self.inventory.target_isos()) > 1:
             raise RuntimeError("LLM experiments only support a single source language and a single target language.")
 
         self._disable_eval_if_no_val_split()
@@ -466,11 +466,14 @@ class LLMConfig(Config):
 
     @property
     def train_src_iso(self) -> str:
-        return self.default_test_src_iso or (next(iter(self.src_isos)) if len(self.src_isos) > 0 else "")
+        return self.inventory.default_test_source_iso() or self._any_iso(self.inventory.source_isos())
 
     @property
     def train_trg_iso(self) -> str:
-        return self.default_test_trg_iso or (next(iter(self.trg_isos)) if len(self.trg_isos) > 0 else "")
+        return self.inventory.default_test_target_iso() or self._any_iso(self.inventory.target_isos())
+
+    def _any_iso(self, isos: Set[str]) -> str:
+        return next(iter(isos)) if len(isos) > 0 else ""
 
     def build_prompt_messages(
         self, source: str, src_lang: Language, trg_lang: Language, target: Optional[str] = None
@@ -688,12 +691,12 @@ class LLMModel(NMTModel):
             return {"input_ids": input_ids, "labels": labels, "attention_mask": [1] * len(input_ids)}
 
         train_dataset = self._load_text_dataset(
-            self._config.exp_dir / self._config.train_src_filename(),
-            self._config.exp_dir / self._config.train_trg_filename(),
+            self._config.files.train_source(),
+            self._config.files.train_target(),
         )
         eval_dataset = self._load_text_dataset(
-            self._config.exp_dir / self._config.val_src_filename(),
-            self._config.exp_dir / self._config.val_trg_filename(),
+            self._config.files.validation_source(),
+            self._config.files.validation_target(),
         )
         if train_dataset is not None:
             train_dataset = train_dataset.map(encode, remove_columns=train_dataset.column_names)

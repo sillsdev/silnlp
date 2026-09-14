@@ -109,7 +109,7 @@ def get_draft_paths_from_exp(config: Config, environment: SilNlpEnv) -> List[Dra
 
     draft_metadata_list = []
     for translate_request in translate_requests:
-        src_project = translate_request.get("src_project", next(iter(config.src_projects)))
+        src_project = translate_request.get("src_project", next(iter(config.inventory.source_projects())))
 
         ckpt = translate_request.get("checkpoint", "last")
         if ckpt == "best":

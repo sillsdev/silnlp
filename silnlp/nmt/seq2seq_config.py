@@ -68,7 +68,6 @@ from ..common.translator import generate_confidence_files
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
 from .checkpoints import CheckpointDirectory, CheckpointType
 from .config import (
-    SUPPORTED_GLOSS_ISOS,
     Config,
     InferenceModelParams,
     NMTModel,
@@ -77,6 +76,7 @@ from .config import (
     write_effective_config,
 )
 from .corpora import DataFile
+from .corpus_inventory import SUPPORTED_GLOSS_ISOS
 from .model_name import ModelName
 from .token_occurrence_logger import TokenOccurrenceLogger
 from .tokenizer import NullTokenizer, Tokenizer
@@ -373,22 +373,22 @@ class Seq2SeqConfig(Config):
     @property
     def val_src_lang(self) -> str:
         lang_codes: Dict[str, str] = self.data["lang_codes"]
-        return lang_codes.get(self.default_val_src_iso, self.default_val_src_iso)
+        return lang_codes.get(self.inventory.default_validation_source_iso(), self.inventory.default_validation_source_iso())
 
     @property
     def test_src_lang(self) -> str:
         lang_codes: Dict[str, str] = self.data["lang_codes"]
-        return lang_codes.get(self.default_test_src_iso, self.default_test_src_iso)
+        return lang_codes.get(self.inventory.default_test_source_iso(), self.inventory.default_test_source_iso())
 
     @property
     def val_trg_lang(self) -> str:
         lang_codes: Dict[str, str] = self.data["lang_codes"]
-        return lang_codes.get(self.default_val_trg_iso, self.default_val_trg_iso)
+        return lang_codes.get(self.inventory.default_validation_target_iso(), self.inventory.default_validation_target_iso())
 
     @property
     def test_trg_lang(self) -> str:
         lang_codes: Dict[str, str] = self.data["lang_codes"]
-        return lang_codes.get(self.default_test_trg_iso, self.default_test_trg_iso)
+        return lang_codes.get(self.inventory.default_test_target_iso(), self.inventory.default_test_target_iso())
 
     def create_model(
         self,
@@ -518,10 +518,10 @@ class Seq2SeqConfig(Config):
             ):
                 if not tok_dict.get("share_vocab") and tok_dict.get("update_src") and tok_dict.get("update_trg"):
                     src_missing_tokens, src_trained_tokenizer = self._create_trained_tokens(
-                        list(self.src_file_paths), tok_dict.get("src_vocab_size")
+                        list(self.inventory.source_file_paths()), tok_dict.get("src_vocab_size")
                     )
                     trg_missing_tokens, trg_trained_tokenizer = self._create_trained_tokens(
-                        list(self.trg_file_paths), tok_dict.get("trg_vocab_size")
+                        list(self.inventory.target_file_paths()), tok_dict.get("trg_vocab_size")
                     )
                     trg_missing_tokens = sorted(list(set(trg_missing_tokens) - set(src_missing_tokens)))
                     missing_tokens = src_missing_tokens + trg_missing_tokens
@@ -529,25 +529,25 @@ class Seq2SeqConfig(Config):
                 else:
                     if tok_dict.get("share_vocab") and tok_dict.get("update_src") and tok_dict.get("update_trg"):
                         missing_tokens, trained_tokenizer = self._create_trained_tokens(
-                            list(self.src_file_paths) + list(self.trg_file_paths),
+                            list(self.inventory.source_file_paths()) + list(self.inventory.target_file_paths()),
                             tok_dict.get("src_vocab_size") + tok_dict.get("trg_vocab_size"),
                         )
                     elif tok_dict.get("update_src"):
                         missing_tokens, trained_tokenizer = self._create_trained_tokens(
-                            list(self.src_file_paths), tok_dict.get("src_vocab_size")
+                            list(self.inventory.source_file_paths()), tok_dict.get("src_vocab_size")
                         )
                         src_missing_tokens = missing_tokens
                     elif tok_dict.get("update_trg"):
                         missing_tokens, trained_tokenizer = self._create_trained_tokens(
-                            list(self.trg_file_paths), tok_dict.get("trg_vocab_size")
+                            list(self.inventory.target_file_paths()), tok_dict.get("trg_vocab_size")
                         )
                         trg_missing_tokens = missing_tokens
                     trained_tokenizers.append(trained_tokenizer)
             else:
                 if tok_dict.get("update_src"):
-                    missing_tokens = src_missing_tokens = self._find_missing_characters(list(self.src_file_paths))
+                    missing_tokens = src_missing_tokens = self._find_missing_characters(list(self.inventory.source_file_paths()))
                 if tok_dict.get("update_trg"):
-                    missing_tokens = trg_missing_tokens = self._find_missing_characters(list(self.trg_file_paths))
+                    missing_tokens = trg_missing_tokens = self._find_missing_characters(list(self.inventory.target_file_paths()))
                 if tok_dict.get("update_src") and tok_dict.get("update_trg"):
                     trg_missing_tokens = sorted(list(set(trg_missing_tokens) - set(src_missing_tokens)))
                     missing_tokens = src_missing_tokens + trg_missing_tokens
@@ -586,10 +586,10 @@ class Seq2SeqConfig(Config):
         if self.data["add_new_lang_code"]:
             lang_codes: Dict[str, str] = self.data["lang_codes"]
             updated = False
-            for iso in self.src_isos | self.trg_isos:
+            for iso in self.inventory.source_isos() | self.inventory.target_isos():
                 lang_code = lang_codes.get(iso, iso)
                 if isinstance(self._tokenizer, T5Tokenizer):
-                    if lang_code not in self._tokenizer.all_special_tokens and iso in self.trg_isos:
+                    if lang_code not in self._tokenizer.all_special_tokens and iso in self.inventory.target_isos():
                         add_lang_code_to_tokenizer(self._tokenizer, lang_code)
                         updated = True
                 elif isinstance(self._tokenizer, MBartTokenizer):
@@ -605,8 +605,8 @@ class Seq2SeqConfig(Config):
             if updated:
                 self._tokenizer.save_pretrained(self.exp_dir)
 
-        if len(self._tags) > 0:
-            self._tokenizer.add_tokens([AddedToken(tag, rstrip=True, special=True) for tag in self._tags])
+        if len(self.inventory.tags()) > 0:
+            self._tokenizer.add_tokens([AddedToken(tag, rstrip=True, special=True) for tag in self.inventory.tags()])
 
     def get_or_create_tokenizer(self) -> PreTrainedTokenizerBase:
         if self._tokenizer is None:
@@ -688,8 +688,8 @@ class Seq2SeqConfig(Config):
             if terms_config["include_glosses"]:
                 gloss_iso: Optional[str] = str(terms_config["include_glosses"]).lower()
                 if gloss_iso == "true":
-                    src_gloss_iso = list(self.src_isos.intersection(SUPPORTED_GLOSS_ISOS))
-                    trg_gloss_iso = list(self.trg_isos.intersection(SUPPORTED_GLOSS_ISOS))
+                    src_gloss_iso = list(self.inventory.source_isos().intersection(SUPPORTED_GLOSS_ISOS))
+                    trg_gloss_iso = list(self.inventory.target_isos().intersection(SUPPORTED_GLOSS_ISOS))
                     if src_gloss_iso:
                         gloss_iso = src_gloss_iso[0]
                     elif trg_gloss_iso:
@@ -931,13 +931,13 @@ class Seq2SeqNMTModel(NMTModel):
             return Dataset.from_dict({"translation": data})
 
         train_dataset = load_text_dataset(
-            self._config.exp_dir / self._config.train_src_filename(),
-            self._config.exp_dir / self._config.train_trg_filename(),
+            self._config.files.train_source(),
+            self._config.files.train_target(),
         )
 
         eval_dataset = load_text_dataset(
-            self._config.exp_dir / self._config.val_src_filename(),
-            self._config.exp_dir / self._config.val_trg_filename(),
+            self._config.files.validation_source(),
+            self._config.files.validation_target(),
         )
 
         def encode(examples: dict) -> dict:
