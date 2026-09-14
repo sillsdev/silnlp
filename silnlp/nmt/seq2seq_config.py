@@ -5,8 +5,6 @@ import os
 import re
 from abc import ABC, abstractmethod
 from contextlib import ExitStack
-from dataclasses import dataclass
-from math import prod
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
 
@@ -54,16 +52,16 @@ from transformers import (
 )
 from transformers.modeling_utils import unwrap_model
 from transformers.models.nllb.tokenization_nllb import FAIRSEQ_LANGUAGE_CODES
-from transformers.tokenization_utils_base import BatchEncoding, TruncationStrategy
+from transformers.tokenization_utils_base import BatchEncoding
 from transformers.trainer import TRAINING_ARGS_NAME
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import SAFE_WEIGHTS_NAME
-from transformers.utils.generic import PaddingStrategy, to_py_obj
+from transformers.utils.generic import PaddingStrategy
 from transformers.utils.logging import tqdm
 
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SilNlpEnv
-from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
+from ..common.translation_data_structures import DraftGroup, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
 from .config import (
@@ -77,6 +75,7 @@ from .config import (
     write_effective_config,
 )
 from .corpora import DataFile
+from .machine_engine import Seq2SeqEngine
 from .token_occurrence_logger import TokenOccurrenceLogger
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -862,45 +861,6 @@ def batch_sentences(
         yield batch
 
 
-@dataclass
-class ModelOutput:
-    translated_text: str
-    translation_token_ids: List[int]
-    token_scores: List[float]
-    sequence_score: Optional[float]
-
-    def convert_to_sentence_translation(self, tokenizer: PreTrainedTokenizerBase) -> SentenceTranslation:
-        tokens = tokenizer.convert_ids_to_tokens(self.translation_token_ids)
-        return SentenceTranslation(
-            to_py_obj(self.translated_text),
-            to_py_obj(tokens),
-            to_py_obj(self.token_scores),
-            to_py_obj(self.sequence_score),
-        )
-
-
-# This class represents multiple translations of a single input sequence
-class ModelOutputGroup:
-    def __init__(self, outputs: List[dict]):
-        self._outputs = outputs
-
-    def _get_model_outputs(self) -> List[ModelOutput]:
-        return [
-            ModelOutput(
-                output["translation_text"],
-                output["translation_token_ids"],
-                output["token_scores"],
-                output["sequence_score"],
-            )
-            for output in self._outputs
-        ]
-
-    def convert_to_sentence_translation_group(self, tokenizer: PreTrainedTokenizerBase) -> SentenceTranslationGroup:
-        return SentenceTranslationGroup(
-            [model_output.convert_to_sentence_translation(tokenizer) for model_output in self._get_model_outputs()]
-        )
-
-
 class Seq2SeqNMTModel(NMTModel):
     def __init__(
         self,
@@ -1177,16 +1137,14 @@ class Seq2SeqNMTModel(NMTModel):
             input_paths,
             translation_paths,
         ):
-            translator = self._create_translator_for_test_file(input_path, compiled_model, tokenizer)
+            engine = self._create_engine_for_test_file(input_path, compiled_model, tokenizer)
 
             length = count_lines(input_path)
             with ExitStack() as stack:
                 src_file = stack.enter_context(input_path.open("r", encoding="utf-8-sig"))
                 sentences = (line.strip().split() for line in src_file)
                 sentence_translation_groups: List[SentenceTranslationGroup] = list(
-                    self._translate_test_sentences(
-                        tokenizer, translator, sentences, length, produce_multiple_translations
-                    )
+                    self._translate_test_sentences(engine, sentences, length, produce_multiple_translations)
                 )
                 draft_group = DraftGroup(sentence_translation_groups)
 
@@ -1206,24 +1164,24 @@ class Seq2SeqNMTModel(NMTModel):
                             translation_draft_path,
                         )
 
-    def _create_translator_for_test_file(
+    def _create_engine_for_test_file(
         self, input_path: Path, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase
-    ) -> "PretokenizedTranslator":
+    ) -> Seq2SeqEngine:
         iso_specified_file_pattern = re.compile(r"^test\.([a-z]{2,3})\.([a-z]{2,3})\..*")
-        if iso_specified_file_pattern.match(input_path.name):
-            src_iso, trg_iso = iso_specified_file_pattern.match(input_path.name).groups()
+        match = iso_specified_file_pattern.match(input_path.name)
+        if match:
+            src_iso, trg_iso = match.groups()
             src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
             trg_lang = self._config.data["lang_codes"].get(trg_iso, trg_iso)
         else:
             src_lang = self._config.test_src_lang
             trg_lang = self._config.test_trg_lang
 
-        return PretokenizedTranslator(model=model, tokenizer=tokenizer, src_lang=src_lang, tgt_lang=trg_lang)
+        return self._create_engine(model, tokenizer, src_lang, trg_lang)
 
     def _translate_test_sentences(
         self,
-        tokenizer: PreTrainedTokenizerBase,
-        translator: "SilTranslator",
+        engine: Seq2SeqEngine,
         sentences: Iterable[List[str]],
         length: int,
         produce_multiple_translations: bool = False,
@@ -1237,12 +1195,11 @@ class Seq2SeqNMTModel(NMTModel):
                 "Falling back to a single translation."
             )
 
-        for model_output_group in tqdm(
-            self._translate_sentences(translator, sentences, produce_multiple_translations),
+        yield from tqdm(
+            self._translate_sentences(engine, sentences, produce_multiple_translations),
             total=length,
             unit="ex",
-        ):
-            yield model_output_group.convert_to_sentence_translation_group(tokenizer)
+        )
 
     def translate(
         self,
@@ -1267,12 +1224,7 @@ class Seq2SeqNMTModel(NMTModel):
         if isinstance(tokenizer, NllbTokenizer):
             tokenizer = PunctuationNormalizingTokenizer(tokenizer)
 
-        translator = SilTranslator(
-            model=cast(PreTrainedModel, torch.compile(model)),
-            tokenizer=tokenizer,
-            src_lang=src_lang,
-            tgt_lang=trg_lang,
-        )
+        engine = self._create_engine(cast(PreTrainedModel, torch.compile(model)), tokenizer, src_lang, trg_lang)
 
         num_drafts = self.get_num_drafts()
         if produce_multiple_translations and num_drafts > 1:
@@ -1285,12 +1237,11 @@ class Seq2SeqNMTModel(NMTModel):
 
         if not isinstance(sentences, list):
             sentences = list(sentences)
-        for model_output_group in tqdm(
-            self._translate_sentences(translator, sentences, produce_multiple_translations),
+        yield from tqdm(
+            self._translate_sentences(engine, sentences, produce_multiple_translations),
             total=len(sentences),
             unit="ex",
-        ):
-            yield model_output_group.convert_to_sentence_translation_group(tokenizer)
+        )
 
     def _create_training_arguments(self) -> Seq2SeqTrainingArguments:
         args = collect_training_args(
@@ -1329,117 +1280,73 @@ class Seq2SeqNMTModel(NMTModel):
 
     def _translate_sentences(
         self,
-        translator: "SilTranslator",
+        engine: Seq2SeqEngine,
         sentences: Iterable[TSent],
         produce_multiple_translations: bool = False,
-    ) -> Iterable[ModelOutputGroup]:
+    ) -> Iterable[SentenceTranslationGroup]:
         for batch in batch_sentences(sentences, self._config.infer["infer_batch_size"]):
-            yield from self._translate_sentence_helper(
-                translator,
-                batch,
-                produce_multiple_translations=produce_multiple_translations,
-            )
+            yield from self._translate_batch(engine, batch, produce_multiple_translations)
 
-    def _translate_sentence_helper(
+    def _translate_batch(
         self,
-        translator: "SilTranslator",
-        sentences: Iterable[TSent],
+        engine: Seq2SeqEngine,
+        sentences: List[TSent],
         produce_multiple_translations: bool = False,
-    ) -> Iterable[ModelOutputGroup]:
-
+    ) -> List[SentenceTranslationGroup]:
         num_drafts = self.get_num_drafts()
-        if produce_multiple_translations and num_drafts > 1:
-            multiple_translations_method: str = self._config.infer.get("multiple_translations_method")
+        if not produce_multiple_translations or num_drafts <= 1:
+            return engine.translate_drafts(sentences, 1, num_beams=self._num_beams())
 
-            sentences = list(sentences)
-
-            if multiple_translations_method == "hybrid":
-                beam_search_results: List[List[dict]] = self._translate_with_beam_search(
-                    translator,
-                    sentences,
-                    num_return_sequences=1,
-                )
-
-                sampling_results: List[List[dict]] = self._translate_with_sampling(
-                    translator,
-                    sentences,
-                    num_return_sequences=num_drafts - 1,
-                )
-
-                # concatenate the beam search results with the sampling results
-                yield from [
-                    ModelOutputGroup(beam_search_results[i] + sampling_results[i])
-                    for i in range(len(beam_search_results))
-                ]
-
-            elif multiple_translations_method == "sampling":
-                yield from [
-                    ModelOutputGroup(result)
-                    for result in self._translate_with_sampling(
-                        translator,
-                        sentences,
-                        num_return_sequences=num_drafts,
-                    )
-                ]
-
-            elif multiple_translations_method == "beam_search":
-                yield from [
-                    ModelOutputGroup(result)
-                    for result in self._translate_with_beam_search(
-                        translator,
-                        sentences,
-                        num_return_sequences=num_drafts,
-                    )
-                ]
-
-            elif multiple_translations_method == "diverse_beam_search":
-                raise RuntimeError(
-                    'infer.multiple_translations_method: "diverse_beam_search" is no longer supported, because '
-                    'transformers moved group beam search out of the library. Use "hybrid" (the default), '
-                    '"beam_search", or "sampling" instead.'
-                )
-            else:
-                LOGGER.error('Unrecognized value for multiple_translations_method: "%s"', multiple_translations_method)
-
-        else:
-            yield from [
-                ModelOutputGroup([translated_sentence[0]])
-                for translated_sentence in self._translate_with_beam_search(
-                    translator,
-                    sentences,
-                    num_return_sequences=1,
-                )
+        method: str = self._config.infer.get("multiple_translations_method")
+        if method == "hybrid":
+            best = engine.translate_drafts(sentences, 1, num_beams=self._num_beams())
+            sampled = self._sample_drafts(engine, sentences, num_drafts - 1)
+            return [
+                SentenceTranslationGroup(list(best_group) + list(sampled_group))
+                for best_group, sampled_group in zip(best, sampled)
             ]
+        if method == "sampling":
+            return self._sample_drafts(engine, sentences, num_drafts)
+        if method == "beam_search":
+            return engine.translate_drafts(sentences, num_drafts, num_beams=self._num_beams())
+        if method == "diverse_beam_search":
+            raise RuntimeError(
+                'infer.multiple_translations_method: "diverse_beam_search" is no longer supported, because '
+                'transformers moved group beam search out of the library. Use "hybrid" (the default), '
+                '"beam_search", or "sampling" instead.'
+            )
+        LOGGER.error('Unrecognized value for multiple_translations_method: "%s"', method)
+        return []
 
-    def _translate_with_beam_search(
-        self,
-        translator: "SilTranslator",
-        sentences: Iterable[TSent],
-        num_return_sequences: int = 1,
-    ) -> List[List[dict]]:
+    def _sample_drafts(
+        self, engine: Seq2SeqEngine, sentences: List[TSent], num_drafts: int
+    ) -> List[SentenceTranslationGroup]:
+        return engine.translate_drafts(
+            sentences,
+            num_drafts,
+            do_sample=True,
+            temperature=self._config.infer.get("temperature"),
+            num_beams=1,
+        )
+
+    def _num_beams(self) -> Optional[int]:
         num_beams: Optional[int] = self._config.infer.get("num_beams")
         if num_beams is None:
             num_beams = self._config.params.get("generation_num_beams")
+        return num_beams
 
-        return translator(
-            sentences,
-            num_beams=num_beams,
-            num_return_sequences=num_return_sequences,
-        )
-
-    def _translate_with_sampling(
-        self,
-        translator: "SilTranslator",
-        sentences: Iterable[TSent],
-        num_return_sequences: int = 1,
-    ) -> List[List[dict]]:
-        temperature: Optional[int] = self._config.infer.get("temperature")
-
-        return translator(
-            sentences,
-            do_sample=True,
-            temperature=temperature,
-            num_return_sequences=num_return_sequences,
+    def _create_engine(
+        self, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, src_lang: str, trg_lang: str
+    ) -> Seq2SeqEngine:
+        return Seq2SeqEngine(
+            model,
+            tokenizer,
+            batch_size=self._config.infer["infer_batch_size"],
+            # silnlp does not use word alignments, and asking for cross-attentions would force the
+            # slower eager attention implementation.
+            output_attentions=False,
+            src_lang=src_lang,
+            tgt_lang=trg_lang,
         )
 
     def _create_inference_model(
@@ -1623,163 +1530,6 @@ class CustomNormalizerWrapper:
 
     def normalize(self, line: NormalizedString) -> None:
         self._tokenizer.normalize_normalized_string(line)
-
-
-class SilTranslator:
-    def __init__(
-        self,
-        model: PreTrainedModel,
-        tokenizer: PreTrainedTokenizerBase,
-        src_lang: str,
-        tgt_lang: str,
-    ) -> None:
-        self.device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
-        self.model = model.to(self.device)
-        self.tokenizer = tokenizer
-        self.src_lang = src_lang
-        self.tgt_lang = tgt_lang
-
-    def __call__(self, sentences: Iterable[Any], **generate_kwargs) -> List[List[dict]]:
-        model_inputs = self.preprocess(list(sentences)).to(self.device)
-        with torch.no_grad():
-            model_outputs = self._forward(model_inputs, **generate_kwargs)
-        return self.postprocess(model_outputs)
-
-    def preprocess(self, sentences: List[Any]) -> BatchEncoding:
-        # The source language prefix and the forced target language token are configured on the tokenizer and the
-        # generation config in _configure_model, so a plain tokenizer call is all that is needed here.
-        return self.tokenizer(
-            sentences, return_tensors="pt", truncation=TruncationStrategy.DO_NOT_TRUNCATE, padding=True
-        )
-
-    def _forward(self, model_inputs, **generate_kwargs):
-        in_b, input_length = model_inputs["input_ids"].shape
-
-        config = self.model.generation_config
-        generate_kwargs["min_length"] = generate_kwargs.get("min_length", config.min_length)
-        generate_kwargs["max_length"] = generate_kwargs.get("max_length", config.max_length)
-        output = self.model.generate(
-            **model_inputs,
-            **generate_kwargs,
-            output_scores=True,
-            return_dict_in_generate=True,
-        )
-
-        output_ids = output.sequences
-        output_scores = output.scores
-        beam_indices = output.beam_indices if "beam_indices" in output else None
-        try:
-            transition_scores = self.model.compute_transition_scores(
-                output_ids,
-                output_scores,
-                beam_indices,
-                normalize_logits=True,
-            )
-        except Exception:
-            output_ids = output_ids.to("cpu")
-            output_scores = tuple(score.to("cpu") for score in output_scores)
-            beam_indices = beam_indices.to("cpu") if beam_indices is not None else None
-            transition_scores = self.model.compute_transition_scores(
-                output_ids,
-                output_scores,
-                beam_indices,
-                normalize_logits=True,
-            )
-        sequences_scores = getattr(output, "sequences_scores", None)
-
-        out_b, seq_len = output_ids.shape
-        n_sequences = out_b // in_b
-
-        ts_len = transition_scores.shape[1]
-        if ts_len == seq_len:
-            token_logprobs = transition_scores
-        elif ts_len == seq_len - 1:
-            token_logprobs = torch.cat(
-                [
-                    torch.zeros(out_b, 1, device=transition_scores.device, dtype=transition_scores.dtype),
-                    transition_scores,
-                ],
-                dim=1,
-            )
-        else:
-            raise RuntimeError(
-                f"Unexpected transition_scores length {ts_len} for sequences length {seq_len}. "
-                "Cannot align token scores robustly."
-            )
-        return {
-            "output_ids": output_ids.reshape(in_b, n_sequences, seq_len),
-            "scores": token_logprobs.reshape(in_b, n_sequences, seq_len),
-            "sequences_scores": None if sequences_scores is None else sequences_scores.reshape(in_b, n_sequences),
-        }
-
-    def postprocess(self, model_outputs) -> List[List[dict]]:
-        if self.tokenizer is None:
-            raise RuntimeError("No tokenizer is specified.")
-
-        output_ids: torch.Tensor = model_outputs["output_ids"]
-        scores: torch.Tensor = model_outputs["scores"]
-        sequences_scores: Optional[torch.Tensor] = model_outputs["sequences_scores"]
-
-        translations: List[List[dict]] = []
-        for sentence_index in range(output_ids.size(dim=0)):
-            records: List[dict] = []
-            for sequence_index in range(output_ids.size(dim=1)):
-                sequence_ids = output_ids[sentence_index][sequence_index].tolist()
-                token_scores = scores[sentence_index][sequence_index]
-                sequence_score = None if sequences_scores is None else sequences_scores[sentence_index][sequence_index]
-                translation_text = self.tokenizer.decode(
-                    sequence_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
-                )
-                records.append(
-                    {
-                        "translation_token_ids": sequence_ids,
-                        "token_scores": token_scores,
-                        "sequence_score": sequence_score,
-                        "translation_text": translation_text,
-                    }
-                )
-            translations.append(records)
-        return translations
-
-
-class PretokenizedTranslator(SilTranslator):
-    def preprocess(self, sentences: List[Any]) -> BatchEncoding:
-        model_inputs = batch_prepare_for_model(self.tokenizer, sentences)
-        model_inputs = self.tokenizer.pad(model_inputs, padding=True, return_tensors="pt")
-        model_inputs["forced_bos_token_id"] = self.tokenizer.convert_tokens_to_ids(self.tgt_lang)
-        return model_inputs
-
-
-def torch_gather_nd(params: torch.Tensor, indices: torch.Tensor, batch_dim: int = 0) -> torch.Tensor:
-    """
-    torch_gather_nd implements tf.gather_nd in PyTorch.
-
-    This supports multiple batch dimensions as well as multiple channel dimensions.
-    """
-    index_shape = indices.shape[:-1]
-    num_dim = indices.size(-1)
-    tail_sizes = params.shape[batch_dim + num_dim :]
-
-    # flatten extra dimensions
-    for s in tail_sizes:
-        row_indices = torch.arange(s, device=params.device)
-        indices = indices.unsqueeze(-2)
-        indices = indices.repeat(*[1 for _ in range(indices.dim() - 2)], s, 1)
-        row_indices = row_indices.expand(*indices.shape[:-2], -1).unsqueeze(-1)
-        indices = torch.cat((indices, row_indices), dim=-1)
-        num_dim += 1
-
-    # flatten indices and params to batch specific ones instead of channel specific
-    for i in range(num_dim):
-        size = prod(params.shape[batch_dim + i + 1 : batch_dim + num_dim])
-        indices[..., i] *= size
-
-    indices = indices.sum(dim=-1)
-    params = params.flatten(batch_dim, -1)
-    indices = indices.flatten(batch_dim, -1)
-
-    out = torch.gather(params, dim=batch_dim, index=indices)
-    return out.reshape(*index_shape, *tail_sizes)
 
 
 class DataCollatorForSeq2SeqNoising:
