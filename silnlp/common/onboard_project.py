@@ -24,7 +24,7 @@ from silnlp.common.analyze import analyze
 from silnlp.common.clean_projects import process_single_project_for_cleaning
 from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
 from silnlp.nmt.config import Config
-from silnlp.nmt.corpus_inventory import SUPPORTED_GLOSS_ISOS
+from silnlp.nmt.terms import GlossLanguages
 
 from ..nmt.config_utils import create_config
 from .collect_verse_counts import collect_verse_counts
@@ -514,8 +514,9 @@ class OnboardingReport:
         self.name = settings.full_name
         self.short_name = settings.name
         self.iso_code = settings.language_code
-        self.key_terms_glosses_exist = (
-            self.iso_code in SUPPORTED_GLOSS_ISOS or ALT_ISO.get_alternative(self.iso_code) in SUPPORTED_GLOSS_ISOS
+        gloss_languages = GlossLanguages()
+        self.key_terms_glosses_exist = gloss_languages.includes(self.iso_code) or gloss_languages.includes(
+            ALT_ISO.get_alternative(self.iso_code)
         )
         self.key_terms_type = settings.biblical_terms_list_type
 
