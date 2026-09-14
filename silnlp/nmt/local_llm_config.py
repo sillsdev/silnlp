@@ -455,7 +455,8 @@ class LocalLLMConfig(LLMConfig[LocalLLMPromptMessages]):
 
     def _delete_previous_data_files(self) -> None:
         super()._delete_previous_data_files()
-        self._delete_files("instruction.*")
+        for path in self.exp_dir.glob("instruction.*"):
+            path.unlink()
 
     def _build_corpora(self, tokenizer: Tokenizer, stats: bool, force_align: bool) -> int:
         return super()._build_corpora(tokenizer, stats, force_align) + self._write_instruction_data()
@@ -939,12 +940,12 @@ class LocalLLMModel(NMTModel):
             return encode_completion(prompt_ids, example["output"])
 
         train_dataset = self._load_text_dataset(
-            self._config.exp_dir / self._config.train_src_filename(),
-            self._config.exp_dir / self._config.train_trg_filename(),
+            self._config.files.train_source(),
+            self._config.files.train_target(),
         )
         eval_dataset = self._load_text_dataset(
-            self._config.exp_dir / self._config.val_src_filename(),
-            self._config.exp_dir / self._config.val_trg_filename(),
+            self._config.files.validation_source(),
+            self._config.files.validation_target(),
         )
         if train_dataset is not None:
             train_dataset = train_dataset.map(encode, with_indices=True, remove_columns=train_dataset.column_names)

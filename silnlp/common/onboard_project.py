@@ -23,7 +23,8 @@ from machine.scripture.canon import book_id_to_number, book_number_to_id
 from silnlp.common.analyze import analyze
 from silnlp.common.clean_projects import process_single_project_for_cleaning
 from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
-from silnlp.nmt.config import SUPPORTED_GLOSS_ISOS, Config
+from silnlp.nmt.config import Config
+from silnlp.nmt.corpus_inventory import SUPPORTED_GLOSS_ISOS
 
 from ..nmt.config_utils import create_config
 from .collect_verse_counts import collect_verse_counts

@@ -28,7 +28,6 @@ from ..common.corpus import (
     load_corpus,
     split_corpus,
     split_parallel_corpus,
-    write_corpus,
 )
 from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import SentenceTranslationGroup
@@ -41,17 +40,15 @@ from .corpora import (
     CorpusPair,
     DataFile,
     DataFileMapping,
-    IsoPairInfo,
     get_data_file_pairs,
-    get_terms_glosses_file_paths,
     parse_corpus_pairs,
 )
+from .corpus_inventory import SUPPORTED_GLOSS_ISOS, CorpusInventory
 from .data_set_files import DataSetFile, DataSetFileOpener, SplitFiles
+from .experiment_files import ExperimentFiles
 from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger((__package__ or "") + ".config")
-
-SUPPORTED_GLOSS_ISOS = ["fr", "en", "id", "es", "pt"]
 
 
 @dataclass(frozen=True)
@@ -198,91 +195,12 @@ class Config(ABC):
 
         data_config: dict = config["data"]
         self.corpus_pairs = parse_corpus_pairs(data_config.get("corpus_pairs", []), self._environment)
-
-        terms_config: dict = data_config["terms"]
-        self.src_isos: Set[str] = set()
-        self.val_src_isos: Set[str] = set()
-        self.test_src_isos: Set[str] = set()
-        self.trg_isos: Set[str] = set()
-        self.val_trg_isos: Set[str] = set()
-        self.test_trg_isos: Set[str] = set()
-        self.src_file_paths: Set[Path] = set()
-        self.trg_file_paths: Set[Path] = set()
-        self._tags: Set[str] = set()
-        self.has_scripture_data = False
-        self._iso_pairs: Dict[Tuple[str, str], IsoPairInfo] = {}
-        self.src_projects: Set[str] = set()
-        self.trg_projects: Set[str] = set()
-        for corpus_pair in self.corpus_pairs:
-            pair_src_isos = {sf.iso for sf in corpus_pair.src_files}
-            pair_trg_isos = {tf.iso for tf in corpus_pair.trg_files}
-            self.src_isos.update(pair_src_isos)
-            self.trg_isos.update(pair_trg_isos)
-            if corpus_pair.is_val:
-                self.val_src_isos.update(pair_src_isos)
-                self.val_trg_isos.update(pair_trg_isos)
-            if corpus_pair.is_test:
-                self.test_src_isos.update(pair_src_isos)
-                self.test_trg_isos.update(pair_trg_isos)
-            self.src_file_paths.update(sf.path for sf in corpus_pair.src_files)
-            self.trg_file_paths.update(tf.path for tf in corpus_pair.trg_files)
-            if corpus_pair.is_scripture:
-                self.has_scripture_data = True
-                self.src_file_paths.update(sf.path for sf in corpus_pair.src_terms_files)
-                self.trg_file_paths.update(tf.path for tf in corpus_pair.trg_terms_files)
-                self.src_projects.update(sf.project for sf in corpus_pair.src_files)
-                self.trg_projects.update(sf.project for sf in corpus_pair.trg_files)
-                if terms_config["include_glosses"]:
-                    for gloss_iso in SUPPORTED_GLOSS_ISOS:
-                        if gloss_iso in pair_src_isos or gloss_iso == terms_config["include_glosses"]:
-                            self.src_file_paths.update(
-                                get_terms_glosses_file_paths(corpus_pair.src_terms_files, environment=self._environment)
-                            )
-                        if gloss_iso in pair_trg_isos:
-                            self.trg_file_paths.update(
-                                get_terms_glosses_file_paths(corpus_pair.trg_terms_files, environment=self._environment)
-                            )
-            self._tags.update(f"<{tag}>" for tag in corpus_pair.tags)
-
-            for src_file in corpus_pair.src_files:
-                for trg_file in corpus_pair.trg_files:
-                    iso_pair = self._iso_pairs.get((src_file.iso, trg_file.iso))
-                    if iso_pair is None:
-                        iso_pair = IsoPairInfo()
-                        self._iso_pairs[(src_file.iso, trg_file.iso)] = iso_pair
-                    if corpus_pair.is_scripture:
-                        if corpus_pair.is_test:
-                            iso_pair.test_projects.add(trg_file.project)
-                        if corpus_pair.is_val:
-                            iso_pair.val_projects.add(trg_file.project)
-                    elif corpus_pair.is_test:
-                        iso_pair.has_basic_test_data = True
-
-        self._multiple_test_iso_pairs = sum(1 for iso_pair in self._iso_pairs.values() if iso_pair.has_test_data) > 1
-
-    @property
-    def default_test_src_iso(self) -> str:
-        if len(self.test_src_isos) == 0:
-            return ""
-        return next(iter(self.test_src_isos))
-
-    @property
-    def default_val_src_iso(self) -> str:
-        if len(self.val_src_isos) == 0:
-            return ""
-        return next(iter(self.val_src_isos))
-
-    @property
-    def default_test_trg_iso(self) -> str:
-        if len(self.test_trg_isos) == 0:
-            return ""
-        return next(iter(self.test_trg_isos))
-
-    @property
-    def default_val_trg_iso(self) -> str:
-        if len(self.val_trg_isos) == 0:
-            return ""
-        return next(iter(self.val_trg_isos))
+        self.inventory = CorpusInventory(
+            self.corpus_pairs,
+            include_glosses=data_config["terms"]["include_glosses"],
+            environment=self._environment,
+        )
+        self.files = ExperimentFiles(exp_dir, self.inventory, multi_ref_eval=config["eval"]["multi_ref_eval"])
 
     @property
     def model(self) -> str:
@@ -320,16 +238,10 @@ class Config(ABC):
     def has_parent(self) -> bool:
         return "parent" in self.data
 
-    @property
-    def has_val_split(self) -> bool:
-        return any(
-            pair.is_val and (pair.size if pair.val_size is None else pair.val_size) > 0 for pair in self.corpus_pairs
-        )
-
     def _disable_eval_if_no_val_split(self) -> None:
         """Turn off evaluation-related settings when there is no validation split. Shared by
         Config subclasses, which call this after merging their defaults."""
-        if not self.has_val_split:
+        if not self.inventory.has_validation_split():
             eval_config: dict = self.root["eval"]
             eval_config["eval_strategy"] = "no"
             eval_config["load_best_model_at_end"] = False
@@ -341,11 +253,9 @@ class Config(ABC):
         set_seed(seed)
 
     def preprocess(self, stats: bool, force_align: bool = False) -> None:
-        # confirm that input file paths exist
-        for file in self.src_file_paths | self.trg_file_paths:
-            if not file.is_file():
-                LOGGER.error(f"The source file {str(file)} does not exist.")
-                return
+        missing_files = self.inventory.missing_input_files()
+        if len(missing_files) > 0:
+            raise RuntimeError("These corpus files do not exist: " + ", ".join(str(f) for f in missing_files))
 
         if self.data["tokenize"]:
             self._build_vocabs(stats)
@@ -360,26 +270,6 @@ class Config(ABC):
 
     @abstractmethod
     def create_tokenizer(self) -> Tokenizer: ...
-
-    def is_train_project(self, ref_file_path: Path) -> bool:
-        trg_iso, trg_project = self._parse_ref_file_path(ref_file_path)
-        for pair in self.corpus_pairs:
-            if not pair.is_train:
-                continue
-            for df in pair.src_files + pair.trg_files:
-                if df.iso == trg_iso and df.project == trg_project:
-                    return True
-        return False
-
-    def is_ref_project(self, ref_projects: Set[str], ref_file_path: Path) -> bool:
-        _, trg_project = self._parse_ref_file_path(ref_file_path)
-        return trg_project in ref_projects
-
-    def _parse_ref_file_path(self, ref_file_path: Path) -> Tuple[str, str]:
-        parts = ref_file_path.name.split(".")
-        if len(parts) == 5:
-            return self.default_test_trg_iso, parts[3]
-        return parts[2], parts[5]
 
     def _build_corpora(self, tokenizer: Tokenizer, stats: bool, force_align: bool) -> int:
         self._delete_previous_data_files()
@@ -525,16 +415,7 @@ class Config(ABC):
         existing_stats.to_excel(stats_path.with_suffix(".xlsx"))
 
     def _delete_previous_data_files(self) -> None:
-        self._delete_files("train.*.txt")
-        self._delete_files("val.*.txt")
-        self._delete_files("val.trg.txt.*")
-        self._delete_files("val.trg.detok.txt.*")
-        self._delete_files("test.*.txt")
-        self._delete_files("dict.*.txt")
-
-    def _delete_files(self, pattern: str) -> None:
-        for old_file_path in self.exp_dir.glob(pattern):
-            old_file_path.unlink()
+        self.files.delete_data_sets()
 
     def _write_scripture_data_sets(
         self,
@@ -690,38 +571,40 @@ class Config(ABC):
             for (src_iso, trg_iso), pair_val in val.items():
                 tokenizer.set_src_lang(src_iso)
                 tokenizer.set_trg_lang(trg_iso)
-                self._append_corpus(self.val_src_filename(), tokenizer.tokenize_all(Side.SOURCE, pair_val["source"]))
-                self._append_corpus(self.val_src_detok_filename(), pair_val["source"])
+                self.files.append(
+                    self.files.validation_source(), tokenizer.tokenize_all(Side.SOURCE, pair_val["source"])
+                )
+                self.files.append(self.files.validation_source_detokenized(), pair_val["source"])
             val_count = sum(len(pair_val) for pair_val in val.values())
             self._write_val_trg(tokenizer, val)
             self._write_val_trg(None, val)
             val_vref = itertools.chain.from_iterable(pair_val["vref"] for pair_val in val.values())
-            self._append_corpus(self.val_vref_filename(), (str(vr) for vr in val_vref))
+            self.files.append(self.files.validation_vref(), (str(vr) for vr in val_vref))
 
         test_count = 0
         for (src_iso, trg_iso), pair_test in test.items():
             tokenizer.set_src_lang(src_iso)
             tokenizer.set_trg_lang(trg_iso)
-            self._append_corpus(self.test_vref_filename(src_iso, trg_iso), (str(vr) for vr in pair_test["vref"]))
-            self._append_corpus(
-                self.test_src_filename(src_iso, trg_iso),
+            self.files.append(self.files.test_vref(src_iso, trg_iso), (str(vr) for vr in pair_test["vref"]))
+            self.files.append(
+                self.files.test_source(src_iso, trg_iso),
                 tokenizer.tokenize_all(Side.SOURCE, pair_test["source"]),
             )
-            self._append_corpus(self.test_src_detok_filename(src_iso, trg_iso), pair_test["source"])
+            self.files.append(self.files.test_source_detokenized(src_iso, trg_iso), pair_test["source"])
             test_count += len(pair_test)
 
             columns: List[str] = [c for c in pair_test.columns if c.startswith("target")]
-            test_projects = self._get_test_projects(src_iso, trg_iso)
+            test_projects = self.inventory.test_projects(src_iso, trg_iso)
             for column in columns:
                 project = column[len("target_") :]
-                self._append_corpus(
-                    self.test_trg_filename(src_iso, trg_iso, project),
+                self.files.append(
+                    self.files.test_target(src_iso, trg_iso, project),
                     tokenizer.normalize_all(Side.TARGET, pair_test[column]),
                 )
                 test_projects.remove(project)
-            if self._has_multiple_test_projects(src_iso, trg_iso):
+            if self.inventory.has_multiple_test_projects(src_iso, trg_iso):
                 for project in test_projects:
-                    self._fill_corpus(self.test_trg_filename(src_iso, trg_iso, project), len(pair_test))
+                    self.files.fill(self.files.test_target(src_iso, trg_iso, project), len(pair_test))
         LOGGER.info(f"train size: {train_count}," f" val size: {val_count}," f" test size: {test_count},")
         return train_count
 
@@ -745,7 +628,9 @@ class Config(ABC):
             stem = vref_path.stem
             test_indices: Set[int] = set()
             if stem == "test.vref":
-                pair_test_indices[(self.default_test_src_iso, self.default_test_trg_iso)] = test_indices
+                pair_test_indices[
+                    (self.inventory.default_test_source_iso(), self.inventory.default_test_target_iso())
+                ] = test_indices
             else:
                 _, src_iso, trg_iso, _ = stem.split(".", maxsplit=4)
                 pair_test_indices[(src_iso, trg_iso)] = test_indices
@@ -838,11 +723,15 @@ class Config(ABC):
         train.fillna("", inplace=True)
         src_columns: List[str] = [c for c in train.columns if c.startswith("source")]
         with ExitStack() as stack:
-            train_src_file = stack.enter_context(self._open_append(self.train_src_filename()))
-            train_trg_file = stack.enter_context(self._open_append(self.train_trg_filename()))
-            train_vref_file = stack.enter_context(self._open_append(self.train_vref_filename()))
-            train_src_detok_file = stack.enter_context(self._open_append(self.train_src_detok_filename()))
-            train_trg_detok_file = stack.enter_context(self._open_append(self.train_trg_detok_filename()))
+            train_src_file = stack.enter_context(self.files.open_for_append(self.files.train_source()))
+            train_trg_file = stack.enter_context(self.files.open_for_append(self.files.train_target()))
+            train_vref_file = stack.enter_context(self.files.open_for_append(self.files.train_vref()))
+            train_src_detok_file = stack.enter_context(
+                self.files.open_for_append(self.files.train_source_detokenized())
+            )
+            train_trg_detok_file = stack.enter_context(
+                self.files.open_for_append(self.files.train_target_detokenized())
+            )
 
             for _, row in train.iterrows():
                 if mixed_src:
@@ -886,11 +775,15 @@ class Config(ABC):
 
         train_count = 0
         with ExitStack() as stack:
-            train_src_file = stack.enter_context(self._open_append(self.train_src_filename()))
-            train_trg_file = stack.enter_context(self._open_append(self.train_trg_filename()))
-            train_vref_file = stack.enter_context(self._open_append(self.train_vref_filename()))
-            train_src_detok_file = stack.enter_context(self._open_append(self.train_src_detok_filename()))
-            train_trg_detok_file = stack.enter_context(self._open_append(self.train_trg_detok_filename()))
+            train_src_file = stack.enter_context(self.files.open_for_append(self.files.train_source()))
+            train_trg_file = stack.enter_context(self.files.open_for_append(self.files.train_target()))
+            train_vref_file = stack.enter_context(self.files.open_for_append(self.files.train_vref()))
+            train_src_detok_file = stack.enter_context(
+                self.files.open_for_append(self.files.train_source_detokenized())
+            )
+            train_trg_detok_file = stack.enter_context(
+                self.files.open_for_append(self.files.train_target_detokenized())
+            )
 
             for _, term in terms.iterrows():
                 src_term = term["source"]
@@ -934,8 +827,8 @@ class Config(ABC):
         if terms_config["include_glosses"]:
             gloss_iso: Optional[str] = str(terms_config["include_glosses"]).lower()
             if gloss_iso == "true":
-                src_gloss_iso = list(self.src_isos.intersection(SUPPORTED_GLOSS_ISOS))
-                trg_gloss_iso = list(self.trg_isos.intersection(SUPPORTED_GLOSS_ISOS))
+                src_gloss_iso = list(self.inventory.source_isos().intersection(SUPPORTED_GLOSS_ISOS))
+                trg_gloss_iso = list(self.inventory.target_isos().intersection(SUPPORTED_GLOSS_ISOS))
                 if src_gloss_iso:
                     gloss_iso = src_gloss_iso[0]
                 elif trg_gloss_iso:
@@ -974,14 +867,14 @@ class Config(ABC):
                 cur_terms["target_lang"] = trg_terms_file.iso
                 terms = self._add_to_terms_data_set(terms, cur_terms, tags)
         if gloss_iso is not None:
-            if gloss_iso in self.trg_isos:
+            if gloss_iso in self.inventory.target_isos():
                 for src_terms_file, src_terms, tags in all_src_terms:
                     cur_terms = get_terms_data_frame(src_terms, categories_set, filter_books)
                     cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
                     cur_terms["source_lang"] = src_terms_file.iso
                     cur_terms["target_lang"] = gloss_iso
                     terms = self._add_to_terms_data_set(terms, cur_terms, tags)
-            if gloss_iso in self.src_isos or gloss_iso == terms_config["include_glosses"]:
+            if gloss_iso in self.inventory.source_isos() or gloss_iso == terms_config["include_glosses"]:
                 for trg_terms_file, trg_terms, tags in all_trg_terms:
                     cur_terms = get_terms_data_frame(trg_terms, categories_set, filter_books)
                     cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
@@ -999,16 +892,16 @@ class Config(ABC):
                     tokenizer.set_trg_lang(trg_iso)
                 columns: List[str] = [c for c in pair_val.columns if c.startswith("target")]
                 if self.root["eval"]["multi_ref_eval"]:
-                    val_project_count = self._get_val_ref_count(src_iso, trg_iso)
+                    val_project_count = self._validation_reference_count(src_iso, trg_iso)
                     for index in pair_val.index:
                         for ci in range(val_project_count):
                             if len(ref_files) == ci:
                                 ref_fn = (
-                                    self.val_trg_filename(ci)
+                                    self.files.validation_target(ci)
                                     if tokenizer is not None
-                                    else self.val_trg_detok_filename(ci)
+                                    else self.files.validation_target_detokenized(ci)
                                 )
-                                ref_files.append(stack.enter_context(self._open_append(ref_fn)))
+                                ref_files.append(stack.enter_context(self.files.open_for_append(ref_fn)))
                             if ci < len(columns):
                                 col = columns[ci]
                                 if tokenizer is not None:
@@ -1023,8 +916,12 @@ class Config(ABC):
                 else:
                     for index in pair_val.index:
                         if len(ref_files) == 0:
-                            fn = self.val_trg_filename() if tokenizer is not None else self.val_trg_detok_filename()
-                            ref_files.append(stack.enter_context(self._open_append(fn)))
+                            fn = (
+                                self.files.validation_target()
+                                if tokenizer is not None
+                                else self.files.validation_target_detokenized()
+                            )
+                            ref_files.append(stack.enter_context(self.files.open_for_append(fn)))
                         columns_with_data = [c for c in columns if cast(str, pair_val.loc[index, c]).strip() != ""]
                         col = random.choice(columns_with_data)
                         if tokenizer is not None:
@@ -1033,15 +930,6 @@ class Config(ABC):
                             )
                         else:
                             ref_files[0].write(pair_val.loc[index, col] + "\n")
-
-    def _append_corpus(self, filename: str, sentences: Iterable[str]) -> None:
-        write_corpus(self.exp_dir / filename, sentences, append=True)
-
-    def _fill_corpus(self, filename: str, size: int) -> None:
-        write_corpus(self.exp_dir / filename, ("" for _ in range(size)), append=True)
-
-    def _open_append(self, filename: str) -> TextIO:
-        return (self.exp_dir / filename).open("a", encoding="utf-8", newline="\n")
 
     def _write_basic_data_sets(self, tokenizer: Tokenizer, pair: CorpusPair, alignment_scores: AlignmentScores) -> int:
         total_train_count = 0
@@ -1067,7 +955,7 @@ class Config(ABC):
         test_count = 0
         dict_count = 0
         with ExitStack() as stack:
-            files = DataSetFileOpener(self.exp_dir, stack)
+            files = DataSetFileOpener(stack)
             test_indices: Optional[Set[int]] = set()
             if pair.is_test:
                 test_size = pair.size if pair.test_size is None else pair.test_size
@@ -1094,52 +982,52 @@ class Config(ABC):
             train_blank_files: List[DataSetFile] = []
             val_blank_files: List[DataSetFile] = []
             test_blank_files: List[DataSetFile] = []
-            if self.has_scripture_data:
-                train_blank_files = files.open(self.train_vref_filename())
-                val_ref_count = self._get_val_ref_count(src_file.iso, trg_file.iso)
+            if self.inventory.has_scripture_data():
+                train_blank_files = files.open(self.files.train_vref())
+                val_ref_count = self._validation_reference_count(src_file.iso, trg_file.iso)
                 val_blank_files = files.open(
-                    self.val_vref_filename(),
-                    *(self.val_trg_filename(index) for index in range(1, val_ref_count)),
-                    *(self.val_trg_detok_filename(index) for index in range(1, val_ref_count)),
+                    self.files.validation_vref(),
+                    *(self.files.validation_target(index) for index in range(1, val_ref_count)),
+                    *(self.files.validation_target_detokenized(index) for index in range(1, val_ref_count)),
                 )
-                test_blank_files = files.open(self.test_vref_filename(src_file.iso, trg_file.iso))
-                if self._has_multiple_test_projects(src_file.iso, trg_file.iso):
+                test_blank_files = files.open(self.files.test_vref(src_file.iso, trg_file.iso))
+                if self.inventory.has_multiple_test_projects(src_file.iso, trg_file.iso):
                     test_blank_files += files.open(
                         *(
-                            self.test_trg_filename(src_file.iso, trg_file.iso, project)
-                            for project in self._get_test_projects(src_file.iso, trg_file.iso)
+                            self.files.test_target(src_file.iso, trg_file.iso, project)
+                            for project in self.inventory.test_projects(src_file.iso, trg_file.iso)
                             if project != BASIC_DATA_PROJECT
                         ),
                     )
             train_files = SplitFiles(
                 files.open(
-                    self.train_src_filename(),
-                    self.train_trg_filename(),
-                    self.train_src_detok_filename(),
-                    self.train_trg_detok_filename(),
+                    self.files.train_source(),
+                    self.files.train_target(),
+                    self.files.train_source_detokenized(),
+                    self.files.train_target_detokenized(),
                 ),
                 train_blank_files,
             )
             val_files = SplitFiles(
                 files.open(
-                    self.val_src_filename(),
-                    self.val_src_detok_filename(),
-                    self.val_trg_filename(),
-                    self.val_trg_detok_filename(),
+                    self.files.validation_source(),
+                    self.files.validation_source_detokenized(),
+                    self.files.validation_target(),
+                    self.files.validation_target_detokenized(),
                 ),
                 val_blank_files,
             )
             test_files = SplitFiles(
                 files.open(
-                    self.test_src_filename(src_file.iso, trg_file.iso),
-                    self.test_src_detok_filename(src_file.iso, trg_file.iso),
-                    self.test_trg_filename(src_file.iso, trg_file.iso),
+                    self.files.test_source(src_file.iso, trg_file.iso),
+                    self.files.test_source_detokenized(src_file.iso, trg_file.iso),
+                    self.files.test_target(src_file.iso, trg_file.iso),
                 ),
                 test_blank_files,
             )
             dict_files = SplitFiles(
-                files.open(self.dict_src_filename(), self.dict_trg_filename()),
-                files.open(self.dict_vref_filename()),
+                files.open(self.files.dictionary_source(), self.files.dictionary_target()),
+                files.open(self.files.dictionary_vref()),
             )
 
             for index, (src_line, trg_line) in enumerate(tqdm(corpus)):
@@ -1203,6 +1091,11 @@ class Config(ABC):
         )
         return train_count
 
+    def _validation_reference_count(self, src_iso: str, trg_iso: str) -> int:
+        if self.root["eval"]["multi_ref_eval"]:
+            return self.inventory.validation_project_count(src_iso, trg_iso)
+        return 1
+
     def _write_train_sentence_pair(
         self,
         train_files: SplitFiles,
@@ -1233,75 +1126,6 @@ class Config(ABC):
         for noise_method in src_noise:
             tokens = noise_method(tokens)
         return " ".join(tokens)
-
-    def _get_val_ref_count(self, src_iso: str, trg_iso: str) -> int:
-        if self.root["eval"]["multi_ref_eval"]:
-            return len(self._iso_pairs[(src_iso, trg_iso)].val_projects)
-        return 1
-
-    def _get_test_projects(self, src_iso: str, trg_iso: str) -> Set[str]:
-        iso_pair = self._iso_pairs[(src_iso, trg_iso)]
-        test_projects = iso_pair.test_projects.copy()
-        if iso_pair.has_basic_test_data:
-            test_projects.add(BASIC_DATA_PROJECT)
-        return test_projects
-
-    def train_src_filename(self) -> str:
-        return "train.src.txt"
-
-    def train_src_detok_filename(self) -> str:
-        return "train.src.detok.txt"
-
-    def train_trg_filename(self) -> str:
-        return "train.trg.txt"
-
-    def train_trg_detok_filename(self) -> str:
-        return "train.trg.detok.txt"
-
-    def train_vref_filename(self) -> str:
-        return "train.vref.txt"
-
-    def val_src_filename(self) -> str:
-        return "val.src.txt"
-
-    def val_src_detok_filename(self) -> str:
-        return "val.src.detok.txt"
-
-    def val_vref_filename(self) -> str:
-        return "val.vref.txt"
-
-    def val_trg_filename(self, index: int = 0) -> str:
-        return f"val.trg.txt.{index}" if self.root["eval"]["multi_ref_eval"] else "val.trg.txt"
-
-    def val_trg_detok_filename(self, index: int = 0) -> str:
-        return f"val.trg.detok.txt.{index}" if self.root["eval"]["multi_ref_eval"] else "val.trg.detok.txt"
-
-    def test_src_filename(self, src_iso: str, trg_iso: str) -> str:
-        return f"test.{src_iso}.{trg_iso}.src.txt" if self._multiple_test_iso_pairs else "test.src.txt"
-
-    def test_src_detok_filename(self, src_iso: str, trg_iso: str) -> str:
-        return f"test.{src_iso}.{trg_iso}.src.detok.txt" if self._multiple_test_iso_pairs else "test.src.detok.txt"
-
-    def test_vref_filename(self, src_iso: str, trg_iso: str) -> str:
-        return f"test.{src_iso}.{trg_iso}.vref.txt" if self._multiple_test_iso_pairs else "test.vref.txt"
-
-    def test_trg_filename(self, src_iso: str, trg_iso: str, project: str = BASIC_DATA_PROJECT) -> str:
-        prefix = f"test.{src_iso}.{trg_iso}" if self._multiple_test_iso_pairs else "test"
-        has_multiple_test_projects = self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
-        suffix = f".{project}" if has_multiple_test_projects else ""
-        return f"{prefix}.trg.detok{suffix}.txt"
-
-    def dict_src_filename(self) -> str:
-        return "dict.src.txt"
-
-    def dict_trg_filename(self) -> str:
-        return "dict.trg.txt"
-
-    def dict_vref_filename(self) -> str:
-        return "dict.vref.txt"
-
-    def _has_multiple_test_projects(self, src_iso: str, trg_iso: str) -> bool:
-        return self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
 
     @abstractmethod
     def _build_vocabs(self, stats: bool = False) -> None: ...
