@@ -33,7 +33,7 @@ from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config
 from .config_utils import load_config
 from .corpora import CorpusPair
-from .seq2seq_config import get_best_checkpoint
+from .checkpoints import CheckpointDirectory
 
 LOGGER = logging.getLogger(__package__ + ".postprocess")
 
@@ -113,7 +113,7 @@ def get_draft_paths_from_exp(config: Config, environment: SilNlpEnv) -> List[Dra
 
         ckpt = translate_request.get("checkpoint", "last")
         if ckpt == "best":
-            step_str = get_best_checkpoint(config.model_dir).name[11:]
+            step_str = str(CheckpointDirectory(config.model_dir).best().step)
         elif ckpt == "last":
             step_str = Path(get_last_checkpoint(config.model_dir)).name[11:]
         else:

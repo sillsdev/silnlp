@@ -45,13 +45,12 @@ from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
 from ..common.utils import merge_dict
+from .checkpoints import CheckpointDirectory, CheckpointType
 from .config import (
-    CheckpointType,
     Config,
     InferenceModelParams,
     NMTModel,
     collect_training_args,
-    find_last_checkpoint,
     warn_about_renamed_keys,
     write_effective_config,
 )
@@ -723,8 +722,8 @@ class LLMModel(NMTModel):
                 )
             )
 
-        last_checkpoint = find_last_checkpoint(Path(training_args.output_dir))
-        train_result = trainer.train(resume_from_checkpoint=str(last_checkpoint) if last_checkpoint else None)
+        last_checkpoint = CheckpointDirectory(Path(training_args.output_dir)).latest()
+        train_result = trainer.train(resume_from_checkpoint=str(last_checkpoint.path) if last_checkpoint else None)
 
         metrics = train_result.metrics
         metrics["train_samples"] = len(train_dataset) if train_dataset is not None else 0
@@ -796,8 +795,8 @@ class LLMModel(NMTModel):
     # --- inference ----------------------------------------------------------------
 
     def _create_inference_model(self, ckpt: Union[CheckpointType, str, int]) -> PreTrainedModel:
-        if self._config.model_dir.exists():
-            checkpoint_path, _ = self.get_checkpoint_path(ckpt)
+        if self.has_been_trained():
+            checkpoint_path = self.resolve_checkpoint(ckpt).path
         else:
             LOGGER.warning("Model has no checkpoints. Using base model.")
             checkpoint_path = None

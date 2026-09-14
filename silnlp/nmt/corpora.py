@@ -30,10 +30,10 @@ BASIC_DATA_PROJECT = "BASIC"
 @dataclass
 class DataFile:
     path: Path
+    environment: SilNlpEnv
     iso: str = field(init=False)
     project: str = field(init=False)
     include_test: bool = True
-    environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
 
     def __post_init__(self):
         file_name = self.path.stem

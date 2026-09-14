@@ -15,7 +15,8 @@ from ..common.translation_data_structures import SentenceTranslationGroup
 from ..common.translator import CONFIDENCE_SUFFIX, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import CheckpointType, Config, NMTModel
+from .checkpoints import CheckpointType
+from .config import Config, NMTModel
 from .quality_estimation import estimate_quality
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
@@ -307,7 +308,7 @@ class TranslationTask:
         model = self.model if self.model is not None else clearml.config.create_model()
         translator = NMTTranslator(model, self.checkpoint, self.environment)
         if clearml.config.model_dir.exists():
-            _, step = model.get_checkpoint_path(self.checkpoint)
+            step = model.resolve_checkpoint(self.checkpoint).step
             step_str = "avg" if step == -1 else str(step)
         else:
             step_str = "last"

@@ -1,14 +1,12 @@
 import itertools
-import json
 import logging
 import random
-import re
 from abc import ABC, abstractmethod
 from contextlib import ExitStack
 from copy import deepcopy
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
-from enum import Enum, auto
+from enum import Enum
 from pathlib import Path
 from statistics import mean, median, stdev
 from typing import Any, Dict, Generator, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
@@ -38,6 +36,7 @@ from ..common.corpus import (
 from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import SentenceTranslationGroup
 from ..common.utils import NoiseMethod, Side, add_tags_to_dataframe, add_tags_to_sentence, set_seed
+from .checkpoints import Checkpoint, CheckpointDirectory, CheckpointType
 from .corpora import (
     BASIC_DATA_PROJECT,
     CorpusPair,
@@ -53,85 +52,7 @@ from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger((__package__ or "") + ".config")
 
-ALIGNMENT_SCORES_FILE = re.compile(r"([a-z]{2,3}-.+)_([a-z]{2,3}-.+)")
-
 SUPPORTED_GLOSS_ISOS = ["fr", "en", "id", "es", "pt"]
-
-
-class CheckpointType(Enum):
-    LAST = auto()
-    BEST = auto()
-    AVERAGE = auto()
-    OTHER = auto()
-
-
-_CHECKPOINT_PREFIX = "checkpoint-"
-
-
-def read_trainer_state(model_dir: Path) -> dict:
-    with (model_dir / "trainer_state.json").open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def model_has_best_checkpoint(model_dir: Path) -> bool:
-    trainer_state_path = model_dir / "trainer_state.json"
-    if not trainer_state_path.is_file():
-        return False
-    trainer_state = read_trainer_state(model_dir)
-    return trainer_state.get("best_model_checkpoint") is not None
-
-
-def find_last_checkpoint(model_dir: Path) -> Optional[Path]:
-    checkpoints = [p for p in model_dir.glob(f"{_CHECKPOINT_PREFIX}*") if p.is_dir()]
-    if len(checkpoints) == 0:
-        return None
-    return max(checkpoints, key=lambda p: int(p.name[len(_CHECKPOINT_PREFIX) :]))
-
-
-def find_all_checkpoints(model_dir: Path) -> List[int]:
-    checkpoints = [p for p in model_dir.glob(f"{_CHECKPOINT_PREFIX}*") if p.is_dir()]
-    return sorted(int(p.name[len(_CHECKPOINT_PREFIX) :]) for p in checkpoints)
-
-
-def resolve_checkpoint_path(model_dir: Path, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
-    """Resolve a checkpoint specifier to a (path, step) pair based purely on the
-    HuggingFace ``checkpoint-<step>`` directory convention and ``trainer_state.json``.
-
-    This is shared by both the seq2seq and decoder-only model implementations. ``AVERAGE``
-    is not supported (checkpoint averaging is not meaningful for these checkpoints) and
-    raises a ``ValueError``, which the test harness handles gracefully.
-    """
-    step: Optional[int] = None
-    if isinstance(ckpt, str):
-        ckpt_str = ckpt.lower()
-        if "avg" in ckpt_str:
-            ckpt = CheckpointType.AVERAGE
-        elif "best" in ckpt_str:
-            ckpt = CheckpointType.BEST
-        elif "last" in ckpt_str:
-            ckpt = CheckpointType.LAST
-        else:
-            step = int(ckpt)
-            ckpt = CheckpointType.OTHER
-    elif isinstance(ckpt, int):
-        step = ckpt
-        ckpt = CheckpointType.OTHER
-
-    if ckpt is CheckpointType.BEST:
-        trainer_state = read_trainer_state(model_dir)
-        ckpt_path = model_dir / Path(trainer_state["best_model_checkpoint"]).name
-        step = int(ckpt_path.name[len(_CHECKPOINT_PREFIX) :])
-    elif ckpt is CheckpointType.LAST:
-        last_checkpoint = find_last_checkpoint(model_dir)
-        if last_checkpoint is None:
-            raise ValueError(f"No checkpoints found in {model_dir}.")
-        ckpt_path = last_checkpoint
-        step = int(ckpt_path.name[len(_CHECKPOINT_PREFIX) :])
-    elif ckpt is CheckpointType.OTHER and step is not None:
-        ckpt_path = model_dir / f"{_CHECKPOINT_PREFIX}{step}"
-    else:
-        raise ValueError(f"Unsupported checkpoint type: {ckpt}.")
-    return ckpt_path, step
 
 
 @dataclass
@@ -206,6 +127,7 @@ def write_effective_config(path: Path, config_root: dict, training_args: Any, ma
 class NMTModel(ABC):
     def __init__(self, config: "Config") -> None:
         self._config = config
+        self._checkpoints = CheckpointDirectory(config.model_dir)
         # The cached inference model is framework-specific (a torch model), so it is typed loosely
         # here to keep this base module free of transformers/torch imports.
         self._cached_inference_model: Optional[Any] = None
@@ -241,8 +163,17 @@ class NMTModel(ABC):
     ) -> Generator[SentenceTranslationGroup, None, None]:
         ...
 
-    def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
-        return resolve_checkpoint_path(self._config.model_dir, ckpt)
+    def resolve_checkpoint(self, ckpt: Union[CheckpointType, str, int]) -> Checkpoint:
+        return self._checkpoints.resolve(ckpt)
+
+    def has_best_checkpoint(self) -> bool:
+        return self._checkpoints.has_best()
+
+    def checkpoint_steps(self) -> List[int]:
+        return self._checkpoints.steps()
+
+    def has_been_trained(self) -> bool:
+        return self._checkpoints.exists()
 
     def clear_cache(self) -> None:
         self._cached_inference_model = None
@@ -379,14 +310,6 @@ class Config(ABC):
         return self.data["mirror"]
 
     @property
-    def share_vocab(self) -> bool:
-        return self.data["share_vocab"]
-
-    @property
-    def stats_max_size(self) -> int:
-        return self.data["stats_max_size"]
-
-    @property
     def has_parent(self) -> bool:
         return "parent" in self.data
 
@@ -395,14 +318,6 @@ class Config(ABC):
         return any(
             pair.is_val and (pair.size if pair.val_size is None else pair.val_size) > 0 for pair in self.corpus_pairs
         )
-
-    @property
-    def has_best_checkpoint(self) -> bool:
-        return model_has_best_checkpoint(self.model_dir)
-
-    @property
-    def all_checkpoint_steps(self) -> List[int]:
-        return find_all_checkpoints(self.model_dir)
 
     def _disable_eval_if_no_val_split(self) -> None:
         """Turn off evaluation-related settings when there is no validation split. Shared by
