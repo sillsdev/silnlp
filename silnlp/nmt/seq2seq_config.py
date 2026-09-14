@@ -76,7 +76,6 @@ from .config import (
     write_effective_config,
 )
 from .corpora import DataFile
-from .corpus_inventory import SUPPORTED_GLOSS_ISOS
 from .model_name import ModelName
 from .token_occurrence_logger import TokenOccurrenceLogger
 from .tokenizer import NullTokenizer, Tokenizer
@@ -672,40 +671,17 @@ class Seq2SeqConfig(Config):
         src_terms_files: List[Tuple[DataFile, List[str]]],
         trg_terms_files: List[Tuple[DataFile, List[str]]],
     ) -> int:
-        terms_config = self.data["terms"]
         dict_count = 0
         with ExitStack() as stack:
-            dict_trg_file = stack.enter_context(self._open_append(self.dict_trg_filename()))
-            dict_vref_file = stack.enter_context(self._open_append(self.dict_vref_filename()))
+            dict_trg_file = stack.enter_context(self.files.open_for_append(self.files.dictionary_target()))
+            dict_vref_file = stack.enter_context(self.files.open_for_append(self.files.dictionary_vref()))
 
-            categories: Optional[Union[str, List[str]]] = terms_config["categories"]
-            if isinstance(categories, str):
-                categories = [cat.strip() for cat in categories.split(",")]
-            if categories is not None and len(categories) == 0:
+            categories = self._term_categories()
+            if categories.excludes_everything():
                 return 0
-            categories_set: Optional[Set[str]] = None if categories is None else set(categories)
-
-            if terms_config["include_glosses"]:
-                gloss_iso: Optional[str] = str(terms_config["include_glosses"]).lower()
-                if gloss_iso == "true":
-                    src_gloss_iso = list(self.inventory.source_isos().intersection(SUPPORTED_GLOSS_ISOS))
-                    trg_gloss_iso = list(self.inventory.target_isos().intersection(SUPPORTED_GLOSS_ISOS))
-                    if src_gloss_iso:
-                        gloss_iso = src_gloss_iso[0]
-                    elif trg_gloss_iso:
-                        gloss_iso = trg_gloss_iso[0]
-                    else:
-                        LOGGER.warning(
-                            f"Glosses could not be included. No source or target language matches any of the supported gloss language codes: {', '.join(SUPPORTED_GLOSS_ISOS)}."
-                        )
-                        gloss_iso = None
-                elif gloss_iso not in SUPPORTED_GLOSS_ISOS:
-                    LOGGER.warning(
-                        f"Gloss language code, {gloss_iso}, does not match the supported gloss language codes: {', '.join(SUPPORTED_GLOSS_ISOS)}."
-                    )
-                    gloss_iso = None
-            else:
-                gloss_iso = None
+            categories_set = categories.as_set()
+            gloss_language = self._gloss_language()
+            gloss_iso = gloss_language.iso()
 
             all_trg_terms: List[Tuple[DataFile, Dict[str, Term], List[str]]] = []
             for trg_terms_file, tags in trg_terms_files:
@@ -732,7 +708,7 @@ class Seq2SeqConfig(Config):
                     dict_vref_file.write("\t".join(str(vref) for vref in trg_term.vrefs) + "\n")
                     dict_count += 1
 
-            if gloss_iso is not None:
+            if gloss_language.is_available():
                 all_src_terms: List[Tuple[DataFile, Dict[str, Term], List[str]]] = []
                 for src_terms_file, tags in src_terms_files:
                     all_src_terms.append(

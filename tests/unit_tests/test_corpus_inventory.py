@@ -153,6 +153,7 @@ def test_gloss_files_reach_the_target_side_when_its_language_is_a_gloss_language
     ]
     collected = inventory(pairs, environment, include_glosses=True)
     assert glosses in collected.target_file_paths()
+    assert glosses not in collected.source_file_paths()
 
 
 def test_no_gloss_files_are_included_when_glosses_are_off(corpora, environment):

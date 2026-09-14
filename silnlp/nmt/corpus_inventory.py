@@ -3,8 +3,7 @@ from typing import Dict, Iterable, List, Set, Tuple, Union
 
 from ..common.environment import SilNlpEnv
 from .corpora import BASIC_DATA_PROJECT, CorpusPair, DataFile, IsoPairInfo, get_terms_glosses_file_paths
-
-SUPPORTED_GLOSS_ISOS = ["fr", "en", "id", "es", "pt"]
+from .terms import GlossLanguages
 
 
 class CorpusInventory:
@@ -13,6 +12,7 @@ class CorpusInventory:
     ) -> None:
         self._corpus_pairs = list(corpus_pairs)
         self._include_glosses = include_glosses
+        self._gloss_languages = GlossLanguages()
         self._environment = environment
 
         self._src_isos: Set[str] = set()
@@ -147,11 +147,10 @@ class CorpusInventory:
         self._trg_projects.update(tf.project for tf in corpus_pair.trg_files)
         if not self._include_glosses:
             return
-        for gloss_iso in SUPPORTED_GLOSS_ISOS:
-            if gloss_iso in pair_src_isos or gloss_iso == self._include_glosses:
-                self._src_file_paths.update(self._glosses_of(corpus_pair.src_terms_files))
-            if gloss_iso in pair_trg_isos:
-                self._trg_file_paths.update(self._glosses_of(corpus_pair.trg_terms_files))
+        if self._gloss_languages.any_in(pair_src_isos) or self._gloss_languages.includes(self._include_glosses):
+            self._src_file_paths.update(self._glosses_of(corpus_pair.src_terms_files))
+        if self._gloss_languages.any_in(pair_trg_isos):
+            self._trg_file_paths.update(self._glosses_of(corpus_pair.trg_terms_files))
 
     def _collect_iso_pairs(self, corpus_pair: CorpusPair) -> None:
         for src_file in corpus_pair.src_files:

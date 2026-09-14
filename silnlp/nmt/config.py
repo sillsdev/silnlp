@@ -13,7 +13,7 @@ from typing import Any, Dict, Generator, Iterable, List, Optional, Set, TextIO, 
 
 import pandas as pd
 import yaml
-from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
+from machine.scripture import get_books
 from machine.tokenization import LatinWordTokenizer
 from tqdm import tqdm
 
@@ -28,13 +28,12 @@ from ..common.corpus import (
     get_terms_corpus,
     get_terms_data_frame,
     include_chapters,
-    load_corpus,
     split_corpus,
     split_parallel_corpus,
 )
 from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import SentenceTranslationGroup
-from ..common.utils import NoiseMethod, Side, add_tags_to_dataframe, add_tags_to_sentence, set_seed
+from ..common.utils import Side, add_tags_to_dataframe, add_tags_to_sentence, set_seed
 from .checkpoints import Checkpoint, CheckpointDirectory, CheckpointType
 from .corpora import (
     BASIC_DATA_PROJECT,
@@ -45,8 +44,11 @@ from .corpora import (
     get_parallel_corpus_size,
     parse_corpus_pairs,
 )
-from .corpus_inventory import SUPPORTED_GLOSS_ISOS, CorpusInventory
+from .corpus_inventory import CorpusInventory
 from .experiment_files import ExperimentFiles
+from .sentence_noiser import SentenceNoiser
+from .shared_test_set import SharedTestSet
+from .terms import GlossLanguage, TermCategories
 from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger((__package__ or "") + ".config")
@@ -437,14 +439,17 @@ class Config(ABC):
         project_isos: Dict[str, str] = {}
 
         if pair.use_test_set_from != "":
-            self._populate_pair_test_indices(pair.use_test_set_from, pair_test_indices)
+            pair_test_indices = SharedTestSet(
+                pair.use_test_set_from, self.inventory, self._environment, self.exp_dir
+            ).indices_by_iso_pair()
 
         for src_file, trg_file in get_data_file_pairs(pair):
             project_isos[src_file.project] = src_file.iso
             project_isos[trg_file.project] = trg_file.iso
             corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, environment=self._environment)
             if len(pair.src_noise) > 0:
-                corpus["source"] = [self._noise(pair.src_noise, x) for x in corpus["source"]]
+                noiser = SentenceNoiser(pair.src_noise)
+                corpus["source"] = [noiser.apply(x) for x in corpus["source"]]
 
             if len(pair.corpus_books) > 0:
                 cur_train = include_chapters(corpus, pair.corpus_books)
@@ -615,37 +620,6 @@ class Config(ABC):
         LOGGER.info(f"train size: {train_count}," f" val size: {val_count}," f" test size: {test_count},")
         return train_count
 
-    def _populate_pair_test_indices(self, exp_name: str, pair_test_indices: Dict[Tuple[str, str], Set[int]]) -> None:
-        vrefs: Dict[str, int] = {}
-        for i, vref_str in enumerate(load_corpus(self._environment.assets_dir / "vref.txt")):
-            if vref_str != "":
-                vrefs[vref_str] = i
-
-        exp_dir = self._environment.get_mt_exp_dir(exp_name)
-        vref_paths: List[Path] = list(exp_dir.glob("test*.vref.txt"))
-        if len(vref_paths) == 0:
-            if Path.samefile(exp_dir, self.exp_dir):
-                # Having the same experiment and "use_test_set_from" directory will also result in no test vrefs, but more cryptically.
-                LOGGER.warning('The experiment specified in "use_test_set_from" is the same as the current experiment.')
-            else:
-                LOGGER.warning(
-                    f'The experiment specified in "use_test_set_from" does not contain any files matching "test*.vref.txt".'
-                )
-        for vref_path in vref_paths:
-            stem = vref_path.stem
-            test_indices: Set[int] = set()
-            if stem == "test.vref":
-                pair_test_indices[(self.inventory.default_test_source_iso(), self.inventory.default_test_target_iso())] = test_indices
-            else:
-                _, src_iso, trg_iso, _ = stem.split(".", maxsplit=4)
-                pair_test_indices[(src_iso, trg_iso)] = test_indices
-
-            for vref_str in load_corpus(vref_path):
-                vref = VerseRef.from_string(vref_str, ORIGINAL_VERSIFICATION)
-                if vref.has_multiple:
-                    vref.simplify()
-                test_indices.add(vrefs[str(vref)])
-
     def _add_to_eval_data_set(
         self,
         src_iso: str,
@@ -812,36 +786,13 @@ class Config(ABC):
         trg_terms_files: List[Tuple[DataFile, List[str]]],
         filter_books: Optional[Set[int]] = None,
     ) -> Optional[pd.DataFrame]:
-        terms_config = self.data["terms"]
         terms: Optional[pd.DataFrame] = None
-        categories: Optional[Union[str, List[str]]] = terms_config["categories"]
-        if isinstance(categories, str):
-            categories = [cat.strip() for cat in categories.split(",")]
-        if categories is not None and len(categories) == 0:
+        categories = self._term_categories()
+        if categories.excludes_everything():
             return None
-        categories_set: Optional[Set[str]] = None if categories is None else set(categories)
-
-        if terms_config["include_glosses"]:
-            gloss_iso: Optional[str] = str(terms_config["include_glosses"]).lower()
-            if gloss_iso == "true":
-                src_gloss_iso = list(self.inventory.source_isos().intersection(SUPPORTED_GLOSS_ISOS))
-                trg_gloss_iso = list(self.inventory.target_isos().intersection(SUPPORTED_GLOSS_ISOS))
-                if src_gloss_iso:
-                    gloss_iso = src_gloss_iso[0]
-                elif trg_gloss_iso:
-                    gloss_iso = trg_gloss_iso[0]
-                else:
-                    LOGGER.warning(
-                        f"Glosses could not be included. No source or target language matches any of the supported gloss language codes: {', '.join(SUPPORTED_GLOSS_ISOS)}."
-                    )
-                    gloss_iso = None
-            elif gloss_iso not in SUPPORTED_GLOSS_ISOS:
-                LOGGER.warning(
-                    f"Gloss language code, {gloss_iso}, does not match the supported gloss language codes: {', '.join(SUPPORTED_GLOSS_ISOS)}."
-                )
-                gloss_iso = None
-        else:
-            gloss_iso = None
+        categories_set = categories.as_set()
+        gloss_language = self._gloss_language()
+        gloss_iso = gloss_language.iso()
 
         all_src_terms: List[Tuple[DataFile, Dict[str, Term], List[str]]] = []
         for src_terms_file, tags in src_terms_files:
@@ -863,15 +814,15 @@ class Config(ABC):
                 cur_terms["source_lang"] = src_terms_file.iso
                 cur_terms["target_lang"] = trg_terms_file.iso
                 terms = self._add_to_terms_data_set(terms, cur_terms, tags)
-        if gloss_iso is not None:
-            if gloss_iso in self.inventory.target_isos():
+        if gloss_language.is_available():
+            if gloss_language.can_serve_as_target():
                 for src_terms_file, src_terms, tags in all_src_terms:
                     cur_terms = get_terms_data_frame(src_terms, categories_set, filter_books)
                     cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
                     cur_terms["source_lang"] = src_terms_file.iso
                     cur_terms["target_lang"] = gloss_iso
                     terms = self._add_to_terms_data_set(terms, cur_terms, tags)
-            if gloss_iso in self.inventory.source_isos() or gloss_iso == terms_config["include_glosses"]:
+            if gloss_language.can_serve_as_source():
                 for trg_terms_file, trg_terms, tags in all_trg_terms:
                     cur_terms = get_terms_data_frame(trg_terms, categories_set, filter_books)
                     cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
@@ -879,6 +830,14 @@ class Config(ABC):
                     cur_terms["target_lang"] = trg_terms_file.iso
                     terms = self._add_to_terms_data_set(terms, cur_terms, tags)
         return terms
+
+    def _term_categories(self) -> TermCategories:
+        return TermCategories(self.data["terms"]["categories"])
+
+    def _gloss_language(self) -> GlossLanguage:
+        return GlossLanguage(
+            self.data["terms"]["include_glosses"], self.inventory.source_isos(), self.inventory.target_isos()
+        )
 
     def _write_val_trg(self, tokenizer: Optional[Tokenizer], val: Dict[Tuple[str, str], pd.DataFrame]) -> None:
         with ExitStack() as stack:
@@ -936,6 +895,7 @@ class Config(ABC):
         tokenizer.set_src_lang(src_file.iso)
         tokenizer.set_trg_lang(trg_file.iso)
         corpus_size = get_parallel_corpus_size(src_file.path, trg_file.path)
+        noiser = SentenceNoiser(pair.src_noise)
         train_count = 0
         val_count = 0
         test_count = 0
@@ -1025,7 +985,7 @@ class Config(ABC):
                         val_trg_ref_file.write("\n")
                     val_count += 1
                 elif pair.is_train and (train_indices is None or index in train_indices):
-                    noised_src_sentence = add_tags_to_sentence(pair.tags, self._noise(pair.src_noise, src_line))
+                    noised_src_sentence = add_tags_to_sentence(pair.tags, noiser.apply(src_line))
                     train_count += self._write_train_sentence_pair(
                         train_src_file,
                         train_trg_file,
@@ -1038,7 +998,7 @@ class Config(ABC):
                     if self.mirror:
                         tokenizer.set_src_lang(trg_file.iso)
                         tokenizer.set_trg_lang(src_file.iso)
-                        mirror_src_sentence = add_tags_to_sentence(pair.tags, self._noise(pair.src_noise, trg_line))
+                        mirror_src_sentence = add_tags_to_sentence(pair.tags, noiser.apply(trg_line))
                         mirror_trg_sentence = src_line
                         train_count += self._write_train_sentence_pair(
                             train_src_file,
@@ -1106,14 +1066,6 @@ class Config(ABC):
             if vref_file is not None:
                 vref_file.write("\n")
         return len(src_variants)
-
-    def _noise(self, src_noise: List[NoiseMethod], src_sentence: str) -> str:
-        if len(src_noise) == 0:
-            return src_sentence
-        tokens = src_sentence.split()
-        for noise_method in src_noise:
-            tokens = noise_method(tokens)
-        return " ".join(tokens)
 
     @abstractmethod
     def _build_vocabs(self, stats: bool = False) -> None:
