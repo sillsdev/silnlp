@@ -37,7 +37,8 @@ def get_scripture_parallel_corpus(
     src_file_path: Path,
     trg_file_path: Path,
     remove_empty_sentences: bool = True,
-    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+    *,
+    environment: SilNlpEnv,
 ) -> pd.DataFrame:
     vrefs: List[VerseRef] = []
     src_sentences: List[str] = []
@@ -206,7 +207,8 @@ def exclude_chapters(corpus: pd.DataFrame, books: dict) -> pd.DataFrame:
 def get_terms_metadata_path(
     list_name: str,
     mt_terms_dir: Optional[Path] = None,
-    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+    *,
+    environment: SilNlpEnv,
 ) -> Path:
     md_path = environment.assets_dir / f"{list_name}-metadata.txt"
     if md_path.is_file():
@@ -264,7 +266,8 @@ class Term:
 def get_terms(
     terms_renderings_path: Path,
     iso: Optional[str] = None,
-    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+    *,
+    environment: SilNlpEnv,
 ) -> Dict[str, Term]:
     list_name = get_terms_list(terms_renderings_path)
     terms_metadata_path = get_terms_metadata_path(list_name, environment=environment)
