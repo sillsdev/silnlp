@@ -8,11 +8,14 @@ from silnlp.nmt.corpora import CorpusPair, DataFile, DataFileMapping, DataFileTy
 
 
 @pytest.fixture
-def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SilNlpEnv:
-    monkeypatch.setenv("SIL_NLP_DATA_PATH", str(tmp_path))
-    for overriding_variable in ("SIL_NLP_MT_DIR", "SIL_NLP_MT_TERMS_DIR", "SIL_NLP_MT_SCRIPTURE_DIR"):
-        monkeypatch.delenv(overriding_variable, raising=False)
-    silnlp_env = SilNlpEnv()
+def environment(tmp_path: Path) -> SilNlpEnv:
+    silnlp_env = SilNlpEnv(
+        data_dir=tmp_path,
+        mt_dir=tmp_path / "MT",
+        mt_experiments_dir=tmp_path / "MT" / "experiments",
+        mt_terms_dir=tmp_path / "MT" / "terms",
+        mt_scripture_dir=tmp_path / "MT" / "scripture",
+    )
     for directory in (silnlp_env.mt_scripture_dir, silnlp_env.mt_corpora_dir, silnlp_env.mt_terms_dir):
         directory.mkdir(parents=True, exist_ok=True)
     return silnlp_env
