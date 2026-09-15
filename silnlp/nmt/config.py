@@ -1,31 +1,25 @@
 import logging
 import random
 from abc import ABC, abstractmethod
-from contextlib import ExitStack
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Generator, Iterable, List, Optional, Set, Tuple, Union
 
-import pandas as pd
 import yaml
 from machine.scripture import get_books
 
 from ..common.corpus import (
-    Term,
     exclude_chapters,
     get_scripture_parallel_corpus,
-    get_terms,
-    get_terms_corpus,
-    get_terms_data_frame,
     include_chapters,
     split_corpus,
     split_parallel_corpus,
 )
 from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import SentenceTranslationGroup
-from ..common.utils import Side, set_seed
+from ..common.utils import set_seed
 from .checkpoints import Checkpoint, CheckpointDirectory, CheckpointType
 from .corpora import (
     CorpusPair,
@@ -43,6 +37,8 @@ from .experiment_files import ExperimentFiles
 from .sentence_noiser import SentenceNoiser
 from .shared_test_set import SharedTestSet
 from .terms import GlossLanguage, TermCategories
+from .terms_data_set import TermsDataSet
+from .terms_writer import TermsWriter
 from .train_data_set import TrainDataSet
 from .tokenization_statistics import TokenizationStatistics
 from .tokenizer import Tokenizer
@@ -287,7 +283,13 @@ class Config(ABC):
 
         terms_train_count = 0
         if terms_config["train"]:
-            terms_train_count = self._write_terms(tokenizer, src_terms_files, trg_terms_files)
+            terms_train_count = TermsWriter(
+                TermsDataSet(self.files, tokenizer, mirror=self.mirror),
+                self._term_categories(),
+                self._gloss_language(),
+                self._term_filter_books(),
+                self._environment,
+            ).write(src_terms_files, trg_terms_files)
             LOGGER.info(f"terms train size: {terms_train_count}")
         train_count += terms_train_count
 
@@ -445,106 +447,10 @@ class Config(ABC):
         LOGGER.info(f"train size: {train_count}," f" val size: {val_count}," f" test size: {test_count},")
         return train_count
 
-    def _write_terms(
-        self,
-        tokenizer: Tokenizer,
-        src_terms_files: List[Tuple[DataFile, List[str]]],
-        trg_terms_files: List[Tuple[DataFile, List[str]]],
-    ) -> int:
-
-        try:
-            filter_books = get_books(self.data["terms"]["filter_books"])
-        except KeyError:
-            filter_books = None
-
-        terms = self._collect_terms(src_terms_files, trg_terms_files, filter_books)
-
-        if terms is None:
-            return 0
-        terms = terms.drop_duplicates(subset=["source", "target"])
-
-        train_count = 0
-        with ExitStack() as stack:
-            train_src_file = stack.enter_context(self.files.open_for_append(self.files.train_source()))
-            train_trg_file = stack.enter_context(self.files.open_for_append(self.files.train_target()))
-            train_vref_file = stack.enter_context(self.files.open_for_append(self.files.train_vref()))
-            train_src_detok_file = stack.enter_context(self.files.open_for_append(self.files.train_source_detokenized()))
-            train_trg_detok_file = stack.enter_context(self.files.open_for_append(self.files.train_target_detokenized()))
-
-            for _, term in terms.iterrows():
-                src_term = term["source"]
-                trg_term = term["target"]
-                tokenizer.set_src_lang(term["source_lang"])
-                tokenizer.set_trg_lang(term["target_lang"])
-
-                src_term_variants = [
-                    tokenizer.tokenize(Side.SOURCE, src_term, add_dummy_prefix=True),
-                    tokenizer.tokenize(Side.SOURCE, src_term, add_dummy_prefix=False),
-                ]
-                trg_term_variants = [
-                    tokenizer.tokenize(Side.TARGET, trg_term, add_dummy_prefix=True),
-                    tokenizer.tokenize(Side.TARGET, trg_term, add_dummy_prefix=False),
-                ]
-                for stv, ttv in zip(src_term_variants, trg_term_variants):
-                    train_src_file.write(stv + "\n")
-                    train_trg_file.write(ttv + "\n")
-                    train_vref_file.write("\n")
-                    train_count += 1
-
-                train_src_detok_file.write(src_term + "\n")
-                train_trg_detok_file.write(trg_term + "\n")
-        return train_count
-
-    def _collect_terms(
-        self,
-        src_terms_files: List[Tuple[DataFile, List[str]]],
-        trg_terms_files: List[Tuple[DataFile, List[str]]],
-        filter_books: Optional[Set[int]] = None,
-    ) -> Optional[pd.DataFrame]:
-        terms: Optional[pd.DataFrame] = None
-        categories = self._term_categories()
-        if categories.excludes_everything():
+    def _term_filter_books(self) -> Optional[Set[int]]:
+        if "filter_books" not in self.data["terms"]:
             return None
-        categories_set = categories.as_set()
-        gloss_language = self._gloss_language()
-        gloss_iso = gloss_language.iso()
-
-        all_src_terms: List[Tuple[DataFile, Dict[str, Term], List[str]]] = []
-        for src_terms_file, tags in src_terms_files:
-            all_src_terms.append(
-                (src_terms_file, get_terms(src_terms_file.path, iso=gloss_iso, environment=self._environment), tags)
-            )
-
-        all_trg_terms: List[Tuple[DataFile, Dict[str, Term], List[str]]] = []
-        for trg_terms_file, tags in trg_terms_files:
-            all_trg_terms.append(
-                (trg_terms_file, get_terms(trg_terms_file.path, iso=gloss_iso, environment=self._environment), tags)
-            )
-
-        for src_terms_file, src_terms, tags in all_src_terms:
-            for trg_terms_file, trg_terms, _ in all_trg_terms:
-                if src_terms_file.iso == trg_terms_file.iso:
-                    continue
-                cur_terms = get_terms_corpus(src_terms, trg_terms, categories_set, filter_books)
-                cur_terms["source_lang"] = src_terms_file.iso
-                cur_terms["target_lang"] = trg_terms_file.iso
-                terms = self._add_to_terms_data_set(terms, cur_terms, tags)
-        if gloss_language.is_available():
-            if gloss_language.can_serve_as_target():
-                for src_terms_file, src_terms, tags in all_src_terms:
-                    cur_terms = get_terms_data_frame(src_terms, categories_set, filter_books)
-                    cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
-                    cur_terms["source_lang"] = src_terms_file.iso
-                    cur_terms["target_lang"] = gloss_iso
-                    terms = self._add_to_terms_data_set(terms, cur_terms, tags)
-            if gloss_language.can_serve_as_source():
-                for trg_terms_file, trg_terms, tags in all_trg_terms:
-                    cur_terms = get_terms_data_frame(trg_terms, categories_set, filter_books)
-                    cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
-                    cur_terms["source_lang"] = gloss_iso
-                    cur_terms["target_lang"] = trg_terms_file.iso
-                    terms = self._add_to_terms_data_set(terms, cur_terms, tags)
-        return terms
+        return get_books(self.data["terms"]["filter_books"])
 
     def _term_categories(self) -> TermCategories:
         return TermCategories(self.data["terms"]["categories"])

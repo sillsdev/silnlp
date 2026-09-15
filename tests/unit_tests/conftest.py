@@ -43,6 +43,9 @@ class CorpusBuilder:
     def terms_file(self, iso: str, project: str, list_type: str = "Custom") -> DataFile:
         return self._data_file(self._environment.mt_terms_dir / f"{iso}-{project}-{list_type}-renderings.txt")
 
+    def terms_list(self, list_type: str = "Custom") -> "TermsListBuilder":
+        return TermsListBuilder(self._environment, list_type)
+
     def glosses_file(self, iso: str, list_type: str = "Custom") -> Path:
         # A list type the repository does not ship glosses for, so the resolver uses this directory.
         path = self._environment.mt_terms_dir / f"{iso.lower()}-{list_type}-glosses.txt"
@@ -87,6 +90,32 @@ class CorpusBuilder:
     def _data_file(self, path: Path, lines: Iterable[str] = ()) -> DataFile:
         path.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
         return DataFile(path, environment=self._environment)
+
+
+class TermsListBuilder:
+    """Builds a Paratext term list, whose metadata, verse references, renderings and glosses line up row by row."""
+
+    def __init__(self, environment: SilNlpEnv, list_type: str) -> None:
+        self._environment = environment
+        self._list_type = list_type
+
+    def term(self, term_id: str, category: str = "PN", vrefs: Iterable[str] = ("MAT 1:1",)) -> "TermsListBuilder":
+        self._append(f"{self._list_type}-metadata.txt", f"{term_id}\t{category}\tdomain")
+        self._append(f"{self._list_type}-vrefs.txt", "\t".join(vrefs))
+        return self
+
+    def renderings(self, iso: str, project: str, *renderings: Iterable[str]) -> DataFile:
+        path = self._environment.mt_terms_dir / f"{iso}-{project}-{self._list_type}-renderings.txt"
+        path.write_text("".join("\t".join(term) + "\n" for term in renderings), encoding="utf-8")
+        return DataFile(path, environment=self._environment)
+
+    def glosses(self, iso: str, *glosses: Iterable[str]) -> None:
+        path = self._environment.mt_terms_dir / f"{iso.lower()}-{self._list_type}-glosses.txt"
+        path.write_text("".join("\t".join(term) + "\n" for term in glosses), encoding="utf-8")
+
+    def _append(self, name: str, line: str) -> None:
+        with (self._environment.mt_terms_dir / name).open("a", encoding="utf-8", newline="\n") as file:
+            file.write(line + "\n")
 
 
 def isos(data_files: Iterable[DataFile]) -> List[str]:
