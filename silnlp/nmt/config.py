@@ -13,12 +13,9 @@ import pandas as pd
 import yaml
 from machine.scripture import get_books
 
-from ..alignment.config import get_aligner_name
-from ..alignment.utils import add_alignment_scores
 from ..common.corpus import (
     Term,
     exclude_chapters,
-    filter_parallel_corpus,
     get_scripture_parallel_corpus,
     get_terms,
     get_terms_corpus,
@@ -38,6 +35,7 @@ from .corpora import (
     get_data_file_pairs,
     parse_corpus_pairs,
 )
+from .alignment_scores import AlignmentScores
 from .basic_data_set_writer import BasicDataSetWriter
 from .corpus_inventory import CorpusInventory
 from .experiment_files import ExperimentFiles
@@ -329,6 +327,8 @@ class Config(ABC):
         pair_test_indices: Dict[Tuple[str, str], Set[int]] = {}
         project_isos: Dict[str, str] = {}
 
+        alignment_scores = AlignmentScores(self.exp_dir, self.data["aligner"], force=force_align)
+
         if pair.use_test_set_from != "":
             pair_test_indices = SharedTestSet(
                 pair.use_test_set_from, self.inventory, self._environment, self.exp_dir
@@ -353,20 +353,11 @@ class Config(ABC):
             corpus_count = len(cur_train)
 
             if pair.is_train and pair.score_threshold > 0:
-                pair_align_path = (
-                    self.exp_dir / f"{src_file.iso}-{src_file.project}_{trg_file.iso}-{trg_file.project}.csv"
+                alignment_scores.add_to(
+                    cur_train,
+                    f"{src_file.iso}-{src_file.project}",
+                    f"{trg_file.iso}-{trg_file.project}",
                 )
-                if pair_align_path.is_file() and not force_align:
-                    LOGGER.info(f"Using pre-existing alignment scores from {pair_align_path}")
-                    pair_scores = pd.read_csv(pair_align_path)
-                    pair_scores["idx"] = cur_train.index
-                    pair_scores.set_index("idx", inplace=True)
-                    cur_train["score"] = pair_scores["score"]
-                else:
-                    aligner_id = self.data["aligner"]
-                    LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
-                    add_alignment_scores(cur_train, aligner_id)
-                    cur_train.to_csv(pair_align_path, index=False)
 
             if pair.is_test:
                 if len(pair.test_books) > 0:
@@ -408,12 +399,7 @@ class Config(ABC):
                     )
 
             if pair.is_train and pair.score_threshold > 0:
-                unfiltered_count = len(cur_train)
-                cur_train = filter_parallel_corpus(cur_train, pair.score_threshold)
-                cur_train = cur_train.drop("score", axis=1, errors="ignore")
-                LOGGER.info(
-                    f"Filtered out {unfiltered_count - len(cur_train)} verses pairs with alignment below {pair.score_threshold}."
-                )
+                cur_train = alignment_scores.filter(cur_train, pair.score_threshold)
 
             if pair.is_val:
                 if pair.disjoint_val and val_indices is None:
