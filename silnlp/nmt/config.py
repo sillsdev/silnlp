@@ -42,6 +42,7 @@ from .experiment_files import ExperimentFiles
 from .sentence_noiser import SentenceNoiser
 from .shared_test_set import SharedTestSet
 from .terms import GlossLanguage, TermCategories
+from .train_data_set import TrainDataSet
 from .tokenization_statistics import TokenizationStatistics
 from .tokenizer import Tokenizer
 
@@ -320,12 +321,13 @@ class Config(ABC):
         val_indices: Optional[Set[int]] = None
         train_indices: Optional[Set[int]] = None
 
-        train: Optional[pd.DataFrame] = None
         val: Dict[Tuple[str, str], pd.DataFrame] = {}
         test: Dict[Tuple[str, str], pd.DataFrame] = {}
         pair_val_indices: Dict[Tuple[str, str], Set[int]] = {}
         pair_test_indices: Dict[Tuple[str, str], Set[int]] = {}
-        project_isos: Dict[str, str] = {}
+        train_data_set = TrainDataSet(
+            self.files, tokenizer, mixed_source=pair.mapping == DataFileMapping.MIXED_SRC
+        )
 
         alignment_scores = AlignmentScores(self.exp_dir, self.data["aligner"], force=force_align)
 
@@ -335,8 +337,8 @@ class Config(ABC):
             ).indices_by_iso_pair()
 
         for src_file, trg_file in get_data_file_pairs(pair):
-            project_isos[src_file.project] = src_file.iso
-            project_isos[trg_file.project] = trg_file.iso
+            train_data_set.note_language(src_file.project, src_file.iso)
+            train_data_set.note_language(trg_file.project, trg_file.iso)
             corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, environment=self._environment)
             if len(pair.src_noise) > 0:
                 noiser = SentenceNoiser(pair.src_noise)
@@ -427,35 +429,23 @@ class Config(ABC):
                 _, cur_train = split_parallel_corpus(cur_train, train_size, train_indices)
 
                 if self.mirror:
-                    mirror_cur_train = cur_train.rename(
-                        columns={
-                            "source": "target",
-                            "target": "source",
-                            "source_lang": "target_lang",
-                            "target_lang": "source_lang",
-                        }
-                    )
-                    train = self._add_to_train_data_set(
+                    train_data_set.add(
                         trg_file.project,
                         src_file.project,
-                        pair.mapping == DataFileMapping.MIXED_SRC,
                         pair.tags,
-                        train,
-                        mirror_cur_train,
+                        cur_train.rename(
+                            columns={
+                                "source": "target",
+                                "target": "source",
+                                "source_lang": "target_lang",
+                                "target_lang": "source_lang",
+                            }
+                        ),
                     )
 
-                train = self._add_to_train_data_set(
-                    src_file.project,
-                    trg_file.project,
-                    pair.mapping == DataFileMapping.MIXED_SRC,
-                    pair.tags,
-                    train,
-                    cur_train,
-                )
+                train_data_set.add(src_file.project, trg_file.project, pair.tags, cur_train)
 
-        train_count = 0
-        if train is not None and len(train) > 0:
-            train_count = self._write_train(tokenizer, train, pair.mapping == DataFileMapping.MIXED_SRC, project_isos)
+        train_count = train_data_set.write()
 
         val_count = 0
         if len(val) > 0:
@@ -525,87 +515,6 @@ class Config(ABC):
             pair_data.fillna("", inplace=True)
 
         dataset[(src_iso, trg_iso)] = pair_data
-
-    def _add_to_train_data_set(
-        self,
-        src_project: str,
-        trg_project: str,
-        mixed_src: bool,
-        tags: List[str],
-        train: Optional[pd.DataFrame],
-        cur_train: pd.DataFrame,
-    ) -> pd.DataFrame:
-        add_tags_to_dataframe(tags, cur_train)
-        if mixed_src:
-            cur_train.drop("source_lang", axis=1, inplace=True, errors="ignore")
-            cur_train.rename(columns={"source": f"source_{src_project}"}, inplace=True)
-            cur_train.set_index(
-                pd.MultiIndex.from_tuples(
-                    map(lambda i: (trg_project, i), cur_train.index), names=["trg_project", "index"]
-                ),
-                inplace=True,
-            )
-            train = cur_train if train is None else train.combine_first(cur_train)
-        else:
-            train = cur_train if train is None else pd.concat([train, cur_train], ignore_index=True)
-        return train
-
-    def _add_to_terms_data_set(
-        self, terms: Optional[pd.DataFrame], cur_terms: pd.DataFrame, tags: Optional[List[str]] = []
-    ) -> pd.DataFrame:
-        if self.mirror:
-            mirror_cur_terms = cur_terms.rename(
-                columns={
-                    "source": "target",
-                    "target": "source",
-                    "source_lang": "target_lang",
-                    "target_lang": "source_lang",
-                }
-            )
-            add_tags_to_dataframe(tags, mirror_cur_terms)
-            terms = mirror_cur_terms if terms is None else pd.concat([terms, mirror_cur_terms], ignore_index=True)
-
-        add_tags_to_dataframe(tags, cur_terms)
-        return cur_terms if terms is None else pd.concat([terms, cur_terms], ignore_index=True)
-
-    def _write_train(
-        self,
-        tokenizer: Tokenizer,
-        train: pd.DataFrame,
-        mixed_src: bool,
-        project_isos: Dict[str, str],
-    ) -> int:
-        train_count = 0
-        train.fillna("", inplace=True)
-        src_columns: List[str] = [c for c in train.columns if c.startswith("source")]
-        with ExitStack() as stack:
-            train_src_file = stack.enter_context(self.files.open_for_append(self.files.train_source()))
-            train_trg_file = stack.enter_context(self.files.open_for_append(self.files.train_target()))
-            train_vref_file = stack.enter_context(self.files.open_for_append(self.files.train_vref()))
-            train_src_detok_file = stack.enter_context(self.files.open_for_append(self.files.train_source_detokenized()))
-            train_trg_detok_file = stack.enter_context(self.files.open_for_append(self.files.train_target_detokenized()))
-
-            for _, row in train.iterrows():
-                if mixed_src:
-                    nonempty_src_columns: List[str] = [c for c in src_columns if row[c] != ""]
-                    source_column = random.choice(nonempty_src_columns)
-                    src_sentence = row[source_column]
-                    src_project = source_column[7:]
-                    tokenizer.set_src_lang(project_isos[src_project])
-                else:
-                    src_sentence = row["source"]
-                    tokenizer.set_src_lang(row["source_lang"])
-                trg_sentence = row["target"]
-                vref = row["vref"]
-                tokenizer.set_trg_lang(row["target_lang"])
-
-                train_src_file.write(tokenizer.tokenize(Side.SOURCE, src_sentence) + "\n")
-                train_trg_file.write(tokenizer.tokenize(Side.TARGET, trg_sentence) + "\n")
-                train_vref_file.write(str(vref) + "\n")
-                train_src_detok_file.write(src_sentence + "\n")
-                train_trg_detok_file.write(trg_sentence + "\n")
-                train_count += 1
-        return train_count
 
     def _write_terms(
         self,

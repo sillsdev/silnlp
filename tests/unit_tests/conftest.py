@@ -4,7 +4,9 @@ from typing import Iterable, List, Optional, Union
 import pytest
 
 from silnlp.common.environment import SilNlpEnv
+from silnlp.common.utils import Side
 from silnlp.nmt.corpora import CorpusPair, DataFile, DataFileMapping, DataFileType
+from silnlp.nmt.tokenizer import Tokenizer
 
 
 @pytest.fixture
@@ -89,3 +91,28 @@ class CorpusBuilder:
 
 def isos(data_files: Iterable[DataFile]) -> List[str]:
     return [data_file.iso for data_file in data_files]
+
+
+class MarkingTokenizer(Tokenizer):
+    """Marks what it was asked to do, so the writers' calls are visible in the written files."""
+
+    def __init__(self) -> None:
+        self.src_lang = ""
+        self.trg_lang = ""
+
+    def set_src_lang(self, src_lang: str) -> None:
+        self.src_lang = src_lang
+
+    def set_trg_lang(self, trg_lang: str) -> None:
+        self.trg_lang = trg_lang
+
+    def tokenize(self, side, line, add_dummy_prefix=True, sample_subwords=False, add_special_tokens=True) -> str:
+        lang = self.src_lang if side is Side.SOURCE else self.trg_lang
+        return f"{'_' if add_dummy_prefix else ''}{lang}|{line}"
+
+    def normalize(self, side: Side, line: str) -> str:
+        lang = self.src_lang if side is Side.SOURCE else self.trg_lang
+        return f"norm({lang}|{line})"
+
+    def detokenize(self, line: str) -> str:
+        return line
