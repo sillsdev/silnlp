@@ -54,7 +54,7 @@ from .config import (
     warn_about_renamed_keys,
     write_effective_config,
 )
-from .corpora import DataFile
+from .dictionary_writer import DictionaryWriter, NoDictionaryWriter
 from .seq2seq_config import batch_sentences, find_executable_batch_size
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -493,13 +493,8 @@ class LLMConfig(Config):
         # No vocabulary surgery for decoder-only LLMs; they use their own tokenizer.
         return
 
-    def _write_dictionary(
-        self,
-        tokenizer: Tokenizer,
-        src_terms_files: List[Tuple[DataFile, List[str]]],
-        trg_terms_files: List[Tuple[DataFile, List[str]]],
-    ) -> int:
-        return 0
+    def _dictionary_writer(self, tokenizer: Tokenizer) -> DictionaryWriter:
+        return NoDictionaryWriter()
 
 
 @dataclass

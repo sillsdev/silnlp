@@ -17,6 +17,7 @@ from .basic_data_set_writer import BasicDataSetWriter
 from .checkpoints import Checkpoint, CheckpointDirectory, CheckpointType
 from .corpora import DataFile, parse_corpus_pairs
 from .corpus_inventory import CorpusInventory
+from .dictionary_writer import DictionaryWriter
 from .experiment_files import ExperimentFiles
 from .scripture_data_set_writer import ScriptureDataSetWriter
 from .terms import GlossLanguage, TermCategories
@@ -288,7 +289,7 @@ class Config(ABC):
 
         dict_count = 0
         if terms_config["dictionary"]:
-            dict_count = self._write_dictionary(tokenizer, src_terms_files, trg_terms_files)
+            dict_count = self._dictionary_writer(tokenizer).write(src_terms_files, trg_terms_files)
             LOGGER.info(f"dictionary size: {dict_count}")
 
         if stats and self.data["tokenize"]:
@@ -314,10 +315,5 @@ class Config(ABC):
         ...
 
     @abstractmethod
-    def _write_dictionary(
-        self,
-        tokenizer: Tokenizer,
-        src_terms_files: List[Tuple[DataFile, List[str]]],
-        trg_terms_files: List[Tuple[DataFile, List[str]]],
-    ) -> int:
+    def _dictionary_writer(self, tokenizer: Tokenizer) -> DictionaryWriter:
         ...

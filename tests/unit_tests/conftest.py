@@ -145,7 +145,7 @@ class MarkingTokenizer(Tokenizer):
 
     def tokenize(self, side, line, add_dummy_prefix=True, sample_subwords=False, add_special_tokens=True) -> str:
         lang = self.src_lang if side is Side.SOURCE else self.trg_lang
-        return f"{'_' if add_dummy_prefix else ''}{lang}|{line}"
+        return f"{'_' if add_dummy_prefix else ''}{lang}{'' if add_special_tokens else '*'}|{line}"
 
     def normalize(self, side: Side, line: str) -> str:
         lang = self.src_lang if side is Side.SOURCE else self.trg_lang

@@ -60,7 +60,7 @@ from transformers.utils import SAFE_WEIGHTS_NAME
 from transformers.utils.generic import PaddingStrategy, to_py_obj
 from transformers.utils.logging import tqdm
 
-from ..common.corpus import Term, count_lines, get_terms
+from ..common.corpus import count_lines
 from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
@@ -74,7 +74,7 @@ from .config import (
     warn_about_renamed_keys,
     write_effective_config,
 )
-from .corpora import DataFile
+from .dictionary_writer import DictionaryWriter, TermDictionaryWriter
 from .decoder_inputs import DecoderInputs
 from .model_name import ModelName
 from .token_occurrence_logger import TokenOccurrenceLogger
@@ -648,79 +648,10 @@ class Seq2SeqConfig(Config):
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
 
-    def _write_dictionary(
-        self,
-        tokenizer: Tokenizer,
-        src_terms_files: List[Tuple[DataFile, List[str]]],
-        trg_terms_files: List[Tuple[DataFile, List[str]]],
-    ) -> int:
-        dict_count = 0
-        with ExitStack() as stack:
-            dict_trg_file = stack.enter_context(self.files.open_for_append(self.files.dictionary_target()))
-            dict_vref_file = stack.enter_context(self.files.open_for_append(self.files.dictionary_vref()))
-
-            categories = self._term_categories()
-            if categories.excludes_everything():
-                return 0
-            categories_set = categories.as_set()
-            gloss_language = self._gloss_language()
-            gloss_iso = gloss_language.iso()
-
-            all_trg_terms: List[Tuple[DataFile, Dict[str, Term], List[str]]] = []
-            for trg_terms_file, tags in trg_terms_files:
-                all_trg_terms.append(
-                    (trg_terms_file, get_terms(trg_terms_file.path, iso=gloss_iso, environment=self._environment), tags)
-                )
-            for trg_terms_file, trg_terms, tags in all_trg_terms:
-                tokenizer.set_trg_lang(trg_terms_file.iso)
-                for trg_term in trg_terms.values():
-                    if categories_set is not None and trg_term.cat not in categories_set:
-                        continue
-
-                    renderings: List[str] = []
-                    for rendering in trg_term.renderings:
-                        renderings.append(
-                            tokenizer.tokenize(Side.TARGET, rendering, add_dummy_prefix=True, add_special_tokens=False)
-                        )
-                        renderings.append(
-                            tokenizer.tokenize(Side.TARGET, rendering, add_dummy_prefix=False, add_special_tokens=False)
-                        )
-                    if len(renderings) == 0:
-                        continue
-                    dict_trg_file.write("\t".join(renderings) + "\n")
-                    dict_vref_file.write("\t".join(str(vref) for vref in trg_term.vrefs) + "\n")
-                    dict_count += 1
-
-            if gloss_language.is_available():
-                all_src_terms: List[Tuple[DataFile, Dict[str, Term], List[str]]] = []
-                for src_terms_file, tags in src_terms_files:
-                    all_src_terms.append(
-                        (
-                            src_terms_file,
-                            get_terms(src_terms_file.path, iso=gloss_iso, environment=self._environment),
-                            tags,
-                        )
-                    )
-                tokenizer.set_trg_lang(gloss_iso)
-                for src_term_file, src_terms, tags in all_src_terms:
-                    for src_term in src_terms.values():
-                        if categories_set is not None and src_term.cat not in categories_set:
-                            continue
-
-                        glosses: List[str] = []
-                        for gloss in src_term.glosses:
-                            glosses.append(
-                                tokenizer.tokenize(Side.TARGET, gloss, add_dummy_prefix=True, add_special_tokens=False)
-                            )
-                            glosses.append(
-                                tokenizer.tokenize(Side.TARGET, gloss, add_dummy_prefix=False, add_special_tokens=False)
-                            )
-                        if len(glosses) == 0:
-                            continue
-                        dict_trg_file.write("\t".join(glosses) + "\n")
-                        dict_vref_file.write("\t".join(str(vref) for vref in src_term.vrefs) + "\n")
-                        dict_count += 1
-        return dict_count
+    def _dictionary_writer(self, tokenizer: Tokenizer) -> DictionaryWriter:
+        return TermDictionaryWriter(
+            self.files, tokenizer, self._term_categories(), self._gloss_language(), self._environment
+        )
 
 
 def batch_prepare_for_model(

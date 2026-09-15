@@ -217,8 +217,8 @@ def test_a_dictionary_pair_writes_both_token_variants_of_every_sentence(corpora,
     writer, files = writer_for([pair], environment, exp_dir)
     writer.write(pair)
 
-    assert lines_of(files.dictionary_source()) == ["_en|one\ten|one"]
-    assert lines_of(files.dictionary_target()) == ["_es|uno\tes|uno"]
+    assert lines_of(files.dictionary_source()) == ["_en*|one\ten*|one"]
+    assert lines_of(files.dictionary_target()) == ["_es*|uno\tes*|uno"]
     assert lines_of(files.dictionary_vref()) == [""]
 
 
