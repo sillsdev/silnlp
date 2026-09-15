@@ -1,4 +1,3 @@
-import itertools
 import logging
 import random
 from abc import ABC, abstractmethod
@@ -7,7 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Generator, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
+from typing import Any, Dict, Generator, Iterable, List, Optional, Set, Tuple, Union
 
 import pandas as pd
 import yaml
@@ -26,7 +25,7 @@ from ..common.corpus import (
 )
 from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import SentenceTranslationGroup
-from ..common.utils import Side, add_tags_to_dataframe, set_seed
+from ..common.utils import Side, set_seed
 from .checkpoints import Checkpoint, CheckpointDirectory, CheckpointType
 from .corpora import (
     CorpusPair,
@@ -38,6 +37,8 @@ from .corpora import (
 from .alignment_scores import AlignmentScores
 from .basic_data_set_writer import BasicDataSetWriter
 from .corpus_inventory import CorpusInventory
+from .eval_data_set import EvalDataSet
+from .eval_data_set_writer import ScriptureTestSetWriter, ScriptureValidationSetWriter
 from .experiment_files import ExperimentFiles
 from .sentence_noiser import SentenceNoiser
 from .shared_test_set import SharedTestSet
@@ -321,10 +322,8 @@ class Config(ABC):
         val_indices: Optional[Set[int]] = None
         train_indices: Optional[Set[int]] = None
 
-        val: Dict[Tuple[str, str], pd.DataFrame] = {}
-        test: Dict[Tuple[str, str], pd.DataFrame] = {}
-        pair_val_indices: Dict[Tuple[str, str], Set[int]] = {}
-        pair_test_indices: Dict[Tuple[str, str], Set[int]] = {}
+        validation = EvalDataSet()
+        test = EvalDataSet()
         train_data_set = TrainDataSet(
             self.files, tokenizer, mixed_source=pair.mapping == DataFileMapping.MIXED_SRC
         )
@@ -332,9 +331,11 @@ class Config(ABC):
         alignment_scores = AlignmentScores(self.exp_dir, self.data["aligner"], force=force_align)
 
         if pair.use_test_set_from != "":
-            pair_test_indices = SharedTestSet(
-                pair.use_test_set_from, self.inventory, self._environment, self.exp_dir
-            ).indices_by_iso_pair()
+            test = EvalDataSet(
+                SharedTestSet(
+                    pair.use_test_set_from, self.inventory, self._environment, self.exp_dir
+                ).indices_by_iso_pair()
+            )
 
         for src_file, trg_file in get_data_file_pairs(pair):
             train_data_set.note_language(src_file.project, src_file.iso)
@@ -381,24 +382,16 @@ class Config(ABC):
                         _, cur_test = split_parallel_corpus(
                             cur_test,
                             test_size,
-                            pair_test_indices.get((src_file.iso, trg_file.iso), test_indices),
+                            test.indices_for(src_file.iso, trg_file.iso, default=test_indices),
                         )
                 else:
                     cur_train, cur_test = split_parallel_corpus(
-                        cur_train, test_size, pair_test_indices.get((src_file.iso, trg_file.iso), test_indices)
+                        cur_train, test_size, test.indices_for(src_file.iso, trg_file.iso, default=test_indices)
                     )
 
                 cur_test.drop("score", axis=1, inplace=True, errors="ignore")
                 if src_file.include_test:
-                    self._add_to_eval_data_set(
-                        src_file.iso,
-                        trg_file.iso,
-                        trg_file.project,
-                        pair.tags,
-                        test,
-                        pair_test_indices,
-                        cur_test,
-                    )
+                    test.add(src_file.iso, trg_file.iso, trg_file.project, pair.tags, cur_test)
 
             if pair.is_train and pair.score_threshold > 0:
                 cur_train = alignment_scores.filter(cur_train, pair.score_threshold)
@@ -414,12 +407,10 @@ class Config(ABC):
                     val_indices = set(random.sample(indices, min(split_size, len(indices))))
 
                 cur_train, cur_val = split_parallel_corpus(
-                    cur_train, val_size, pair_val_indices.get((src_file.iso, trg_file.iso), val_indices)
+                    cur_train, val_size, validation.indices_for(src_file.iso, trg_file.iso, default=val_indices)
                 )
 
-                self._add_to_eval_data_set(
-                    src_file.iso, trg_file.iso, trg_file.project, pair.tags, val, pair_val_indices, cur_val
-                )
+                validation.add(src_file.iso, trg_file.iso, trg_file.project, pair.tags, cur_val)
 
             if pair.is_train:
                 cur_train["source_lang"] = src_file.iso
@@ -447,74 +438,12 @@ class Config(ABC):
 
         train_count = train_data_set.write()
 
-        val_count = 0
-        if len(val) > 0:
-            for (src_iso, trg_iso), pair_val in val.items():
-                tokenizer.set_src_lang(src_iso)
-                tokenizer.set_trg_lang(trg_iso)
-                self.files.append(self.files.validation_source(), tokenizer.tokenize_all(Side.SOURCE, pair_val["source"]))
-                self.files.append(self.files.validation_source_detokenized(), pair_val["source"])
-            val_count = sum(len(pair_val) for pair_val in val.values())
-            self._write_val_trg(tokenizer, val)
-            self._write_val_trg(None, val)
-            val_vref = itertools.chain.from_iterable(pair_val["vref"] for pair_val in val.values())
-            self.files.append(self.files.validation_vref(), (str(vr) for vr in val_vref))
-
-        test_count = 0
-        for (src_iso, trg_iso), pair_test in test.items():
-            tokenizer.set_src_lang(src_iso)
-            tokenizer.set_trg_lang(trg_iso)
-            self.files.append(self.files.test_vref(src_iso, trg_iso), (str(vr) for vr in pair_test["vref"]))
-            self.files.append(
-                self.files.test_source(src_iso, trg_iso),
-                tokenizer.tokenize_all(Side.SOURCE, pair_test["source"]),
-            )
-            self.files.append(self.files.test_source_detokenized(src_iso, trg_iso), pair_test["source"])
-            test_count += len(pair_test)
-
-            columns: List[str] = [c for c in pair_test.columns if c.startswith("target")]
-            test_projects = self.inventory.test_projects(src_iso, trg_iso)
-            for column in columns:
-                project = column[len("target_") :]
-                self.files.append(
-                    self.files.test_target(src_iso, trg_iso, project),
-                    tokenizer.normalize_all(Side.TARGET, pair_test[column]),
-                )
-                test_projects.remove(project)
-            if self.inventory.has_multiple_test_projects(src_iso, trg_iso):
-                for project in test_projects:
-                    self.files.fill(self.files.test_target(src_iso, trg_iso, project), len(pair_test))
+        val_count = ScriptureValidationSetWriter(
+            self.files, tokenizer, multi_ref_eval=self.root["eval"]["multi_ref_eval"]
+        ).write(validation)
+        test_count = ScriptureTestSetWriter(self.files, self.inventory, tokenizer).write(test)
         LOGGER.info(f"train size: {train_count}," f" val size: {val_count}," f" test size: {test_count},")
         return train_count
-
-    def _add_to_eval_data_set(
-        self,
-        src_iso: str,
-        trg_iso: str,
-        trg_project: str,
-        tags: List[str],
-        dataset: Dict[Tuple[str, str], pd.DataFrame],
-        pair_indices: Dict[Tuple[str, str], Set[int]],
-        new_data: pd.DataFrame,
-    ) -> None:
-        if len(new_data) == 0:
-            return
-
-        add_tags_to_dataframe(tags, new_data)
-
-        pair_data = dataset.get((src_iso, trg_iso))
-
-        if (src_iso, trg_iso) not in pair_indices:
-            pair_indices[(src_iso, trg_iso)] = set(new_data.index)
-
-        new_data.rename(columns={"target": f"target_{trg_project}"}, inplace=True)
-        if pair_data is None:
-            pair_data = new_data
-        else:
-            pair_data = pair_data.combine_first(new_data)
-            pair_data.fillna("", inplace=True)
-
-        dataset[(src_iso, trg_iso)] = pair_data
 
     def _write_terms(
         self,
@@ -624,45 +553,6 @@ class Config(ABC):
         return GlossLanguage(
             self.data["terms"]["include_glosses"], self.inventory.source_isos(), self.inventory.target_isos()
         )
-
-    def _write_val_trg(self, tokenizer: Optional[Tokenizer], val: Dict[Tuple[str, str], pd.DataFrame]) -> None:
-        with ExitStack() as stack:
-            ref_files: List[TextIO] = []
-            for (src_iso, trg_iso), pair_val in val.items():
-                if tokenizer is not None:
-                    tokenizer.set_src_lang(src_iso)
-                    tokenizer.set_trg_lang(trg_iso)
-                columns: List[str] = [c for c in pair_val.columns if c.startswith("target")]
-                if self.root["eval"]["multi_ref_eval"]:
-                    val_project_count = self.files.validation_reference_count(src_iso, trg_iso)
-                    for index in pair_val.index:
-                        for ci in range(val_project_count):
-                            if len(ref_files) == ci:
-                                ref_files.append(stack.enter_context(self.files.open_for_append(self.files.validation_target(ci))))
-                            if ci < len(columns):
-                                col = columns[ci]
-                                if tokenizer is not None:
-                                    ref_files[ci].write(
-                                        tokenizer.tokenize(Side.TARGET, cast(str, pair_val.loc[index, col]).strip())
-                                        + "\n"
-                                    )
-                                else:
-                                    ref_files[ci].write(pair_val.loc[index, col] + "\n")
-                            else:
-                                ref_files[ci].write("\n")
-                else:
-                    for index in pair_val.index:
-                        if len(ref_files) == 0:
-                            fn = self.files.validation_target() if tokenizer is not None else self.files.validation_target_detokenized()
-                            ref_files.append(stack.enter_context(self.files.open_for_append(fn)))
-                        columns_with_data = [c for c in columns if cast(str, pair_val.loc[index, c]).strip() != ""]
-                        col = random.choice(columns_with_data)
-                        if tokenizer is not None:
-                            ref_files[0].write(
-                                tokenizer.tokenize(Side.TARGET, cast(str, pair_val.loc[index, col]).strip()) + "\n"
-                            )
-                        else:
-                            ref_files[0].write(pair_val.loc[index, col] + "\n")
 
     @abstractmethod
     def _build_vocabs(self, stats: bool = False) -> None:
