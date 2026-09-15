@@ -28,15 +28,9 @@ from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import SentenceTranslationGroup
 from ..common.utils import NoiseMethod, Side, add_tags_to_dataframe, set_seed
 from .alignment_scores import AlignmentScores
-from .checkpoints import Checkpoint, CheckpointDirectory, CheckpointType
-from .corpora import (
-    CorpusPair,
-    DataFile,
-    DataFileMapping,
-    get_data_file_pairs,
-    parse_corpus_pairs,
-)
 from .basic_data_set_writer import BasicDataSetWriter
+from .checkpoints import Checkpoint, CheckpointDirectory, CheckpointType
+from .corpora import CorpusPair, DataFile, DataFileMapping, get_data_file_pairs, parse_corpus_pairs
 from .corpus_inventory import CorpusInventory
 from .experiment_files import ExperimentFiles
 from .sentence_noiser import SentenceNoiser
