@@ -4,7 +4,7 @@ from typing import Iterable, List, Optional, Union
 import pytest
 
 from silnlp.common.environment import SilNlpEnv
-from silnlp.common.utils import Side
+from silnlp.common.utils import NoiseMethod, Side
 from silnlp.nmt.corpora import CorpusPair, DataFile, DataFileMapping, DataFileType
 from silnlp.nmt.tokenizer import Tokenizer
 
@@ -34,8 +34,9 @@ class CorpusBuilder:
     def __init__(self, environment: SilNlpEnv) -> None:
         self._environment = environment
 
-    def scripture_file(self, iso: str, project: str) -> DataFile:
-        return self._data_file(self._environment.mt_scripture_dir / f"{iso}-{project}.txt")
+    def scripture_file(self, iso: str, project: str, lines: Iterable[str] = ()) -> DataFile:
+        # Scripture files line up with assets/vref.txt, so line N is that file's Nth verse.
+        return self._data_file(self._environment.mt_scripture_dir / f"{iso}-{project}.txt", lines)
 
     def basic_file(self, iso: str, name: str, lines: Iterable[str] = ()) -> DataFile:
         return self._data_file(self._environment.mt_corpora_dir / f"{iso}-{name}.txt", lines)
@@ -65,22 +66,29 @@ class CorpusBuilder:
         trg_terms_files: Iterable[DataFile] = (),
         mapping: DataFileMapping = DataFileMapping.ONE_TO_ONE,
         is_lexical_data: bool = False,
+        corpus_books: Optional[dict] = None,
+        test_books: Optional[dict] = None,
+        disjoint_test: bool = True,
+        disjoint_val: bool = True,
+        score_threshold: float = 0.0,
+        use_test_set_from: str = "",
+        src_noise: Iterable[NoiseMethod] = (),
     ) -> CorpusPair:
         return CorpusPair(
             src_files=list(src_files),
             trg_files=list(trg_files),
             type=type,
-            src_noise=[],
+            src_noise=list(src_noise),
             tags=list(tags),
             size=size,
             test_size=test_size,
             val_size=val_size,
-            disjoint_test=True,
-            disjoint_val=True,
-            score_threshold=0.0,
-            corpus_books={},
-            test_books={},
-            use_test_set_from="",
+            disjoint_test=disjoint_test,
+            disjoint_val=disjoint_val,
+            score_threshold=score_threshold,
+            corpus_books=corpus_books if corpus_books is not None else {},
+            test_books=test_books if test_books is not None else {},
+            use_test_set_from=use_test_set_from,
             src_terms_files=list(src_terms_files),
             trg_terms_files=list(trg_terms_files),
             is_lexical_data=is_lexical_data,

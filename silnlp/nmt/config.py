@@ -1,5 +1,4 @@
 import logging
-import random
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass
@@ -10,36 +9,19 @@ from typing import Any, Dict, Generator, Iterable, List, Optional, Set, Tuple, U
 import yaml
 from machine.scripture import get_books
 
-from ..common.corpus import (
-    exclude_chapters,
-    get_scripture_parallel_corpus,
-    include_chapters,
-    split_corpus,
-    split_parallel_corpus,
-)
 from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import SentenceTranslationGroup
 from ..common.utils import set_seed
-from .checkpoints import Checkpoint, CheckpointDirectory, CheckpointType
-from .corpora import (
-    CorpusPair,
-    DataFile,
-    DataFileMapping,
-    get_data_file_pairs,
-    parse_corpus_pairs,
-)
 from .alignment_scores import AlignmentScores
 from .basic_data_set_writer import BasicDataSetWriter
+from .checkpoints import Checkpoint, CheckpointDirectory, CheckpointType
+from .corpora import DataFile, parse_corpus_pairs
 from .corpus_inventory import CorpusInventory
-from .eval_data_set import EvalDataSet
-from .eval_data_set_writer import ScriptureTestSetWriter, ScriptureValidationSetWriter
 from .experiment_files import ExperimentFiles
-from .sentence_noiser import SentenceNoiser
-from .shared_test_set import SharedTestSet
+from .scripture_data_set_writer import ScriptureDataSetWriter
 from .terms import GlossLanguage, TermCategories
 from .terms_data_set import TermsDataSet
 from .terms_writer import TermsWriter
-from .train_data_set import TrainDataSet
 from .tokenization_statistics import TokenizationStatistics
 from .tokenizer import Tokenizer
 
@@ -267,9 +249,20 @@ class Config(ABC):
         terms_config = self.data["terms"]
         src_terms_files: List[Tuple[DataFile, List[str]]] = []
         trg_terms_files: List[Tuple[DataFile, List[str]]] = []
+        alignment_scores = AlignmentScores(self.exp_dir, self.data["aligner"], force=force_align)
         for pair in self.corpus_pairs:
             if pair.is_scripture:
-                train_count += self._write_scripture_data_sets(tokenizer, pair, force_align)
+                train_count += ScriptureDataSetWriter(
+                    pair,
+                    self.files,
+                    self.inventory,
+                    tokenizer,
+                    alignment_scores,
+                    self._environment,
+                    self.exp_dir,
+                    mirror=self.mirror,
+                    multi_ref_eval=self.root["eval"]["multi_ref_eval"],
+                ).write()
             else:
                 train_count += BasicDataSetWriter(
                     self.files, self.inventory, tokenizer, mirror=self.mirror
@@ -301,150 +294,6 @@ class Config(ABC):
         if stats and self.data["tokenize"]:
             TokenizationStatistics(self.files).write()
 
-        return train_count
-
-    def _write_scripture_data_sets(
-        self,
-        tokenizer: Tokenizer,
-        pair: CorpusPair,
-        force_align: bool,
-    ) -> int:
-        src_corpora_str = ", ".join(sf.path.stem for sf in pair.src_files)
-        if len(pair.src_files) > 1:
-            src_corpora_str = f"[{src_corpora_str}]"
-        trg_corpora_str = ", ".join(tf.path.stem for tf in pair.trg_files)
-        if len(pair.trg_files) > 1:
-            trg_corpora_str = f"[{trg_corpora_str}]"
-        LOGGER.info(f"Preprocessing {src_corpora_str} -> {trg_corpora_str}")
-        test_size = pair.size if pair.test_size is None else pair.test_size
-        val_size = pair.size if pair.val_size is None else pair.val_size
-        train_size = pair.size
-
-        test_indices: Optional[Set[int]] = None
-        val_indices: Optional[Set[int]] = None
-        train_indices: Optional[Set[int]] = None
-
-        validation = EvalDataSet()
-        test = EvalDataSet()
-        train_data_set = TrainDataSet(
-            self.files, tokenizer, mixed_source=pair.mapping == DataFileMapping.MIXED_SRC
-        )
-
-        alignment_scores = AlignmentScores(self.exp_dir, self.data["aligner"], force=force_align)
-
-        if pair.use_test_set_from != "":
-            test = EvalDataSet(
-                SharedTestSet(
-                    pair.use_test_set_from, self.inventory, self._environment, self.exp_dir
-                ).indices_by_iso_pair()
-            )
-
-        for src_file, trg_file in get_data_file_pairs(pair):
-            train_data_set.note_language(src_file.project, src_file.iso)
-            train_data_set.note_language(trg_file.project, trg_file.iso)
-            corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, environment=self._environment)
-            if len(pair.src_noise) > 0:
-                noiser = SentenceNoiser(pair.src_noise)
-                corpus["source"] = [noiser.apply(x) for x in corpus["source"]]
-
-            if len(pair.corpus_books) > 0:
-                cur_train = include_chapters(corpus, pair.corpus_books)
-                if len(pair.test_books) > 0:
-                    cur_train = exclude_chapters(cur_train, pair.test_books)
-            elif len(pair.test_books) > 0:
-                cur_train = exclude_chapters(corpus, pair.test_books)
-            else:
-                cur_train = corpus
-            corpus_count = len(cur_train)
-
-            if pair.is_train and pair.score_threshold > 0:
-                alignment_scores.add_to(
-                    cur_train,
-                    f"{src_file.iso}-{src_file.project}",
-                    f"{trg_file.iso}-{trg_file.project}",
-                )
-
-            if pair.is_test:
-                if len(pair.test_books) > 0:
-                    cur_test = include_chapters(corpus, pair.test_books)
-                    if test_indices is None:
-                        test_indices = cur_test.index
-
-                if pair.disjoint_test and test_indices is None:
-                    indices: Set[int] = set(cur_train.index)
-                    if pair.disjoint_val and val_indices is not None:
-                        indices.difference_update(val_indices)
-                    split_size = test_size
-                    if isinstance(split_size, float):
-                        split_size = int(split_size if split_size > 1 else corpus_count * split_size)
-                    test_indices = set(random.sample(indices, min(split_size, len(indices))))
-
-                if len(pair.test_books) > 0:
-                    if test_size > 0:
-                        _, cur_test = split_parallel_corpus(
-                            cur_test,
-                            test_size,
-                            test.indices_for(src_file.iso, trg_file.iso, default=test_indices),
-                        )
-                else:
-                    cur_train, cur_test = split_parallel_corpus(
-                        cur_train, test_size, test.indices_for(src_file.iso, trg_file.iso, default=test_indices)
-                    )
-
-                cur_test.drop("score", axis=1, inplace=True, errors="ignore")
-                if src_file.include_test:
-                    test.add(src_file.iso, trg_file.iso, trg_file.project, pair.tags, cur_test)
-
-            if pair.is_train and pair.score_threshold > 0:
-                cur_train = alignment_scores.filter(cur_train, pair.score_threshold)
-
-            if pair.is_val:
-                if pair.disjoint_val and val_indices is None:
-                    indices = set(cur_train.index)
-                    if pair.disjoint_test and test_indices is not None:
-                        indices.difference_update(test_indices)
-                    split_size = val_size
-                    if isinstance(split_size, float):
-                        split_size = int(split_size if split_size > 1 else corpus_count * split_size)
-                    val_indices = set(random.sample(indices, min(split_size, len(indices))))
-
-                cur_train, cur_val = split_parallel_corpus(
-                    cur_train, val_size, validation.indices_for(src_file.iso, trg_file.iso, default=val_indices)
-                )
-
-                validation.add(src_file.iso, trg_file.iso, trg_file.project, pair.tags, cur_val)
-
-            if pair.is_train:
-                cur_train["source_lang"] = src_file.iso
-                cur_train["target_lang"] = trg_file.iso
-
-                train_indices = split_corpus(set(cur_train.index), train_size)
-                _, cur_train = split_parallel_corpus(cur_train, train_size, train_indices)
-
-                if self.mirror:
-                    train_data_set.add(
-                        trg_file.project,
-                        src_file.project,
-                        pair.tags,
-                        cur_train.rename(
-                            columns={
-                                "source": "target",
-                                "target": "source",
-                                "source_lang": "target_lang",
-                                "target_lang": "source_lang",
-                            }
-                        ),
-                    )
-
-                train_data_set.add(src_file.project, trg_file.project, pair.tags, cur_train)
-
-        train_count = train_data_set.write()
-
-        val_count = ScriptureValidationSetWriter(
-            self.files, tokenizer, multi_ref_eval=self.root["eval"]["multi_ref_eval"]
-        ).write(validation)
-        test_count = ScriptureTestSetWriter(self.files, self.inventory, tokenizer).write(test)
-        LOGGER.info(f"train size: {train_count}," f" val size: {val_count}," f" test size: {test_count},")
         return train_count
 
     def _term_filter_books(self) -> Optional[Set[int]]:
