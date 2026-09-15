@@ -66,6 +66,11 @@ class ExperimentFiles:
     def dictionary_vref(self) -> Path:
         return self._exp_dir / "dict.vref.txt"
 
+    def validation_reference_count(self, src_iso: str, trg_iso: str) -> int:
+        if self._multi_ref_eval:
+            return self._inventory.validation_project_count(src_iso, trg_iso)
+        return 1
+
     def statistics_report(self) -> Path:
         return self._exp_dir / "tokenization_stats.csv"
 

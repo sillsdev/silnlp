@@ -35,8 +35,8 @@ class CorpusBuilder:
     def scripture_file(self, iso: str, project: str) -> DataFile:
         return self._data_file(self._environment.mt_scripture_dir / f"{iso}-{project}.txt")
 
-    def basic_file(self, iso: str, name: str) -> DataFile:
-        return self._data_file(self._environment.mt_corpora_dir / f"{iso}-{name}.txt")
+    def basic_file(self, iso: str, name: str, lines: Iterable[str] = ()) -> DataFile:
+        return self._data_file(self._environment.mt_corpora_dir / f"{iso}-{name}.txt", lines)
 
     def terms_file(self, iso: str, project: str, list_type: str = "Custom") -> DataFile:
         return self._data_file(self._environment.mt_terms_dir / f"{iso}-{project}-{list_type}-renderings.txt")
@@ -59,6 +59,7 @@ class CorpusBuilder:
         src_terms_files: Iterable[DataFile] = (),
         trg_terms_files: Iterable[DataFile] = (),
         mapping: DataFileMapping = DataFileMapping.ONE_TO_ONE,
+        is_lexical_data: bool = False,
     ) -> CorpusPair:
         return CorpusPair(
             src_files=list(src_files),
@@ -77,12 +78,12 @@ class CorpusBuilder:
             use_test_set_from="",
             src_terms_files=list(src_terms_files),
             trg_terms_files=list(trg_terms_files),
-            is_lexical_data=False,
+            is_lexical_data=is_lexical_data,
             mapping=mapping,
         )
 
-    def _data_file(self, path: Path) -> DataFile:
-        path.touch()
+    def _data_file(self, path: Path, lines: Iterable[str] = ()) -> DataFile:
+        path.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
         return DataFile(path, environment=self._environment)
 
 

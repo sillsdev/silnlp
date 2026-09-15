@@ -12,7 +12,6 @@ from typing import Any, Dict, Generator, Iterable, List, Optional, Set, TextIO, 
 import pandas as pd
 import yaml
 from machine.scripture import get_books
-from tqdm import tqdm
 
 from ..alignment.config import get_aligner_name
 from ..alignment.utils import add_alignment_scores
@@ -30,17 +29,16 @@ from ..common.corpus import (
 )
 from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import SentenceTranslationGroup
-from ..common.utils import Side, add_tags_to_dataframe, add_tags_to_sentence, set_seed
+from ..common.utils import Side, add_tags_to_dataframe, set_seed
 from .checkpoints import Checkpoint, CheckpointDirectory, CheckpointType
 from .corpora import (
-    BASIC_DATA_PROJECT,
     CorpusPair,
     DataFile,
     DataFileMapping,
     get_data_file_pairs,
-    get_parallel_corpus_size,
     parse_corpus_pairs,
 )
+from .basic_data_set_writer import BasicDataSetWriter
 from .corpus_inventory import CorpusInventory
 from .experiment_files import ExperimentFiles
 from .sentence_noiser import SentenceNoiser
@@ -277,7 +275,9 @@ class Config(ABC):
             if pair.is_scripture:
                 train_count += self._write_scripture_data_sets(tokenizer, pair, force_align)
             else:
-                train_count += self._write_basic_data_sets(tokenizer, pair)
+                train_count += BasicDataSetWriter(
+                    self.files, self.inventory, tokenizer, mirror=self.mirror
+                ).write(pair)
 
             if terms_config["dictionary"] or terms_config["train"]:
                 for file in pair.src_terms_files:
@@ -739,7 +739,7 @@ class Config(ABC):
                     tokenizer.set_trg_lang(trg_iso)
                 columns: List[str] = [c for c in pair_val.columns if c.startswith("target")]
                 if self.root["eval"]["multi_ref_eval"]:
-                    val_project_count = self._validation_reference_count(src_iso, trg_iso)
+                    val_project_count = self.files.validation_reference_count(src_iso, trg_iso)
                     for index in pair_val.index:
                         for ci in range(val_project_count):
                             if len(ref_files) == ci:
@@ -768,195 +768,6 @@ class Config(ABC):
                             )
                         else:
                             ref_files[0].write(pair_val.loc[index, col] + "\n")
-
-    def _write_basic_data_sets(self, tokenizer: Tokenizer, pair: CorpusPair) -> int:
-        total_train_count = 0
-        for src_file, trg_file in zip(pair.src_files, pair.trg_files):
-            total_train_count += self._write_basic_data_file_pair(tokenizer, pair, src_file, trg_file)
-        return total_train_count
-
-    def _write_basic_data_file_pair(
-        self,
-        tokenizer: Tokenizer,
-        pair: CorpusPair,
-        src_file: DataFile,
-        trg_file: DataFile,
-    ) -> int:
-        LOGGER.info(f"Preprocessing {src_file.path.stem} -> {trg_file.path.stem}")
-        tokenizer.set_src_lang(src_file.iso)
-        tokenizer.set_trg_lang(trg_file.iso)
-        corpus_size = get_parallel_corpus_size(src_file.path, trg_file.path)
-        noiser = SentenceNoiser(pair.src_noise)
-        train_count = 0
-        val_count = 0
-        test_count = 0
-        dict_count = 0
-        with ExitStack() as stack:
-            input_src_file = stack.enter_context(src_file.path.open("r", encoding="utf-8"))
-            input_trg_file = stack.enter_context(trg_file.path.open("r", encoding="utf-8"))
-            test_indices: Optional[Set[int]] = set()
-            if pair.is_test:
-                test_size = pair.size if pair.test_size is None else pair.test_size
-                test_indices = split_corpus(corpus_size, test_size)
-
-            val_indices: Optional[Set[int]] = set()
-            if pair.is_val and test_indices is not None:
-                val_size = pair.size if pair.val_size is None else pair.val_size
-                val_indices = split_corpus(corpus_size, val_size, test_indices)
-
-            train_indices: Optional[Set[int]] = set()
-            if pair.is_train and test_indices is not None and val_indices is not None:
-                train_size = pair.size
-                train_indices = split_corpus(corpus_size, train_size, test_indices | val_indices)
-
-            train_src_file = stack.enter_context(self.files.open_for_append(self.files.train_source()))
-            train_trg_file = stack.enter_context(self.files.open_for_append(self.files.train_target()))
-            val_src_file = stack.enter_context(self.files.open_for_append(self.files.validation_source()))
-            val_trg_file = stack.enter_context(self.files.open_for_append(self.files.validation_target()))
-            test_src_file = stack.enter_context(self.files.open_for_append(self.files.test_source(src_file.iso, trg_file.iso)))
-            test_trg_file = stack.enter_context(self.files.open_for_append(self.files.test_target(src_file.iso, trg_file.iso)))
-
-            train_vref_file: Optional[TextIO] = None
-            val_vref_file: Optional[TextIO] = None
-            test_vref_file: Optional[TextIO] = None
-            test_trg_project_files: List[TextIO] = []
-            val_trg_ref_files: List[TextIO] = []
-            dict_src_file: Optional[TextIO] = None
-            dict_trg_file: Optional[TextIO] = None
-            dict_vref_file: Optional[TextIO] = None
-            if self.inventory.has_scripture_data():
-                train_vref_file = stack.enter_context(self.files.open_for_append(self.files.train_vref()))
-                val_vref_file = stack.enter_context(self.files.open_for_append(self.files.validation_vref()))
-                test_vref_file = stack.enter_context(
-                    self.files.open_for_append(self.files.test_vref(src_file.iso, trg_file.iso))
-                )
-                test_projects = self.inventory.test_projects(src_file.iso, trg_file.iso)
-                if self.inventory.has_multiple_test_projects(src_file.iso, trg_file.iso):
-                    test_trg_project_files = [
-                        stack.enter_context(
-                            self.files.open_for_append(self.files.test_target(src_file.iso, trg_file.iso, project))
-                        )
-                        for project in test_projects
-                        if project != BASIC_DATA_PROJECT
-                    ]
-                val_ref_count = self._validation_reference_count(src_file.iso, trg_file.iso)
-                val_trg_ref_files = [
-                    stack.enter_context(self.files.open_for_append(self.files.validation_target(index)))
-                    for index in range(1, val_ref_count)
-                ]
-            if pair.is_dictionary:
-                dict_src_file = stack.enter_context(self.files.open_for_append(self.files.dictionary_source()))
-                dict_trg_file = stack.enter_context(self.files.open_for_append(self.files.dictionary_target()))
-                dict_vref_file = stack.enter_context(self.files.open_for_append(self.files.dictionary_vref()))
-
-            index = 0
-            for src_line, trg_line in tqdm(zip(input_src_file, input_trg_file)):
-                src_line = src_line.strip()
-                trg_line = trg_line.strip()
-                if len(src_line) == 0 or len(trg_line) == 0:
-                    continue
-
-                src_sentence = add_tags_to_sentence(pair.tags, src_line)
-                trg_sentence = trg_line
-
-                if pair.is_test and (test_indices is None or index in test_indices):
-                    test_src_file.write(tokenizer.tokenize(Side.SOURCE, src_sentence) + "\n")
-                    test_trg_file.write(tokenizer.normalize(Side.TARGET, trg_sentence) + "\n")
-                    if test_vref_file is not None:
-                        test_vref_file.write("\n")
-                    for test_trg_project_file in test_trg_project_files:
-                        test_trg_project_file.write("\n")
-                    test_count += 1
-                elif pair.is_val and (val_indices is None or index in val_indices):
-                    val_src_file.write(tokenizer.tokenize(Side.SOURCE, src_sentence) + "\n")
-                    val_trg_file.write(tokenizer.tokenize(Side.TARGET, trg_sentence) + "\n")
-                    if val_vref_file is not None:
-                        val_vref_file.write("\n")
-                    for val_trg_ref_file in val_trg_ref_files:
-                        val_trg_ref_file.write("\n")
-                    val_count += 1
-                elif pair.is_train and (train_indices is None or index in train_indices):
-                    noised_src_sentence = add_tags_to_sentence(pair.tags, noiser.apply(src_line))
-                    train_count += self._write_train_sentence_pair(
-                        train_src_file,
-                        train_trg_file,
-                        train_vref_file,
-                        tokenizer,
-                        noised_src_sentence,
-                        trg_sentence,
-                        pair.is_lexical_data,
-                    )
-                    if self.mirror:
-                        tokenizer.set_src_lang(trg_file.iso)
-                        tokenizer.set_trg_lang(src_file.iso)
-                        mirror_src_sentence = add_tags_to_sentence(pair.tags, noiser.apply(trg_line))
-                        mirror_trg_sentence = src_line
-                        train_count += self._write_train_sentence_pair(
-                            train_src_file,
-                            train_trg_file,
-                            train_vref_file,
-                            tokenizer,
-                            mirror_src_sentence,
-                            mirror_trg_sentence,
-                            pair.is_lexical_data,
-                        )
-                        tokenizer.set_src_lang(src_file.iso)
-                        tokenizer.set_trg_lang(trg_file.iso)
-
-                if (
-                    pair.is_dictionary
-                    and dict_src_file is not None
-                    and dict_trg_file is not None
-                    and dict_vref_file is not None
-                ):
-                    src_variants = [
-                        tokenizer.tokenize(Side.SOURCE, src_sentence, add_dummy_prefix=True, add_special_tokens=False),
-                        tokenizer.tokenize(Side.SOURCE, src_sentence, add_dummy_prefix=False, add_special_tokens=False),
-                    ]
-                    trg_variants = [
-                        tokenizer.tokenize(Side.TARGET, trg_sentence, add_dummy_prefix=True, add_special_tokens=False),
-                        tokenizer.tokenize(Side.TARGET, trg_sentence, add_dummy_prefix=False, add_special_tokens=False),
-                    ]
-                    dict_src_file.write("\t".join(src_variants) + "\n")
-                    dict_trg_file.write("\t".join(trg_variants) + "\n")
-                    dict_vref_file.write("\n")
-                    dict_count += 1
-
-                index += 1
-
-        LOGGER.info(
-            f"train size: {train_count}, val size: {val_count}, test size: {test_count}, dict size: {dict_count}"
-        )
-        return train_count
-
-    def _validation_reference_count(self, src_iso: str, trg_iso: str) -> int:
-        if self.root["eval"]["multi_ref_eval"]:
-            return self.inventory.validation_project_count(src_iso, trg_iso)
-        return 1
-
-    def _write_train_sentence_pair(
-        self,
-        src_file: TextIO,
-        trg_file: TextIO,
-        vref_file: Optional[TextIO],
-        tokenizer: Tokenizer,
-        src_sentence: str,
-        trg_sentence: str,
-        is_lexical: bool,
-    ) -> int:
-        src_variants = [tokenizer.tokenize(Side.SOURCE, src_sentence, add_dummy_prefix=True)]
-        trg_variants = [tokenizer.tokenize(Side.TARGET, trg_sentence, add_dummy_prefix=True)]
-
-        if is_lexical:
-            src_variants.append(tokenizer.tokenize(Side.SOURCE, src_sentence, add_dummy_prefix=False))
-            trg_variants.append(tokenizer.tokenize(Side.TARGET, trg_sentence, add_dummy_prefix=False))
-
-        for src_variant, trg_variant in zip(src_variants, trg_variants):
-            src_file.write(src_variant + "\n")
-            trg_file.write(trg_variant + "\n")
-            if vref_file is not None:
-                vref_file.write("\n")
-        return len(src_variants)
 
     @abstractmethod
     def _build_vocabs(self, stats: bool = False) -> None:
