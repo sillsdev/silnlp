@@ -59,13 +59,13 @@ from .config import (
     Config,
     InferenceModelParams,
     NMTModel,
-    collect_training_args,
-    write_effective_config,
 )
+from .training_arguments import TrainingArgumentsMapping
 from .config_keys import RenamedConfigKeys
 from .dictionary_writer import DictionaryWriter, TermDictionaryWriter
 from .decoder_inputs import DecoderInputs
 from .huggingface_tokenizer import PunctuationNormalizingTokenizer
+from .experiment_settings import TrainingSettings
 from .model_name import ModelName
 from .parent_model import ParentModel
 from .pretrained_tokenizer import PretrainedTokenizer
@@ -76,7 +76,7 @@ from .tokenizer import NullTokenizer, Tokenizer
 LOGGER = logging.getLogger(__name__)
 
 
-TRAINING_ARGS_CONFIG_MAPPING = {
+_TRAINING_ARGS_CONFIG_MAPPING = {
     "train": {
         "gradient_accumulation_steps",
         "gradient_checkpointing",
@@ -314,15 +314,8 @@ class Seq2SeqConfig(Config):
 
         super().__init__(exp_dir, config, environment)
 
-        if self.model_name.is_madlad():
-            self.train["max_source_length"] = 256
-            self.train["max_target_length"] = 256
-
+        TrainingSettings(self.train).fit_to(self.model_name)
         self._disable_eval_if_no_val_split()
-
-        if config["train"]["auto_grad_acc"]:
-            config["train"]["per_device_train_batch_size"] = 64
-            config["train"]["gradient_accumulation_steps"] = 1
 
         self._tokenizer_settings = TokenizerSettings(self.data.get("tokenizer"))
         self._tokenizer_source = TokenizerSource(
@@ -725,7 +718,9 @@ class Seq2SeqNMTModel(NMTModel):
             written_checkpoints.discard_tokenizers()
 
     def save_effective_config(self, path: Path) -> None:
-        write_effective_config(path, self._config.root, self._create_training_arguments(), TRAINING_ARGS_CONFIG_MAPPING)
+        TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING).write_effective_config(
+            path, self._config.root, self._create_training_arguments()
+        )
 
     def translate_test_files(
         self,
@@ -859,9 +854,8 @@ class Seq2SeqNMTModel(NMTModel):
             yield model_output_group.convert_to_sentence_translation_group(tokenizer)
 
     def _create_training_arguments(self) -> Seq2SeqTrainingArguments:
-        args = collect_training_args(
+        args = TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING).collect(
             self._config.root,
-            TRAINING_ARGS_CONFIG_MAPPING,
             # For context on floating point precision, see https://github.com/sillsdev/silnlp/issues/647
             {
                 "fp16": self._mixed_precision and not self._is_t5,

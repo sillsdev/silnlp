@@ -30,7 +30,6 @@ from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
     AutoModelForImageTextToText,
-    AutoTokenizer,
     EarlyStoppingCallback,
     HfArgumentParser,
     PreTrainedModel,
@@ -49,9 +48,9 @@ from .config import (
     Config,
     InferenceModelParams,
     NMTModel,
-    collect_training_args,
-    write_effective_config,
 )
+from .training_arguments import TrainingArgumentsMapping
+from .causal_lm_tokenizer import CausalLMTokenizer
 from .config_keys import DeprecatedAdapterKey, RenamedConfigKeys
 from .finetune_method import FinetuneMethod
 from .model_name import ModelName
@@ -65,7 +64,7 @@ LOGGER = logging.getLogger(__name__)
 # Which config sections/keys map onto transformers.TrainingArguments fields. Mirrors
 # TRAINING_ARGS_CONFIG_MAPPING in seq2seq_config.py but without the seq2seq-only
 # generation keys (generation_max_length, generation_num_beams, predict_with_generate).
-TRAINING_ARGS_CONFIG_MAPPING = {
+_TRAINING_ARGS_CONFIG_MAPPING = {
     "train": {
         "gradient_accumulation_steps",
         "gradient_checkpointing",
@@ -220,9 +219,8 @@ class LLMConfig(Config):
             },
             config,
         )
-        self._hf_tokenizer: Optional[PreTrainedTokenizerBase] = None
-
         super().__init__(exp_dir, config, environment)
+        self._hf_tokenizer = CausalLMTokenizer(self.model, self.params["trust_remote_code"])
 
         if len(self.inventory.source_isos()) > 1 or len(self.inventory.target_isos()) > 1:
             raise RuntimeError("LLM experiments only support a single source language and a single target language.")
@@ -265,12 +263,7 @@ class LLMConfig(Config):
         return NullTokenizer()
 
     def get_hf_tokenizer(self) -> PreTrainedTokenizerBase:
-        if self._hf_tokenizer is None:
-            tokenizer = AutoTokenizer.from_pretrained(self.model, trust_remote_code=self.params["trust_remote_code"])
-            if tokenizer.pad_token_id is None:
-                tokenizer.pad_token = tokenizer.eos_token
-            self._hf_tokenizer = tokenizer
-        return self._hf_tokenizer
+        return self._hf_tokenizer.load()
 
     def lang_name(self, iso: str) -> str:
         return self.data["lang_codes"].get(iso, iso)
@@ -583,9 +576,8 @@ class LLMModel(NMTModel):
 
     def _create_training_arguments(self) -> TrainingArguments:
         dtype = self._config.params["torch_dtype"]
-        args = collect_training_args(
+        args = TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING).collect(
             self._config.root,
-            TRAINING_ARGS_CONFIG_MAPPING,
             {
                 "bf16": self._mixed_precision and dtype == "bfloat16",
                 "fp16": self._mixed_precision and dtype == "float16",
@@ -595,7 +587,9 @@ class LLMModel(NMTModel):
         return HfArgumentParser(TrainingArguments).parse_dict(args)[0]
 
     def save_effective_config(self, path: Path) -> None:
-        write_effective_config(path, self._config.root, self._create_training_arguments(), TRAINING_ARGS_CONFIG_MAPPING)
+        TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING).write_effective_config(
+            path, self._config.root, self._create_training_arguments()
+        )
 
     # --- inference ----------------------------------------------------------------
 

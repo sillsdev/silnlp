@@ -1,12 +1,9 @@
 import logging
 from abc import ABC, abstractmethod
-from copy import deepcopy
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Generator, Iterable, List, Optional, Set, Union
+from typing import Any, Generator, Iterable, List, Optional, Set, Union
 
-import yaml
 from machine.scripture import get_books
 
 from ..common.environment import SilNlpEnv
@@ -19,6 +16,7 @@ from .corpora import parse_corpus_pairs
 from .corpus_inventory import CorpusInventory
 from .dictionary_writer import DictionaryWriter
 from .experiment_files import ExperimentFiles
+from .experiment_settings import EvaluationSettings
 from .experiment_preprocessor import ExperimentPreprocessor, ScriptureDataSetWriters, TermsSettings
 from .terms import GlossLanguage, TermCategories
 from .terms_data_set import TermsDataSet
@@ -41,45 +39,6 @@ class InferenceModelParams:
             raise ValueError("src_lang must be a string")
         if not isinstance(self.trg_lang, str):
             raise ValueError("trg_lang must be a string")
-
-
-def collect_training_args(
-    config_root: dict,
-    mapping: Dict[str, Set[str]],
-    precision_args: Dict[str, Any],
-    clearml_queue: Optional[str],
-) -> Dict[str, Any]:
-    """Collect the experiment config values named in ``mapping`` into a flat dict of
-    TrainingArguments fields, with ``precision_args`` merged on top. Shared by the seq2seq and
-    LLM models, which differ only in the args class, the mapping, and the precision flags."""
-    args: Dict[str, Any] = {}
-    for section, params in mapping.items():
-        section_config: dict = config_root[section]
-        for param in params:
-            if param in section_config and section_config[param] is not None:
-                args[param] = section_config[param]
-    args.update(precision_args)
-    args["report_to"] = "none" if clearml_queue is None else "all"
-    return args
-
-
-def write_effective_config(path: Path, config_root: dict, training_args: Any, mapping: Dict[str, Set[str]]) -> None:
-    """Write the resolved experiment config, overlaying the effective values from ``training_args``
-    (per ``mapping``) onto a copy of ``config_root``. Shared by the seq2seq and LLM models, which
-    differ only in the args class and the mapping they pass in."""
-    config = deepcopy(config_root)
-    for section, params in mapping.items():
-        section_config: dict = config[section]
-        for param in params:
-            value = getattr(training_args, param)
-            if isinstance(value, Enum):
-                value = value.value
-            if value is None:
-                section_config.pop(param, None)
-            else:
-                section_config[param] = value
-    with path.open("w") as file:
-        yaml.dump(config, file)
 
 
 class NMTModel(ABC):
@@ -193,14 +152,7 @@ class Config(ABC):
         return "parent" in self.data
 
     def _disable_eval_if_no_val_split(self) -> None:
-        """Turn off evaluation-related settings when there is no validation split. Shared by
-        Config subclasses, which call this after merging their defaults."""
-        if not self.inventory.has_validation_split():
-            eval_config: dict = self.root["eval"]
-            eval_config["eval_strategy"] = "no"
-            eval_config["load_best_model_at_end"] = False
-            eval_config["early_stopping"] = None
-            eval_config["metric_for_best_model"] = None
+        EvaluationSettings(self.root["eval"]).disable_unless(self.inventory.has_validation_split())
 
     def set_seed(self) -> None:
         seed = self.data["seed"]
