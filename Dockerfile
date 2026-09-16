@@ -1,5 +1,5 @@
-ARG PYTHON_VERSION=3.10
-ARG POETRY_VERSION=1.7.1
+ARG PYTHON_VERSION=3.12
+ARG POETRY_VERSION=2.4.1
 
 FROM python:$PYTHON_VERSION-slim AS builder
 ARG POETRY_VERSION
@@ -18,13 +18,14 @@ ENV PATH="${PATH}:${POETRY_VENV}/bin"
 
 WORKDIR /src
 COPY poetry.lock pyproject.toml /src/
+RUN poetry self add poetry-plugin-export
 RUN poetry export -E eflomal --without-hashes -f requirements.txt > requirements.txt
 COPY . /src
 RUN poetry build
 
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
-ARG PYTHON_VERSION=3.10
+ARG PYTHON_VERSION=3.12
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=on
 ENV TZ=America/New_York
@@ -38,6 +39,7 @@ RUN apt-get upgrade -y
 RUN apt-get install --no-install-recommends -y \
     git \
     python$PYTHON_VERSION \
+    python$PYTHON_VERSION-venv \
     python3-pip \
     python3-dev \
     wget \
@@ -51,6 +53,9 @@ RUN apt-get install --no-install-recommends -y \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
+RUN python${PYTHON_VERSION} -m venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+
 # Make some useful symlinks that are expected to exist
 RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
     ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python
@@ -60,7 +65,7 @@ COPY --from=builder /src/requirements.txt .
 RUN pip install -r requirements.txt && rm requirements.txt
 
 # Set eflomal path
-ENV EFLOMAL_PATH=/usr/local/lib/python3.10/dist-packages/eflomal/bin
+ENV EFLOMAL_PATH=/usr/local/lib/python3.12/dist-packages/eflomal/bin
 
 # Install fast_align
 RUN apt-get update && \

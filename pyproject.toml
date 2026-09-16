@@ -1,6 +1,6 @@
 [tool.black]
 line-length = 120
-target-version = ['py310']
+target-version = ['py312']
 include = '\.pyi?$'
 exclude = '''
 /(
@@ -46,7 +46,7 @@ silnlp-alignment-test = "silnlp.alignment.test:main"
 silnlp-alignment-aggregate-results = "silnlp.alignment.aggregate_results:main"
 
 [tool.poetry.dependencies]
-python = ">=3.10,<3.11"
+python = ">=3.12,<3.13"
 pandas = "^2.2"
 sentencepiece = "^0.2.0"
 nltk = "^3.5"
@@ -81,7 +81,7 @@ attrs = "^24.3.0"
 jsonschema = "^4.18.0"
 requests = "^2.31"
 openpyxl = "^3.1.2"
-packaging = "^22.0"
+packaging = "^24.0"
 hanzidentifier = "^1.2.0"
 jarowinkler = "^2.0.1"
 wildebeest-nlp = ">=0.9.0"
@@ -107,4 +107,3 @@ llm = ["bitsandbytes"]
 name = "torch"
 url = "https://download.pytorch.org/whl/cu124"
 priority = "explicit"
-
