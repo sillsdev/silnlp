@@ -4,7 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Generator, Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, Generator, Iterable, List, Optional, Set, Union
 
 import yaml
 from machine.scripture import get_books
@@ -15,15 +15,14 @@ from ..common.utils import set_seed
 from .alignment_scores import AlignmentScores
 from .basic_data_set_writer import BasicDataSetWriter
 from .checkpoints import Checkpoint, CheckpointDirectory, CheckpointType
-from .corpora import DataFile, parse_corpus_pairs
+from .corpora import parse_corpus_pairs
 from .corpus_inventory import CorpusInventory
 from .dictionary_writer import DictionaryWriter
 from .experiment_files import ExperimentFiles
-from .scripture_data_set_writer import ScriptureDataSetWriter
+from .experiment_preprocessor import ExperimentPreprocessor, ScriptureDataSetWriters, TermsSettings
 from .terms import GlossLanguage, TermCategories
 from .terms_data_set import TermsDataSet
 from .terms_writer import TermsWriter
-from .tokenization_statistics import TokenizationStatistics
 from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger((__package__ or "") + ".config")
@@ -42,21 +41,6 @@ class InferenceModelParams:
             raise ValueError("src_lang must be a string")
         if not isinstance(self.trg_lang, str):
             raise ValueError("trg_lang must be a string")
-
-
-def warn_about_renamed_keys(config: dict, renamed: Dict[str, Dict[str, str]]) -> None:
-    # Some config keys were renamed from huggingface 4.x to 5.x, so we need to warn team members if they have them in their config
-    # rather than silently dropping the arguments. Can be removed once team is accustomed to 5.x.
-    for section, keys in renamed.items():
-        section_config = config.get(section)
-        if not isinstance(section_config, dict):
-            continue
-        for old_name, new_name in keys.items():
-            if old_name in section_config:
-                LOGGER.warning(
-                    f"{section}.{old_name} was renamed to {section}.{new_name} and is being ignored. "
-                    f"Rename it to keep its effect.",
-                )
 
 
 def collect_training_args(
@@ -230,7 +214,7 @@ class Config(ABC):
         if self.data["tokenize"]:
             self._build_vocabs(stats)
         tokenizer = self.create_tokenizer()
-        self._build_corpora(tokenizer, stats, force_align)
+        self._preprocessor(tokenizer, force_align).write(stats)
         LOGGER.info("Preprocessing completed")
 
     @abstractmethod
@@ -243,59 +227,32 @@ class Config(ABC):
     def create_tokenizer(self) -> Tokenizer:
         ...
 
-    def _build_corpora(self, tokenizer: Tokenizer, stats: bool, force_align: bool) -> int:
-        self.files.delete_data_sets()
-
-        train_count = 0
-        terms_config = self.data["terms"]
-        src_terms_files: List[Tuple[DataFile, List[str]]] = []
-        trg_terms_files: List[Tuple[DataFile, List[str]]] = []
-        alignment_scores = AlignmentScores(self.exp_dir, self.data["aligner"], force=force_align)
-        for pair in self.corpus_pairs:
-            if pair.is_scripture:
-                train_count += ScriptureDataSetWriter(
-                    pair,
-                    self.files,
-                    self.inventory,
-                    tokenizer,
-                    alignment_scores,
-                    self._environment,
-                    self.exp_dir,
-                    mirror=self.mirror,
-                    multi_ref_eval=self.root["eval"]["multi_ref_eval"],
-                ).write()
-            else:
-                train_count += BasicDataSetWriter(
-                    self.files, self.inventory, tokenizer, mirror=self.mirror
-                ).write(pair)
-
-            if terms_config["dictionary"] or terms_config["train"]:
-                for file in pair.src_terms_files:
-                    src_terms_files.append((file, pair.tags))
-                for file in pair.trg_terms_files:
-                    trg_terms_files.append((file, pair.tags))
-
-        terms_train_count = 0
-        if terms_config["train"]:
-            terms_train_count = TermsWriter(
+    def _preprocessor(self, tokenizer: Tokenizer, force_align: bool) -> ExperimentPreprocessor:
+        return ExperimentPreprocessor(
+            self.corpus_pairs,
+            self.files,
+            ScriptureDataSetWriters(
+                self.files,
+                self.inventory,
+                tokenizer,
+                AlignmentScores(self.exp_dir, self.data["aligner"], force=force_align),
+                self._environment,
+                self.exp_dir,
+                mirror=self.mirror,
+                multi_ref_eval=self.root["eval"]["multi_ref_eval"],
+            ),
+            BasicDataSetWriter(self.files, self.inventory, tokenizer, mirror=self.mirror),
+            TermsWriter(
                 TermsDataSet(self.files, tokenizer, mirror=self.mirror),
                 self._term_categories(),
                 self._gloss_language(),
                 self._term_filter_books(),
                 self._environment,
-            ).write(src_terms_files, trg_terms_files)
-            LOGGER.info(f"terms train size: {terms_train_count}")
-        train_count += terms_train_count
-
-        dict_count = 0
-        if terms_config["dictionary"]:
-            dict_count = self._dictionary_writer(tokenizer).write(src_terms_files, trg_terms_files)
-            LOGGER.info(f"dictionary size: {dict_count}")
-
-        if stats and self.data["tokenize"]:
-            TokenizationStatistics(self.files).write()
-
-        return train_count
+            ),
+            self._dictionary_writer(tokenizer),
+            TermsSettings(self.data["terms"]),
+            tokenize=self.data["tokenize"],
+        )
 
     def _term_filter_books(self) -> Optional[Set[int]]:
         if "filter_books" not in self.data["terms"]:

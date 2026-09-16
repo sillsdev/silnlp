@@ -30,6 +30,7 @@ class SilNlpEnv:
         data_dir: Optional[Path] = None,
         mt_terms_dir: Optional[Path] = None,
         mt_scripture_dir: Optional[Path] = None,
+        assets_dir: Optional[Path] = None,
     ):
         atexit.register(self.delete_path)
         self.path_to_delete: Optional[Path] = None
@@ -42,6 +43,7 @@ class SilNlpEnv:
             mt_scripture_dir if mt_scripture_dir is not None else self._resolve_mt_scripture_dir()
         )
         self._align_dir = self._resolve_align_dir()
+        self._assets_dir = assets_dir if assets_dir is not None else Path(__file__).parent.parent / "assets"
 
     def _resolve_data_dir(self) -> Path:
         sil_nlp_data_path = os.getenv("SIL_NLP_DATA_PATH", default="")
@@ -103,7 +105,7 @@ class SilNlpEnv:
 
     @property
     def assets_dir(self) -> Path:
-        return Path(__file__).parent.parent / "assets"
+        return self._assets_dir
 
     @property
     def data_dir(self) -> Path:

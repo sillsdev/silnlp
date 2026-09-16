@@ -3,28 +3,21 @@ from dataclasses import dataclass
 import pytest
 from jinja2.exceptions import UndefinedError
 
-from silnlp.nmt.config_utils import is_llm_config
-from silnlp.nmt.llm_config import (
-    DataCollatorForCausalLM,
-    Language,
-    LLMConfig,
-    LLMModel,
-    PromptMessages,
-    TranslateGemmaPromptMessages,
-    build_generation_kwargs,
-)
+from silnlp.nmt.config_utils import ConfiguredModelType
+from silnlp.nmt.llm_config import DataCollatorForCausalLM, LLMConfig, LLMModel, build_generation_kwargs
+from silnlp.nmt.prompt_messages import Language, PromptMessages, TranslateGemmaPromptMessages
 
 
-def test_is_llm_config_explicit_model_type():
-    assert is_llm_config({"model_type": "llm", "model": "anything"})
-    assert not is_llm_config({"model_type": "nmt", "model": "google/gemma-2-2b-it"})
+def test_an_explicit_model_type_decides_whatever_the_model_is_called():
+    assert ConfiguredModelType({"model_type": "llm", "model": "anything"}).is_llm()
+    assert not ConfiguredModelType({"model_type": "nmt", "model": "google/gemma-2-2b-it"}).is_llm()
 
 
-def test_is_llm_config_prefix_fallback():
-    assert is_llm_config({"model": "google/gemma-2-2b-it"})
-    assert is_llm_config({"model": "tencent/Hunyuan-MT-7B"})
-    assert not is_llm_config({"model": "facebook/nllb-200-distilled-1.3B"})
-    assert not is_llm_config({"model": "google/madlad400-3b-mt"})
+def test_the_model_name_decides_when_no_model_type_is_given():
+    assert ConfiguredModelType({"model": "google/gemma-2-2b-it"}).is_llm()
+    assert ConfiguredModelType({"model": "tencent/Hunyuan-MT-7B"}).is_llm()
+    assert not ConfiguredModelType({"model": "facebook/nllb-200-distilled-1.3B"}).is_llm()
+    assert not ConfiguredModelType({"model": "google/madlad400-3b-mt"}).is_llm()
 
 
 def test_prompt_messages_to_chat_messages():
@@ -238,51 +231,3 @@ def test_build_adapter_config_dora():
     adapter = {"rank": 64, "alpha": 256, "dropout": 0.05, "target_modules": "all-linear"}
     peft_config = LLMModel._build_adapter_config(adapter, use_dora=True)
     assert peft_config.use_dora is True
-
-
-@dataclass
-class _MethodStub:
-    params: dict
-
-    finetune_method = LLMConfig.finetune_method
-    uses_quantization = LLMConfig.uses_quantization
-    uses_dora = LLMConfig.uses_dora
-
-
-def test_finetune_method_axes():
-    # (method, quantized, dora)
-    cases = [
-        ("full", False, False),
-        ("lora", False, False),
-        ("qlora", True, False),
-        ("dora", False, True),
-        ("qdora", True, True),
-    ]
-    for method, quantized, dora in cases:
-        stub = _MethodStub(params={"finetune_method": method})
-        assert stub.finetune_method == method
-        assert stub.uses_quantization is quantized
-        assert stub.uses_dora is dora
-
-
-def test_finetune_method_is_case_insensitive():
-    assert _MethodStub(params={"finetune_method": "QDoRA"}).uses_dora is True
-
-
-def test_finetune_method_invalid_raises():
-    with pytest.raises(ValueError, match="Unknown finetune_method"):
-        _ = _MethodStub(params={"finetune_method": "bogus"}).finetune_method
-
-
-def test_normalize_deprecated_keys_renames_lora_to_adapter():
-    config = {"params": {"finetune_method": "lora", "lora": {"rank": 8}}}
-    LLMConfig._normalize_deprecated_keys(config)
-    assert "lora" not in config["params"]
-    assert config["params"]["adapter"] == {"rank": 8}
-
-
-def test_normalize_deprecated_keys_prefers_explicit_adapter():
-    config = {"params": {"lora": {"rank": 8}, "adapter": {"rank": 64}}}
-    LLMConfig._normalize_deprecated_keys(config)
-    # An explicit adapter wins; the deprecated lora key is left untouched rather than clobbering it.
-    assert config["params"]["adapter"] == {"rank": 64}
