@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Dict, List, Union
+from typing import Dict, List, Set, Union
 
 import pandas as pd
 from tokenizers import AddedToken
@@ -149,7 +149,7 @@ class MissingTokens:
     def _uncovered_characters(self, corpus: List[Path]) -> List[str]:
         vocab = self._pretrained.build().get_vocab().keys()
         sil_tokenizer = self._pretrained.sil_tokenizer()
-        charset = set()
+        charset: Set[str] = set()
         for path in corpus:
             with path.open("r", encoding="utf-8-sig") as file:
                 for line in file:
