@@ -41,10 +41,13 @@ class PretrainedTokenizer:
         """The tokenizer to extend, converting a SentencePiece model the experiment carries if there is one."""
         if self._tokenizer is None:
             if self._source.holds_unconverted_sentence_piece_model():
-                self._convert_sentence_piece_model()
+                # Only the families below know how to be built from a bare SentencePiece model; for any
+                # other the conversion yields nothing and the next line is where that surfaces.
+                tokenizer = self._convert_sentence_piece_model()
             else:
-                self._tokenizer = self._from_pretrained(self._source.path_for_building())
-            self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
+                tokenizer = self._from_pretrained(self._source.path_for_building())
+            tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
+            self._tokenizer = tokenizer
         return self._tokenizer
 
     def load(self) -> PreTrainedTokenizerBase:
@@ -58,22 +61,23 @@ class PretrainedTokenizer:
         self._tokenizer = self._from_pretrained(str(self._exp_dir))
         return self._tokenizer
 
-    def _convert_sentence_piece_model(self) -> None:
+    def _convert_sentence_piece_model(self) -> Optional[PreTrainedTokenizerBase]:
         if self._model_name.is_nllb():
             # NllbTokenizer normally falls back to FAIRSEQ_LANGUAGE_CODES, but only when
             # additional_special_tokens is None. When loading from a SentencePiece model,
             # SentencePieceExtractor.extract always sets it to the control symbols in the model (<s> and
             # </s>), so the fallback never runs and the language codes have to be passed in explicitly.
-            self._tokenizer = NllbTokenizer.from_pretrained(
+            tokenizer = NllbTokenizer.from_pretrained(
                 str(self._exp_dir), token=False, extra_special_tokens=FAIRSEQ_LANGUAGE_CODES
             )
-            self._tokenizer.save_pretrained(str(self._exp_dir))
-        elif self._model_name.is_madlad():
-            self._tokenizer = T5Tokenizer.from_pretrained(str(self._exp_dir), token=False)
-            self._tokenizer.add_special_tokens(
-                {"extra_special_tokens": ["<s>"]}, replace_extra_special_tokens=False
-            )
-            self._tokenizer.save_pretrained(str(self._exp_dir))
+            tokenizer.save_pretrained(str(self._exp_dir))
+            return tokenizer
+        if self._model_name.is_madlad():
+            tokenizer = T5Tokenizer.from_pretrained(str(self._exp_dir), token=False)
+            tokenizer.add_special_tokens({"extra_special_tokens": ["<s>"]}, replace_extra_special_tokens=False)
+            tokenizer.save_pretrained(str(self._exp_dir))
+            return tokenizer
+        return None
 
     def _from_pretrained(self, model_name_or_path: str) -> PreTrainedTokenizerBase:
         return AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True, token=False)

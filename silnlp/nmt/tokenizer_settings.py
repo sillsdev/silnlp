@@ -1,18 +1,18 @@
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 
 class TokenizerSettings:
     """The tokenizer section of the config: which sides of the corpus extend the vocabulary, and by how much."""
 
     def __init__(self, settings: Optional[dict]) -> None:
-        self._settings = settings
+        self._settings = settings if settings is not None else {}
 
     def updates_source(self) -> bool:
-        return bool(self._settings) and bool(self._settings.get("update_src"))
+        return bool(self._settings.get("update_src"))
 
     def updates_target(self) -> bool:
-        return bool(self._settings) and bool(self._settings.get("update_trg"))
+        return bool(self._settings.get("update_trg"))
 
     def updates_either(self) -> bool:
         return self.updates_source() or self.updates_target()
@@ -21,18 +21,18 @@ class TokenizerSettings:
         return self.updates_source() and self.updates_target()
 
     def shares_vocab(self) -> bool:
-        return bool(self._settings) and bool(self._settings.get("share_vocab"))
+        return bool(self._settings.get("share_vocab"))
 
     def trains_tokens(self) -> bool:
-        return bool(self._settings) and bool(self._settings.get("trained_tokens"))
+        return bool(self._settings.get("trained_tokens"))
 
-    def source_vocab_size(self) -> int:
+    def source_vocab_size(self) -> Any:
         return self._settings.get("src_vocab_size")
 
-    def target_vocab_size(self) -> int:
+    def target_vocab_size(self) -> Any:
         return self._settings.get("trg_vocab_size")
 
-    def shared_vocab_size(self) -> int:
+    def shared_vocab_size(self) -> Any:
         return self.source_vocab_size() + self.target_vocab_size()
 
 

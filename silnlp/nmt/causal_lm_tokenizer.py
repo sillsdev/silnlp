@@ -1,3 +1,5 @@
+from typing import Optional
+
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
@@ -9,7 +11,7 @@ class CausalLMTokenizer:
     def __init__(self, model: str, trust_remote_code: bool) -> None:
         self._model = model
         self._trust_remote_code = trust_remote_code
-        self._tokenizer = None
+        self._tokenizer: Optional[PreTrainedTokenizerBase] = None
 
     def load(self) -> PreTrainedTokenizerBase:
         if self._tokenizer is None:

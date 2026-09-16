@@ -42,14 +42,14 @@ class SplitIndices:
         self._disjoint_val = disjoint_val
         self._test_size = test_size
         self._val_size = val_size
-        self._test: Optional[Set[int]] = None
-        self._val: Optional[Set[int]] = None
+        self._test: Optional[Iterable[int]] = None
+        self._val: Optional[Iterable[int]] = None
 
     def reserve_for_test(self, indices: Iterable[int]) -> None:
         if self._test is None:
             self._test = indices
 
-    def for_test(self, available: Iterable[int], corpus_count: int) -> Optional[Set[int]]:
+    def for_test(self, available: Iterable[int], corpus_count: int) -> Optional[Iterable[int]]:
         if self._disjoint_test and self._test is None:
             remaining = set(available)
             if self._disjoint_val and self._val is not None:
@@ -57,7 +57,7 @@ class SplitIndices:
             self._test = self._sample(remaining, self._test_size, corpus_count)
         return self._test
 
-    def for_validation(self, available: Iterable[int], corpus_count: int) -> Optional[Set[int]]:
+    def for_validation(self, available: Iterable[int], corpus_count: int) -> Optional[Iterable[int]]:
         if self._disjoint_val and self._val is None:
             remaining = set(available)
             if self._disjoint_test and self._test is not None:

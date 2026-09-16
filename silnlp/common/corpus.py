@@ -120,7 +120,7 @@ def get_scripture_parallel_corpus(
 
 
 def split_parallel_corpus(
-    corpus: pd.DataFrame, split_size: Union[float, int], split_indices: Optional[Set[int]] = None
+    corpus: pd.DataFrame, split_size: Union[float, int], split_indices: Optional[Iterable[int]] = None
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     split: pd.DataFrame
     if split_indices is None:

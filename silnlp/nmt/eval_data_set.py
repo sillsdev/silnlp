@@ -35,7 +35,9 @@ class EvalDataSet:
             gathered.fillna("", inplace=True)
         self._corpora[language_pair] = gathered
 
-    def indices_for(self, src_iso: str, trg_iso: str, default: Optional[Set[int]]) -> Optional[Set[int]]:
+    def indices_for(
+        self, src_iso: str, trg_iso: str, default: Optional[Iterable[int]]
+    ) -> Optional[Iterable[int]]:
         return self._selected_verses.get((src_iso, trg_iso), default)
 
     def is_empty(self) -> bool:
