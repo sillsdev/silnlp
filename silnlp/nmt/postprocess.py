@@ -196,8 +196,8 @@ def postprocess_draft(
         train_src_sentences = []
         train_trg_sentences = []
         if train_src_filename is not None and train_trg_filename is not None:
-            train_src_sentences = list(load_corpus(train_src_filename))
-            train_trg_sentences = list(load_corpus(train_trg_filename))
+            train_src_sentences = list(load_corpus(Path(train_src_filename)))
+            train_trg_sentences = list(load_corpus(Path(train_trg_filename)))
 
         postprocess_handler.construct_rows(
             [s.ref for s in src_sentences.sentences],
