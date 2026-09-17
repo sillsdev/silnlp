@@ -189,23 +189,26 @@ class OnboardingProject:
         config = create_config(exp_dir=stats_dir, config=stats_config, environment=self.environment)
 
         config.set_seed()
-        config.preprocess(stats=True, force_align=True)
+        try:
+            config.preprocess(stats=True, force_align=True)
 
-        tokenization_stats_csv = stats_dir / "tokenization_stats.csv"
-        tokenization_stats_xlsx = stats_dir / "tokenization_stats.xlsx"
-        token_occurrence_log = stats_dir / "token_occurrence.log"
-        if tokenization_stats_csv.exists():
-            shutil.move(str(tokenization_stats_csv), str(self.output_folder / "tokenization_stats.csv"))
-        if tokenization_stats_xlsx.exists():
-            shutil.move(
-                str(tokenization_stats_xlsx),
-                str(self.output_folder / "tokenization_stats.xlsx"),
-            )
-        if token_occurrence_log.exists():
-            shutil.move(
-                str(token_occurrence_log),
-                str(self.output_folder / "token_occurrence.log"),
-            )
+            tokenization_stats_csv = stats_dir / "tokenization_stats.csv"
+            tokenization_stats_xlsx = stats_dir / "tokenization_stats.xlsx"
+            token_occurrence_log = stats_dir / "token_occurrence.log"
+            if tokenization_stats_csv.exists():
+                shutil.move(str(tokenization_stats_csv), str(self.output_folder / "tokenization_stats.csv"))
+            if tokenization_stats_xlsx.exists():
+                shutil.move(
+                    str(tokenization_stats_xlsx),
+                    str(self.output_folder / "tokenization_stats.xlsx"),
+                )
+            if token_occurrence_log.exists():
+                shutil.move(
+                    str(token_occurrence_log),
+                    str(self.output_folder / "token_occurrence.log"),
+                )
+        except Exception as e:
+            LOGGER.error(f"Error occurred while calculating tokenization stats for project '{self.project_name}': {e}")
 
     def align_wrapper(
         self,
@@ -272,13 +275,16 @@ class OnboardingProject:
             exp_dir=align_output_dir, config=align_config, environment=self.environment
         )
         exp_name = f"{self.output_folder.stem}/{self.project_name}/alignments"
-        analyze(config=align_config, exp_name=exp_name, create_summaries=True, environment=self.environment)
-        corpus_stats_csv = align_output_dir / "corpus-stats.csv"
-        if corpus_stats_csv.exists():
-            shutil.move(
-                str(corpus_stats_csv),
-                str(self.output_folder / "corpus-stats.csv"),
-            )
+        try:
+            analyze(config=align_config, exp_name=exp_name, create_summaries=True, environment=self.environment)
+            corpus_stats_csv = align_output_dir / "corpus-stats.csv"
+            if corpus_stats_csv.exists():
+                shutil.move(
+                    str(corpus_stats_csv),
+                    str(self.output_folder / "corpus-stats.csv"),
+                )
+        except Exception as e:
+            LOGGER.error(f"Error occurred while running alignments for project '{self.project_name}': {e}")
 
     def check_for_project_errors(self) -> None:
         if self.local_project_path:
