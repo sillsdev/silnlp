@@ -289,7 +289,6 @@ class TranslatedTextRow:
     text: str
     translated_sentence: SentenceTranslationGroup
 
-
 class TranslatedTextRowCollection:
     def __init__(self, rows: List[TranslatedTextRow]):
         self._rows = rows
@@ -302,12 +301,14 @@ class TranslatedTextRowCollection:
         return self._draft_group.get_drafts()
 
     def construct_postprocessing_rows_for_draft_index(
-        self, postprocess_handler: PostprocessHandler, draft_index: int
+        self, postprocess_handler: PostprocessHandler, draft_index: int, source_train_rows: List[str], target_train_rows: List[str]
     ) -> None:
         postprocess_handler.construct_rows(
             [r.ref for r in self._rows],
             [r.text for r in self._rows],
             self._draft_group.get_drafts()[draft_index - 1].get_all_translations(),
+            source_train_rows,
+            target_train_rows
         )
 
     def get_scripture_refs(self) -> List[ScriptureRef]:
