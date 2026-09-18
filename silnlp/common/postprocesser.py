@@ -459,4 +459,4 @@ class PostprocessHandler:
             write_corpus(Path(td, "trg_align.txt"), trg_sents)
             compute_alignment_scores(Path(td, "src_align.txt"), Path(td, "trg_align.txt"), aligner, align_path)
 
-            return [to_word_alignment_matrix(line) for line in load_corpus(align_path)[:only_fetch_alignments_for_first_n]]
+            return [to_word_alignment_matrix(line) for line in list(load_corpus(align_path))[:only_fetch_alignments_for_first_n]]

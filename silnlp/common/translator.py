@@ -435,7 +435,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
         if postprocess_handler is None:
             postprocess_handler = PostprocessHandler(environment=self._environment)
         for draft_index, translated_draft in enumerate(translated_text_rows.get_translated_drafts(), 1):
-            translated_text_rows.construct_postprocessing_rows_for_draft_index(postprocess_handler, draft_index,  list(load_corpus(Path(experiment_config.train_src_detok_filename()))),list(load_corpus(Path(experiment_config.train_trg_detok_filename()))) )
+            translated_text_rows.construct_postprocessing_rows_for_draft_index(postprocess_handler, draft_index,  list(load_corpus(experiment_config.exp_dir / experiment_config.train_src_detok_filename())),list(load_corpus(experiment_config.exp_dir / experiment_config.train_trg_detok_filename())) )
 
             for config in postprocess_handler.configs:
 
