@@ -691,7 +691,7 @@ class InterleavedTrainDataset(TorchDataset):
         return self._translation_count + self._instruction_count
 
     def start_epoch(self, epoch: int) -> None:
-        """Carries both pools on to where the previous epoch stopped, rather than replaying it."""
+        # used to track the position in the instruction dataset, which doesn't repeat per epoch
         self._epoch = epoch
 
     def __getitem__(self, index: int) -> dict:
