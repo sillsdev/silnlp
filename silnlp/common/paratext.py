@@ -528,7 +528,15 @@ def check_versification(
             )
             return CheckVersificationOutput(matching, detected_versification, 0, 0)
 
-    analysis = FileUsfmVersificationAnalyzer(project_dir).analyze_usfm_versification()
+    existing_non_empty_books = []
+    for book_id in settings.get_all_scripture_book_ids():
+        book_file_name = settings.get_book_file_name(book_id)
+        book_file_path = Path(project_dir) / book_file_name
+        # Only analyze files that exist and have some content (i.e., more than 100 bytes to cover situations where there's just a new line or id tag, etc.)
+        if book_file_path.exists() and book_file_path.is_file() and book_file_path.stat().st_size > 100:
+            existing_non_empty_books.append(book_id)
+
+    analysis = FileUsfmVersificationAnalyzer(project_dir).analyze_usfm_versification({book_id: None for book_id in existing_non_empty_books})
     if len(analysis.diagnostics) > 0:
         LOGGER.warning(
             f"Detected {len(analysis.diagnostics)} versification errors affecting {analysis.total_num_affected_verses} verses. See {versification_error_output_path} for more details."
