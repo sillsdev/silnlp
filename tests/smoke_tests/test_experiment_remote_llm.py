@@ -1,3 +1,4 @@
+import json
 from typing import Tuple
 
 from silnlp.common.environment import SilNlpEnv
@@ -53,7 +54,8 @@ def check_training_step(environment: SilNlpEnv):
     # checkpoint that the test and translate steps resolve.
     checkpoint_dir = environment.get_mt_exp_dir(EXPERIMENT_NAME) / "run" / "checkpoint-1"
     assert checkpoint_dir.is_dir()
-    assert (checkpoint_dir / "retrieval.pkl").is_file()
+    info = json.loads((checkpoint_dir / "remote_llm_model.json").read_text(encoding="utf-8"))
+    assert info["retrieval_method"] == "tfidf"
 
 
 def check_test_step(environment: SilNlpEnv):

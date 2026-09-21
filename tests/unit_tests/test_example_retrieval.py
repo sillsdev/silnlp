@@ -1,4 +1,7 @@
 import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pytest
@@ -238,23 +241,164 @@ def test_example_pool_raises_a_clear_error_when_the_corpus_is_missing(tmp_path):
         pool.select("hello", k=1)
 
 
-def test_example_pool_saves_and_reloads_its_index(tmp_path):
-    pool = _write_pool(tmp_path, ["the cat sat", "something unrelated"], ["1", "2"])
-    pool.save_index(tmp_path)
+_EMBEDDING_VECTORS = {"cat": [1.0, 0.0], "dog": [0.0, 1.0], "kitten": [0.9, 0.1]}
 
-    reloaded = _write_pool(tmp_path, ["the cat sat", "something unrelated"], ["1", "2"])
+
+def _embedding_pool(tmp_path, model_name=None, model=None, sources=("cat", "dog")):
+    retriever = EmbeddingExampleRetriever(model_name, model or _StubEmbeddingModel(_EMBEDDING_VECTORS))
+    return _write_pool(tmp_path, list(sources), [str(i) for i in range(1, len(sources) + 1)], retriever=retriever)
+
+
+def test_example_pool_saves_and_reloads_its_index(tmp_path):
+    _embedding_pool(tmp_path).save_index(tmp_path)
+
+    model = _StubEmbeddingModel(_EMBEDDING_VECTORS)
+    reloaded = _embedding_pool(tmp_path, model=model)
     assert reloaded.load_index(tmp_path)
-    assert [ex.target for ex in reloaded.select("the cat sat here", k=1)] == ["1"]
+    assert [ex.target for ex in reloaded.select("kitten", k=1)] == ["1"]
+    # Only the query was encoded: the corpus came back from the saved vectors.
+    assert model.encode_calls == 1
 
 
 def test_example_pool_rejects_a_saved_index_built_with_another_method(tmp_path):
-    _write_pool(tmp_path, ["a", "b"], ["1", "2"]).save_index(tmp_path)
-    embedding = _write_pool(tmp_path, ["a", "b"], ["1", "2"], retriever=ExampleRetrieverFactory.create("embedding"))
-    assert not embedding.load_index(tmp_path)
+    _embedding_pool(tmp_path).save_index(tmp_path)
+    assert not _write_pool(tmp_path, ["cat", "dog"], ["1", "2"]).load_index(tmp_path)
+
+
+def test_example_pool_rejects_a_saved_index_built_with_another_embedding_model(tmp_path):
+    _embedding_pool(tmp_path, model_name="some/model").save_index(tmp_path)
+    assert not _embedding_pool(tmp_path, model_name="another/model").load_index(tmp_path)
+
+
+def test_example_pool_rejects_a_saved_index_whose_corpus_has_changed_size(tmp_path):
+    _embedding_pool(tmp_path).save_index(tmp_path)
+    assert not _embedding_pool(tmp_path, sources=("cat", "dog", "kitten")).load_index(tmp_path)
 
 
 def test_example_pool_reports_a_missing_index(tmp_path):
-    assert not _write_pool(tmp_path, ["a"], ["1"]).load_index(tmp_path / "nowhere")
+    assert not _embedding_pool(tmp_path).load_index(tmp_path / "nowhere")
+
+
+def test_example_pool_rebuilds_rather_than_fail_on_an_unreadable_index(tmp_path):
+    _embedding_pool(tmp_path).save_index(tmp_path)
+    (tmp_path / "retrieval_embeddings.npy").write_bytes(b"not an npy file")
+    assert not _embedding_pool(tmp_path).load_index(tmp_path)
+
+
+# Long enough that a thread doing the lazy work gives up the GIL and the others reach the same
+# check. Without it they finish inside one slice and an unguarded lazy init still looks correct.
+_LAZY_WORK_SECONDS = 0.1
+
+
+class _CountingFitRetriever(ExampleRetriever):
+    """Counts indexing runs, so a lazy fit repeated per thread is visible."""
+
+    method = "counting"
+
+    def __init__(self):
+        super().__init__()
+        self.fit_calls = 0
+        self._sources = []
+        self._counter = threading.Lock()
+
+    def _fit_index(self, sources):
+        with self._counter:
+            self.fit_calls += 1
+        time.sleep(_LAZY_WORK_SECONDS)
+        self._sources = sources
+
+    def _top_indices_for_query(self, query, k):
+        return list(range(len(self._sources)))[:k]
+
+
+class _CountingReadPool(ExamplePool):
+    """Counts corpus reads, so a lazy read repeated per thread is visible."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.reads = 0
+        self._counter = threading.Lock()
+
+    def _read_first_available_corpus(self):
+        with self._counter:
+            self.reads += 1
+        time.sleep(_LAZY_WORK_SECONDS)
+        return super()._read_first_available_corpus()
+
+
+class _CountingModelLoadRetriever(EmbeddingExampleRetriever):
+    """Counts model loads, so one load per thread is visible."""
+
+    def __init__(self):
+        super().__init__()
+        self.model_loads = 0
+        self._counter = threading.Lock()
+
+    def _create_model(self):
+        with self._counter:
+            self.model_loads += 1
+        time.sleep(_LAZY_WORK_SECONDS)
+        return _StubEmbeddingModel(_EMBEDDING_VECTORS)
+
+
+def _run_together(work, workers=4):
+    """Runs `work` on `workers` threads, all released at the same moment."""
+    barrier = threading.Barrier(workers)
+
+    def task(_):
+        barrier.wait()
+        return work()
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        return list(executor.map(task, range(workers)))
+
+
+def test_example_pool_fits_its_index_once_when_threads_select_together(tmp_path):
+    # Inference selects examples on a thread pool, so an unguarded lazy fit runs once per worker.
+    retriever = _CountingFitRetriever()
+    pool = _write_pool(tmp_path, ["a b", "c d", "e f"], ["1", "2", "3"], retriever=retriever)
+    pool.ensure_available()
+
+    selected = _run_together(lambda: pool.select("a b", k=1))
+
+    assert retriever.fit_calls == 1
+    assert [len(examples) for examples in selected] == [1] * 4
+
+
+def test_example_pool_reads_its_corpus_once_when_threads_select_together(tmp_path):
+    src_path = tmp_path / "train.src.txt"
+    trg_path = tmp_path / "train.trg.txt"
+    src_path.write_text("a b\nc d\n", encoding="utf-8")
+    trg_path.write_text("1\n2\n", encoding="utf-8")
+    pool = _CountingReadPool([(src_path, trg_path)], _CountingFitRetriever())
+
+    selected = _run_together(lambda: pool.select("a b", k=1))
+
+    assert pool.reads == 1
+    assert [len(examples) for examples in selected] == [1] * 4
+
+
+def test_embedding_retriever_loads_its_model_once_when_threads_rank_together(tmp_path):
+    # A pool that adopted a cached index has never touched the model, so every worker's first
+    # query reaches the lazy load at the same moment.
+    _fitted(EmbeddingExampleRetriever(model=_StubEmbeddingModel(_EMBEDDING_VECTORS)), ["cat", "dog"]).save(tmp_path)
+    retriever = _CountingModelLoadRetriever()
+    assert retriever.load(tmp_path, corpus_size=2)
+
+    ranked = _run_together(lambda: retriever.rank("kitten", k=1))
+
+    assert retriever.model_loads == 1
+    assert ranked == [[0]] * 4
+
+
+def test_lexical_retrievers_cache_nothing_and_rebuild_every_run(tmp_path):
+    # Refitting tfidf or bm25 takes seconds, so nothing is written that could go stale or
+    # tie the experiment directory to the installed scikit-learn.
+    pool = _write_pool(tmp_path, ["the cat sat", "something unrelated"], ["1", "2"])
+    pool.save_index(tmp_path)
+
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["train.src.txt", "train.trg.txt"]
+    assert not _write_pool(tmp_path, ["the cat sat", "something unrelated"], ["1", "2"]).load_index(tmp_path)
 
 
 class _RankedStubRetriever(ExampleRetriever):
@@ -280,15 +424,15 @@ def test_generic_leave_one_out_returns_fewer_than_k_when_the_corpus_is_too_small
     assert retriever.rank_excluding("a", 0, k=5) == [1]
 
 
-def test_embedding_retriever_pickles_the_embeddings_but_not_the_model(tmp_path):
+def test_embedding_retriever_saves_its_vectors_but_not_its_model(tmp_path):
     vectors = {"cat": [1.0, 0.0], "dog": [0.0, 1.0], "kitten": [0.9, 0.1]}
     retriever = _fitted(EmbeddingExampleRetriever(model=_StubEmbeddingModel(vectors)), ["cat", "dog"])
     retriever.save(tmp_path)
 
-    loaded = ExampleRetriever.load(tmp_path)
-    assert loaded is not None
-    # Ranking a known position uses the cached embeddings, so it works without the model that
-    # was deliberately left out of the pickle.
+    assert (tmp_path / "retrieval_embeddings.npy").is_file()
+    # Ranking a known position uses the saved vectors, so it works without any model at all.
+    loaded = EmbeddingExampleRetriever()
+    assert loaded.load(tmp_path, corpus_size=2)
     assert loaded.rank_excluding("cat", 0, k=1) == [1]
 
 

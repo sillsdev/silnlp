@@ -38,6 +38,7 @@ from transformers import (
     PreTrainedModel,
     PreTrainedTokenizerBase,
     Trainer,
+    TrainerCallback,
     TrainingArguments,
     set_seed,
 )
@@ -68,6 +69,7 @@ from .llm_config import (
     PromptTemplateCollection,
 )
 from .seq2seq_config import batch_sentences, find_executable_batch_size
+from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger(__name__)
 
@@ -421,11 +423,22 @@ class LocalLLMConfig(LLMConfig[LocalLLMPromptMessages]):
         instructions_dir = self._environment.mt_dir / "instructions"
         return [instructions_dir / f"{name}.jsonl" for name in datasets]
 
+    def instruction_jsonl_filename(self) -> str:
+        return "instruction.jsonl"
+
     def _count_nonblank_lines(self, path: Path) -> int:
         with path.open("r", encoding="utf-8") as f:
             return sum(1 for line in f if line.strip())
 
+    def _delete_previous_data_files(self) -> None:
+        super()._delete_previous_data_files()
+        self._delete_files("instruction.*")
+
+    def _build_corpora(self, tokenizer: Tokenizer, stats: bool, force_align: bool) -> int:
+        return super()._build_corpora(tokenizer, stats, force_align) + self._write_instruction_data()
+
     def _write_instruction_data(self) -> int:
+        """Writes instruction data from one or more instruction datasets into a single file."""
         dataset_paths = self.instruction_data_paths()
         if not dataset_paths:
             return 0
@@ -672,16 +685,24 @@ class InterleavedTrainDataset(TorchDataset):
         self._instruction_count = instruction_count
         self._seed = random.randrange(2**31) if seed is None else seed
         self._lap_cache: Dict[Tuple[int, int], List[int]] = {}
+        self._epoch = 0
 
     def __len__(self) -> int:
         return self._translation_count + self._instruction_count
+
+    def start_epoch(self, epoch: int) -> None:
+        """Carries both pools on to where the previous epoch stopped, rather than replaying it."""
+        self._epoch = epoch
 
     def __getitem__(self, index: int) -> dict:
         if index < 0 or index >= len(self):
             raise IndexError(index)
         if index < self._translation_count:
-            return self._lap_item(self._translation_dataset, salt=0, index=index)
-        return self._lap_item(self._instruction_dataset, salt=1, index=index - self._translation_count)
+            return self._lap_item(
+                self._translation_dataset, salt=0, index=index + self._epoch * self._translation_count
+            )
+        offset = index - self._translation_count
+        return self._lap_item(self._instruction_dataset, salt=1, index=offset + self._epoch * self._instruction_count)
 
     def _lap_item(self, dataset: Dataset, salt: int, index: int) -> dict:
         pool_size = len(dataset)
@@ -697,6 +718,17 @@ class InterleavedTrainDataset(TorchDataset):
             rng.shuffle(permutation)
             self._lap_cache[key] = permutation
         return permutation
+
+
+class InterleavedEpochCallback(TrainerCallback):
+    """Advances an InterleavedTrainDataset each epoch, which a map-style dataset cannot do alone."""
+
+    def __init__(self, dataset: InterleavedTrainDataset) -> None:
+        self._dataset = dataset
+
+    def on_epoch_begin(self, args, state, control, **kwargs) -> None:
+        # state.epoch is restored from the checkpoint, so a resumed run carries on rather than replays.
+        self._dataset.start_epoch(int(state.epoch))
 
 
 class SilCausalTrainer(Trainer):
@@ -873,7 +905,7 @@ class LocalLLMModel(NMTModel):
             instruction_dataset = instruction_dataset.map(
                 encode_instruction, remove_columns=instruction_dataset.column_names
             )
-            total_length = self._estimate_total_train_examples(training_args, len(train_dataset))
+            total_length = self._interleaved_dataset_length(training_args, len(train_dataset), mix_ratio)
             translation_count = round(total_length / (1 + mix_ratio))
             instruction_count = total_length - translation_count
             train_dataset = InterleavedTrainDataset(
@@ -889,6 +921,8 @@ class LocalLLMModel(NMTModel):
             processing_class=tokenizer,
             auto_grad_acc=self._config.train.get("auto_grad_acc", False),
         )
+        if isinstance(train_dataset, InterleavedTrainDataset):
+            trainer.add_callback(InterleavedEpochCallback(train_dataset))
         early_stopping: Optional[dict] = self._config.eval["early_stopping"]
         if early_stopping:
             trainer.add_callback(
@@ -938,15 +972,17 @@ class LocalLLMModel(NMTModel):
             task_type=TaskType.CAUSAL_LM,
         )
 
-    def _estimate_total_train_examples(self, training_args: TrainingArguments, translation_size: int) -> int:
-        """Estimate the total number of training examples the run will consume."""
+    def _interleaved_dataset_length(
+        self, training_args: TrainingArguments, translation_size: int, mix_ratio: float
+    ) -> int:
+        """How long the interleaved dataset must be; under an epoch budget the Trainer repeats it."""
         num_devices = max(1, self._num_devices)
         effective_batch_size = (
             training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps * num_devices
         )
         if training_args.max_steps and training_args.max_steps > 0:
             return training_args.max_steps * effective_batch_size
-        return round(training_args.num_train_epochs * translation_size)
+        return round(translation_size * (1 + mix_ratio))
 
     def _load_text_dataset(self, src_path: Path, trg_path: Path) -> Optional[Dataset]:
         pairs = read_parallel_text_pairs(src_path, trg_path)

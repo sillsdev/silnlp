@@ -453,16 +453,18 @@ def write_training_corpus(exp_dir: Path) -> None:
     (exp_dir / "train.trg.txt").write_text("en el principio\nsea la luz\n", encoding="utf-8")
 
 
-def test_train_builds_and_saves_the_retrieval_index(tmp_path: Path):
+def test_train_records_the_retrieval_method_it_built(tmp_path: Path):
     write_training_corpus(tmp_path)
     model, _ = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"num_examples": 1}})
 
     model.train()
 
     checkpoint_dir = tmp_path / "run" / "checkpoint-1"
-    assert (checkpoint_dir / "retrieval.pkl").is_file()
-    meta = json.loads((checkpoint_dir / "retrieval_meta.json").read_text(encoding="utf-8"))
-    assert meta == {"method": "tfidf", "model_name": None, "num_sources": 2}
+    info = json.loads((checkpoint_dir / "remote_llm_model.json").read_text(encoding="utf-8"))
+    assert info["retrieval_method"] == "tfidf"
+    assert info["num_training_pairs"] == 2
+    # A lexical index refits in seconds, so none is cached for inference to pick up.
+    assert [path.name for path in checkpoint_dir.glob("retrieval*")] == []
 
 
 def test_train_writes_a_checkpoint_so_the_last_checkpoint_resolves(tmp_path: Path):
@@ -484,7 +486,10 @@ def test_train_in_full_corpus_mode_writes_a_checkpoint_but_no_index(tmp_path: Pa
 
     checkpoint_dir = tmp_path / "run" / "checkpoint-1"
     assert checkpoint_dir.is_dir()
-    assert not (checkpoint_dir / "retrieval.pkl").exists()
+    info = json.loads((checkpoint_dir / "remote_llm_model.json").read_text(encoding="utf-8"))
+    # Every example goes in the prompt, so no retrieval happens at all.
+    assert "retrieval_method" not in info
+    assert info["corpus_tokens"] is not None
 
 
 def test_train_rejects_a_missing_training_corpus(tmp_path: Path):
@@ -928,14 +933,12 @@ def test_the_remote_model_falls_back_to_the_plain_corpus(tmp_path: Path):
     assert [example.target for example in selected] == ["sea la luz"]
 
 
-def test_a_saved_index_is_reused_for_batched_requests(tmp_path: Path):
+def test_the_example_index_serves_batched_requests(tmp_path: Path):
     write_training_corpus(tmp_path)
     model, client = make_model(
         tmp_path, lambda messages: "1. hola\n2. adios", infer={"prompt": {"num_examples": 1}, "infer_batch_size": 2}
     )
     model.train()
-
-    assert model._config.load_example_index(tmp_path / "run" / "checkpoint-1")
 
     list(model.translate(["let there be light", "and so on"], "en", "es"))
 

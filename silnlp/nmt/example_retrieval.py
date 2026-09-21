@@ -3,7 +3,7 @@
 
 import json
 import logging
-import pickle
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,24 +37,8 @@ class ExampleRetriever(ABC):
 
     method: str = ""
 
-    _INDEX_FILENAME = "retrieval.pkl"
-    _META_FILENAME = "retrieval_meta.json"
-
     def __init__(self) -> None:
         self._source_count = 0
-
-    def _model_name(self) -> Optional[str]:
-        return None
-
-    def reason_to_rebuild(self, wanted: "ExampleRetriever", corpus_size: int) -> Optional[str]:
-        """Why this saved index cannot stand in for `wanted` over a corpus of `corpus_size`."""
-        if self.method != wanted.method or self._model_name() != wanted._model_name():
-            return f"The saved retrieval index uses '{self.method}' but the config asks for '{wanted.method}'"
-        if self._source_count != corpus_size:
-            return (
-                f"The saved retrieval index covers {self._source_count} examples " f"but the corpus has {corpus_size}"
-            )
-        return None
 
     def _top_indices(self, scores: np.ndarray, k: int, exclude: Optional[int] = None) -> List[int]:
         """Indices of the top-k highest scores, most-similar first, optionally excluding one index."""
@@ -98,29 +82,10 @@ class ExampleRetriever(ABC):
         return [i for i in self._top_indices_for_query(source, k + 1) if i != index][:k]
 
     def save(self, directory: Path) -> None:
-        directory.mkdir(parents=True, exist_ok=True)
-        with (directory / self._INDEX_FILENAME).open("wb") as file:
-            pickle.dump(self, file)
-        meta = {"method": self.method, "model_name": self._model_name(), "num_sources": self._source_count}
-        with (directory / self._META_FILENAME).open("w", encoding="utf-8") as file:
-            json.dump(meta, file, indent=2)
+        pass
 
-    @classmethod
-    def load(cls, directory: Path) -> Optional["ExampleRetriever"]:
-        """Load a previously saved index, or return None if it is missing or unreadable."""
-        path = directory / cls._INDEX_FILENAME
-        try:
-            with path.open("rb") as file:
-                retriever = pickle.load(file)
-        except FileNotFoundError:
-            return None
-        except Exception:
-            LOGGER.warning("Could not load the retrieval index at %s; it will be rebuilt.", path, exc_info=True)
-            return None
-        if not isinstance(retriever, ExampleRetriever):
-            LOGGER.warning("The file at %s is not a retrieval index; it will be rebuilt.", path)
-            return None
-        return retriever
+    def load(self, directory: Path, corpus_size: int) -> bool:
+        return False
 
 
 class RetrievalTokenizer:
@@ -141,6 +106,8 @@ class LexicalExampleRetriever(ExampleRetriever):
     def __init__(self) -> None:
         super().__init__()
         self._tokenizer = RetrievalTokenizer()
+
+    # Lexical indices can be rebuilt in seconds, so they do not implement save/load.
 
 
 class TfidfExampleRetriever(LexicalExampleRetriever):
@@ -201,23 +168,29 @@ class EmbeddingExampleRetriever(ExampleRetriever):
     method = "embedding"
 
     _DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    _EMBEDDINGS_FILENAME = "example_retrieval_embeddings.npy"
+    _META_FILENAME = "example_retrieval_meta.json"
 
     def __init__(self, model_name: Optional[str] = None, model: Optional[_EmbeddingModel] = None) -> None:
         """`model` is the test injection seam; production passes only `model_name`."""
         super().__init__()
         self._name = model_name or self._DEFAULT_MODEL
         self._model = model
+        self._model_lock = threading.Lock()
         self._embeddings: np.ndarray = np.zeros((0, 0), dtype=np.float32)
 
-    def _model_name(self) -> Optional[str]:
-        return self._name
-
     def _get_model(self) -> _EmbeddingModel:
-        if self._model is None:
-            from sentence_transformers import SentenceTransformer
+        # Inference ranks on a thread pool, so without this every worker would load its own copy.
+        with self._model_lock:
+            if self._model is None:
+                self._model = self._create_model()
+            return self._model
 
-            self._model = SentenceTransformer(self._name)
-        return self._model
+    def _create_model(self) -> _EmbeddingModel:
+        # Imported here so that a config using no embedding retrieval never pays for the import.
+        from sentence_transformers import SentenceTransformer
+
+        return SentenceTransformer(self._name)
 
     def _encode(self, texts: Sequence[str]) -> np.ndarray:
         return self._get_model().encode(
@@ -235,9 +208,43 @@ class EmbeddingExampleRetriever(ExampleRetriever):
     def _top_indices_excluding(self, source: str, index: int, k: int) -> List[int]:
         return self._top_indices(self._embeddings @ self._embeddings[index], k, exclude=index)
 
-    def __getstate__(self) -> dict:
-        # The embeddings are the expensive part worth caching; the model reloads by name.
-        return {**self.__dict__, "_model": None}
+    def save(self, directory: Path) -> None:
+        directory.mkdir(parents=True, exist_ok=True)
+        np.save(directory / self._EMBEDDINGS_FILENAME, self._embeddings)
+        meta = {"method": self.method, "model_name": self._name, "num_sources": self._source_count}
+        with (directory / self._META_FILENAME).open("w", encoding="utf-8") as file:
+            json.dump(meta, file, indent=2)
+
+    def load(self, directory: Path, corpus_size: int) -> bool:
+        try:
+            with (directory / self._META_FILENAME).open("r", encoding="utf-8") as file:
+                meta = json.load(file)
+            embeddings = np.load(directory / self._EMBEDDINGS_FILENAME, allow_pickle=False)
+        except FileNotFoundError:
+            return False
+        except Exception:
+            LOGGER.warning("Could not read the retrieval index in %s; it will be rebuilt.", directory, exc_info=True)
+            return False
+
+        reason = self._reason_to_rebuild(meta, len(embeddings), corpus_size)
+        if reason is not None:
+            LOGGER.info("%s; rebuilding it.", reason)
+            return False
+
+        self._embeddings = embeddings
+        self._source_count = len(embeddings)
+        return True
+
+    def _reason_to_rebuild(self, meta: dict, saved_count: int, corpus_size: int) -> Optional[str]:
+        """Why a saved index cannot stand in for this one over a corpus of `corpus_size`."""
+        if meta.get("method") != self.method or meta.get("model_name") != self._name:
+            return (
+                f"The saved retrieval index uses '{meta.get('method')}' with model "
+                f"'{meta.get('model_name')}' but the config asks for '{self.method}' with '{self._name}'"
+            )
+        if saved_count != corpus_size:
+            return f"The saved retrieval index covers {saved_count} examples but the corpus has {corpus_size}"
+        return None
 
 
 class ExampleRetrieverFactory:
@@ -331,21 +338,24 @@ class ExamplePool:
         self._retriever = retriever
         self._examples: Optional[List[Example]] = None
         self._fitted = False
+        # Reentrant because fitting the index reads the corpus through the same lock.
+        self._lock = threading.RLock()
 
     def __len__(self) -> int:
         return len(self.all_examples())
 
     def all_examples(self) -> List[Example]:
         # Read on first use rather than in __init__, so num_examples: 0 never touches the corpus.
-        if self._examples is None:
-            pairs = self._read_first_available_corpus()
-            if pairs is None:
-                raise RuntimeError(
-                    f"num_examples > 0 requires the training corpus at {self._describe_corpus_paths()}. "
-                    "Run preprocessing (--preprocess) first."
-                )
-            self._examples = [Example(source=s, target=t) for s, t in zip(*pairs)]
-        return self._examples
+        with self._lock:
+            if self._examples is None:
+                pairs = self._read_first_available_corpus()
+                if pairs is None:
+                    raise RuntimeError(
+                        f"num_examples > 0 requires the training corpus at {self._describe_corpus_paths()}. "
+                        "Run preprocessing (--preprocess) first."
+                    )
+                self._examples = [Example(source=s, target=t) for s, t in zip(*pairs)]
+            return self._examples
 
     def _read_first_available_corpus(self) -> Optional[Tuple[List[str], List[str]]]:
         for src_path, trg_path in self._corpus_paths:
@@ -383,23 +393,19 @@ class ExamplePool:
         return [self.all_examples()[i] for i in reversed(ranked)]
 
     def get_retriever(self) -> ExampleRetriever:
-        if not self._fitted:
-            self._retriever.fit([example.source for example in self.all_examples()])
-            self._fitted = True
-        return self._retriever
+        with self._lock:
+            if not self._fitted:
+                self._retriever.fit([example.source for example in self.all_examples()])
+                self._fitted = True
+            return self._retriever
 
     def save_index(self, directory: Path) -> None:
         self.get_retriever().save(directory)
 
     def load_index(self, directory: Path) -> bool:
         """Adopt a previously saved index, or report that one has to be built."""
-        saved = ExampleRetriever.load(directory)
-        if saved is None:
-            return False
-        reason = saved.reason_to_rebuild(self._retriever, len(self))
-        if reason is not None:
-            LOGGER.info("%s; rebuilding it.", reason)
-            return False
-        self._retriever = saved
-        self._fitted = True
-        return True
+        with self._lock:
+            if not self._retriever.load(directory, len(self)):
+                return False
+            self._fitted = True
+            return True

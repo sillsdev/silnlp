@@ -552,7 +552,7 @@ class RemoteLLMModel(NMTModel):
         self._client_factory = completion_client_factory or LiteLLMCompletionClientFactory()
         self._client: Optional[CompletionClient] = None
         self._corpus_block: Optional[str] = None
-        # Requests run on a thread pool; guards the lazily built client, index, and corpus block.
+        # Requests run on a thread pool; guards the lazily built client and corpus block.
         self._lock = threading.Lock()
 
     def train(self) -> None:

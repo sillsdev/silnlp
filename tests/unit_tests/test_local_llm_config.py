@@ -18,6 +18,7 @@ from silnlp.nmt.local_llm_config import (
     LocalLLMPromptMessages,
     LocalLLMPromptMessagesFactory,
     DataCollatorForCausalLM,
+    InterleavedEpochCallback,
     InterleavedTrainDataset,
     LocalLLMConfig,
     LocalLLMModel,
@@ -582,27 +583,88 @@ def test_interleaved_train_dataset_supports_getitem_based_fallback_iteration():
     assert len(tags) == 6
 
 
+def _tags_for_epoch(dataset, epoch):
+    dataset.start_epoch(epoch)
+    # The sampler permutes the order but covers every index exactly once per epoch.
+    return [dataset[i]["tag"] for i in range(len(dataset))]
+
+
+def _interleaved(translation_count, instruction_count, pool=100):
+    return InterleavedTrainDataset(
+        _make_tagged_dataset("t", 10), _make_tagged_dataset("i", pool), translation_count, instruction_count, seed=0
+    )
+
+
+def test_each_epoch_is_a_full_pass_over_the_translation_pool():
+    dataset = _interleaved(translation_count=10, instruction_count=5)
+    for epoch in range(3):
+        tags = _tags_for_epoch(dataset, epoch)
+        assert sorted(tag for tag in tags if tag.startswith("t")) == sorted(f"t{i}" for i in range(10))
+
+
+def test_later_epochs_draw_instruction_rows_the_earlier_ones_did_not():
+    dataset = _interleaved(translation_count=10, instruction_count=5)
+    seen = [{tag for tag in _tags_for_epoch(dataset, epoch) if tag.startswith("i")} for epoch in range(4)]
+
+    assert all(len(epoch_tags) == 5 for epoch_tags in seen)
+    # 4 epochs x 5 slots drawn from a pool of 100, so no row should come round twice.
+    assert len(set().union(*seen)) == 20
+
+
+def test_instruction_rows_only_repeat_once_the_pool_is_exhausted():
+    dataset = _interleaved(translation_count=10, instruction_count=3, pool=6)
+    first_two = set(_tags_for_epoch(dataset, 0)) | set(_tags_for_epoch(dataset, 1))
+    assert {tag for tag in first_two if tag.startswith("i")} == {f"i{i}" for i in range(6)}
+
+
+def test_epoch_callback_passes_the_trainer_epoch_to_the_dataset():
+    # Verified against a real Trainer run: state.epoch is exactly the loop epoch here, and it is
+    # restored from the checkpoint, so a resumed run carries on rather than replaying.
+    recorded = []
+    callback = InterleavedEpochCallback(SimpleNamespace(start_epoch=recorded.append))
+
+    for epoch in (0.0, 1.0, 2.6):
+        callback.on_epoch_begin(None, SimpleNamespace(epoch=epoch), None)
+
+    assert recorded == [0, 1, 2]
+
+
 @dataclass
-class _TotalTrainExamplesStub:
+class _DatasetLengthStub:
     _num_devices: int
 
-    _estimate_total_train_examples = LocalLLMModel._estimate_total_train_examples
+    _interleaved_dataset_length = LocalLLMModel._interleaved_dataset_length
 
 
-def test_estimate_total_train_examples_uses_max_steps_when_set():
-    stub = _TotalTrainExamplesStub(_num_devices=2)
+def _length(num_devices, max_steps, translation_size=1000, mix_ratio=0.1, num_train_epochs=3.0):
     training_args = SimpleNamespace(
-        max_steps=100, per_device_train_batch_size=4, gradient_accumulation_steps=8, num_train_epochs=3.0
+        max_steps=max_steps,
+        per_device_train_batch_size=4,
+        gradient_accumulation_steps=8,
+        num_train_epochs=num_train_epochs,
     )
-    assert stub._estimate_total_train_examples(training_args, translation_size=1000) == 100 * 4 * 8 * 2
+    return _DatasetLengthStub(_num_devices=num_devices)._interleaved_dataset_length(
+        training_args, translation_size, mix_ratio
+    )
 
 
-def test_estimate_total_train_examples_falls_back_to_num_train_epochs_when_max_steps_unset():
-    stub = _TotalTrainExamplesStub(_num_devices=1)
-    training_args = SimpleNamespace(
-        max_steps=-1, per_device_train_batch_size=4, gradient_accumulation_steps=8, num_train_epochs=3.0
-    )
-    assert stub._estimate_total_train_examples(training_args, translation_size=1000) == 3000
+def test_a_step_budget_sizes_the_dataset_for_the_whole_run():
+    # The Trainer stops at max_steps, so the dataset covers exactly what the run consumes.
+    assert _length(num_devices=2, max_steps=100) == 100 * 4 * 8 * 2
+
+
+def test_an_epoch_budget_sizes_the_dataset_for_one_pass_plus_the_instruction_share():
+    # The Trainer derives its step count from this length and then runs num_train_epochs of them,
+    # so a whole-run length here would square the epoch count.
+    length = _length(num_devices=1, max_steps=-1)
+    assert length == 1100
+    # And the caller's split hands a full pass back, so instructions never displace translations.
+    assert round(length / 1.1) == 1000
+
+
+def test_an_unset_step_budget_is_treated_as_an_epoch_budget():
+    # Neither the epoch count nor the device count belongs here; the Trainer applies both itself.
+    assert _length(num_devices=4, max_steps=0, num_train_epochs=10.0) == 1100
 
 
 def _write_jsonl_fixture(path: Path, examples: list) -> None:

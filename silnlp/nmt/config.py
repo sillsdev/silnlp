@@ -468,11 +468,7 @@ class Config(ABC):
         return parts[2], parts[5]
 
     def _build_corpora(self, tokenizer: Tokenizer, stats: bool, force_align: bool) -> int:
-        self._delete_files("train.*.txt")
-        self._delete_files("val.*.txt")
-        self._delete_files("test.*.txt")
-        self._delete_files("dict.*.txt")
-        self._delete_files("instruction.*")
+        self._delete_previous_data_files()
 
         train_count = 0
         terms_config = self.data["terms"]
@@ -500,8 +496,6 @@ class Config(ABC):
         if terms_config["dictionary"]:
             dict_count = self._write_dictionary(tokenizer, src_terms_files, trg_terms_files)
             LOGGER.info(f"dictionary size: {dict_count}")
-
-        train_count += self._write_instruction_data()
 
         if stats and self.data["tokenize"]:
             self._calculate_tokenization_stats()
@@ -614,6 +608,12 @@ class Config(ABC):
 
         existing_stats.to_csv(stats_path, index=False)
         existing_stats.to_excel(stats_path.with_suffix(".xlsx"))
+
+    def _delete_previous_data_files(self) -> None:
+        self._delete_files("train.*.txt")
+        self._delete_files("val.*.txt")
+        self._delete_files("test.*.txt")
+        self._delete_files("dict.*.txt")
 
     def _delete_files(self, pattern: str) -> None:
         for old_file_path in self.exp_dir.glob(pattern):
@@ -1395,14 +1395,6 @@ class Config(ABC):
 
     def dict_vref_filename(self) -> str:
         return "dict.vref.txt"
-
-    def instruction_jsonl_filename(self) -> str:
-        return "instruction.jsonl"
-
-    def _write_instruction_data(self) -> int:
-        """Hook for general instruction-following data mixed into training only, kept separate
-        from the translation corpora. No-op here; overridden by LLMConfig."""
-        return 0
 
     def _has_multiple_test_projects(self, src_iso: str, trg_iso: str) -> bool:
         return self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
