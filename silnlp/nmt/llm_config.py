@@ -21,7 +21,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Generator, Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple, Union
 
 import torch
 from datasets import Dataset
@@ -53,6 +53,7 @@ from .training_arguments import TrainingArgumentsMapping
 from .vocabulary_builder import NoVocabularyBuilder, VocabularyBuilder
 from .causal_lm_tokenizer import CausalLMTokenizer
 from .config_keys import DeprecatedAdapterKey, RenamedConfigKeys
+from .experiment_languages import ExperimentLanguages
 from .finetune_method import FinetuneMethod
 from .model_name import ModelName
 from .prompt_messages import Language, PromptBuilder, PromptMessages
@@ -256,7 +257,14 @@ class LLMConfig(Config):
     ) -> NMTModel:
         if pretrained_model_provider_factory is None:
             pretrained_model_provider_factory = FileCausalLMProviderFactory()
-        return LLMModel(self, mixed_precision, num_devices, clearml_queue, pretrained_model_provider_factory)
+        return LLMModel(
+            self,
+            self.create_languages(),
+            mixed_precision,
+            num_devices,
+            clearml_queue,
+            pretrained_model_provider_factory,
+        )
 
     def create_tokenizer(self) -> Tokenizer:
         # The Config-level Tokenizer is only used by data prep and by test.py to detokenize
@@ -266,22 +274,8 @@ class LLMConfig(Config):
     def get_hf_tokenizer(self) -> PreTrainedTokenizerBase:
         return self._hf_tokenizer.load()
 
-    def lang_name(self, iso: str) -> str:
-        return self.data["lang_codes"].get(iso, iso)
-
-    def language(self, iso: str) -> Language:
-        return Language(iso=iso, name=self.lang_name(iso))
-
-    @property
-    def train_src_iso(self) -> str:
-        return self.inventory.default_test_source_iso() or self._any_iso(self.inventory.source_isos())
-
-    @property
-    def train_trg_iso(self) -> str:
-        return self.inventory.default_test_target_iso() or self._any_iso(self.inventory.target_isos())
-
-    def _any_iso(self, isos: Set[str]) -> str:
-        return next(iter(isos)) if len(isos) > 0 else ""
+    def create_languages(self) -> ExperimentLanguages:
+        return ExperimentLanguages(self.data["lang_codes"], self.inventory)
 
     def build_prompt_messages(
         self, source: str, src_lang: Language, trg_lang: Language, target: Optional[str] = None
@@ -449,6 +443,7 @@ class LLMModel(NMTModel):
     def __init__(
         self,
         config: LLMConfig,
+        languages: ExperimentLanguages,
         mixed_precision: bool,
         num_devices: int,
         clearml_queue: Optional[str] = None,
@@ -456,6 +451,7 @@ class LLMModel(NMTModel):
     ) -> None:
         super().__init__(config)
         self._config: LLMConfig = config
+        self._languages = languages
         self._mixed_precision = mixed_precision
         self._num_devices = num_devices
         self._clearml_queue = clearml_queue
@@ -473,8 +469,8 @@ class LLMModel(NMTModel):
         model = self._apply_finetuning_config(model)
 
         max_seq_length: int = self._config.params["max_seq_length"]
-        src_lang = self._config.language(self._config.train_src_iso)
-        trg_lang = self._config.language(self._config.train_trg_iso)
+        src_lang = self._languages.of(self._languages.training_source_iso())
+        trg_lang = self._languages.of(self._languages.training_target_iso())
         eos_token_id = tokenizer.eos_token_id
 
         def encode(example: dict) -> dict:
@@ -624,8 +620,8 @@ class LLMModel(NMTModel):
         produce_multiple_translations: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Generator[SentenceTranslationGroup, None, None]:
-        src_lang = self._config.language(src_iso)
-        trg_lang = self._config.language(trg_iso)
+        src_lang = self._languages.of(src_iso)
+        trg_lang = self._languages.of(trg_iso)
         model = self._get_inference_model(ckpt, src_lang.name, trg_lang.name)
         tokenizer = self._config.get_hf_tokenizer()
         yield from self._generate(model, tokenizer, sentences, src_lang, trg_lang, produce_multiple_translations, False)
@@ -639,16 +635,16 @@ class LLMModel(NMTModel):
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         tokenizer = self._config.get_hf_tokenizer()
-        src_iso = self._config.train_src_iso
-        trg_iso = self._config.train_trg_iso
-        src_lang = self._config.language(src_iso)
-        trg_lang = self._config.language(trg_iso)
+        src_iso = self._languages.training_source_iso()
+        trg_iso = self._languages.training_target_iso()
+        src_lang = self._languages.of(src_iso)
+        trg_lang = self._languages.of(trg_iso)
         model = self._get_inference_model(ckpt, src_lang.name, trg_lang.name)
 
         for input_path, translation_path in zip(input_paths, translation_paths):
             file_src_iso, file_trg_iso = self._isos_for_test_file(input_path, src_iso, trg_iso)
-            file_src_lang = self._config.language(file_src_iso)
-            file_trg_lang = self._config.language(file_trg_iso)
+            file_src_lang = self._languages.of(file_src_iso)
+            file_trg_lang = self._languages.of(file_trg_iso)
             with open(input_path, "r", encoding="utf-8-sig") as src_file:
                 sentences = [line.strip() for line in src_file]
             sentence_translation_groups = list(

@@ -216,7 +216,8 @@ class TranslationTokenIds:
         # experiment directory until the preprocess step runs.
         if self._token_ids is None:
             tokenizer = self._config.get_tokenizer()
-            trg_lang = self._config.test_trg_lang or self._config.val_trg_lang
+            languages = self._config.create_languages()
+            trg_lang = languages.test_target() or languages.validation_target()
             translation_token_ids = tokenizer.convert_tokens_to_ids(tokenizer.tokenize(self._translation))
             # A generated sequence starts with the decoder start token, followed by the forced
             # target language token, and ends with the end-of-sequence token.

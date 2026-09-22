@@ -64,6 +64,7 @@ from .training_arguments import TrainingArgumentsMapping
 from .config_keys import RenamedConfigKeys
 from .dictionary_writer import DictionaryWriter, TermDictionaryWriter
 from .decoder_inputs import DecoderInputs
+from .experiment_languages import ExperimentLanguages
 from .huggingface_tokenizer import HuggingFaceTokenizer, PunctuationNormalizingTokenizer
 from .experiment_settings import TrainingSettings
 from .model_name import ModelName
@@ -334,25 +335,8 @@ class Seq2SeqConfig(Config):
             self.train["max_target_length"],
         )
 
-    @property
-    def val_src_lang(self) -> str:
-        lang_codes: Dict[str, str] = self.data["lang_codes"]
-        return lang_codes.get(self.inventory.default_validation_source_iso(), self.inventory.default_validation_source_iso())
-
-    @property
-    def test_src_lang(self) -> str:
-        lang_codes: Dict[str, str] = self.data["lang_codes"]
-        return lang_codes.get(self.inventory.default_test_source_iso(), self.inventory.default_test_source_iso())
-
-    @property
-    def val_trg_lang(self) -> str:
-        lang_codes: Dict[str, str] = self.data["lang_codes"]
-        return lang_codes.get(self.inventory.default_validation_target_iso(), self.inventory.default_validation_target_iso())
-
-    @property
-    def test_trg_lang(self) -> str:
-        lang_codes: Dict[str, str] = self.data["lang_codes"]
-        return lang_codes.get(self.inventory.default_test_target_iso(), self.inventory.default_test_target_iso())
+    def create_languages(self) -> ExperimentLanguages:
+        return ExperimentLanguages(self.data["lang_codes"], self.inventory)
 
     def create_model(
         self,
@@ -361,7 +345,14 @@ class Seq2SeqConfig(Config):
         clearml_queue: Optional[str] = None,
         pretrained_model_provider_factory: PreTrainedModelProviderFactory = FilePreTrainedModelProviderFactory(),
     ) -> NMTModel:
-        return Seq2SeqNMTModel(self, mixed_precision, num_devices, clearml_queue, pretrained_model_provider_factory)
+        return Seq2SeqNMTModel(
+            self,
+            self.create_languages(),
+            mixed_precision,
+            num_devices,
+            clearml_queue,
+            pretrained_model_provider_factory,
+        )
 
     def create_tokenizer(self) -> Tokenizer:
         if not self.data["tokenize"]:
@@ -470,6 +461,7 @@ class Seq2SeqNMTModel(NMTModel):
     def __init__(
         self,
         config: Seq2SeqConfig,
+        languages: ExperimentLanguages,
         mixed_precision: bool,
         num_devices: int,
         clearml_queue: Optional[str] = None,
@@ -477,6 +469,7 @@ class Seq2SeqNMTModel(NMTModel):
     ) -> None:
         super().__init__(config)
         self._config: Seq2SeqConfig = config
+        self._languages = languages
         self._mixed_precision = mixed_precision
         set_seed(self._config.data["seed"])
         self._dictionary: Optional[Dict[VerseRef, Set[str]]] = None
@@ -551,8 +544,8 @@ class Seq2SeqNMTModel(NMTModel):
         model, tokenizer = self._configure_model(
             model,
             tokenizer,
-            self._config.val_src_lang if self._config.val_src_lang else self._config.test_src_lang,
-            self._config.val_trg_lang if self._config.val_trg_lang else self._config.test_trg_lang,
+            self._languages.validation_source() if self._languages.validation_source() else self._languages.test_source(),
+            self._languages.validation_target() if self._languages.validation_target() else self._languages.test_target(),
         )
 
         def load_text_dataset(src_path: Path, trg_path: Path) -> Optional[Dataset]:
@@ -734,7 +727,7 @@ class Seq2SeqNMTModel(NMTModel):
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         tokenizer = self._config.get_tokenizer()
-        model = self._create_inference_model(ckpt, tokenizer, self._config.test_src_lang, self._config.test_trg_lang)
+        model = self._create_inference_model(ckpt, tokenizer, self._languages.test_source(), self._languages.test_target())
         compiled_model = cast(PreTrainedModel, torch.compile(model))
 
         for input_path, translation_path in zip(
@@ -779,8 +772,8 @@ class Seq2SeqNMTModel(NMTModel):
             src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
             trg_lang = self._config.data["lang_codes"].get(trg_iso, trg_iso)
         else:
-            src_lang = self._config.test_src_lang
-            trg_lang = self._config.test_trg_lang
+            src_lang = self._languages.test_source()
+            trg_lang = self._languages.test_target()
 
         return PretokenizedTranslator(model=model, tokenizer=tokenizer, src_lang=src_lang, tgt_lang=trg_lang)
 

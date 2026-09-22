@@ -4,8 +4,14 @@ import pytest
 from jinja2.exceptions import UndefinedError
 
 from silnlp.nmt.config_utils import ConfiguredModelType
-from silnlp.nmt.llm_config import DataCollatorForCausalLM, LLMConfig, LLMModel, build_generation_kwargs
-from silnlp.nmt.prompt_messages import Language, PromptMessages, TranslateGemmaPromptMessages
+from silnlp.nmt.llm_config import DataCollatorForCausalLM, LLMModel, build_generation_kwargs
+from silnlp.nmt.model_name import ModelName
+from silnlp.nmt.prompt_messages import (
+    Language,
+    PromptBuilder,
+    PromptMessages,
+    TranslateGemmaPromptMessages,
+)
 
 
 def test_an_explicit_model_type_decides_whatever_the_model_is_called():
@@ -110,34 +116,20 @@ def test_data_collator_pad_to_multiple_of():
     assert batch["labels"].tolist() == [[-100, 6, 7, -100]]
 
 
-@dataclass
-class _StubLLMConfig:
-    model: str
-    params: dict
-    data: dict
-
-    lang_name = LLMConfig.lang_name
-    language = LLMConfig.language
-    build_prompt_messages = LLMConfig.build_prompt_messages
+def prompt_builder_for(model: str, **prompt) -> PromptBuilder:
+    return PromptBuilder(ModelName(model), prompt)
 
 
-def test_language_resolves_configured_name_and_falls_back_to_iso():
-    config = _StubLLMConfig(model="google/gemma-2-2b-it", params={}, data={"lang_codes": {"en": "English"}})
-    assert config.language("en") == Language("en", "English")
-    assert config.language("fr") == Language("fr", "fr")
-
-
-def test_build_prompt_messages_translate_gemma_uses_structured_content():
-    config = _StubLLMConfig(
-        model="google/translategemma-4b-it",
-        params={"prompt": {"instruction_template": "Translate from {src_lang} to {trg_lang}.\n\n{source}"}},
-        data={"lang_codes": {}},
+def test_translate_gemma_is_given_structured_content_rather_than_an_instruction():
+    builder = prompt_builder_for(
+        "google/translategemma-4b-it", instruction_template="Translate from {src_lang} to {trg_lang}.\n\n{source}"
     )
-    prompt = config.build_prompt_messages("hello", config.language("en"), config.language("fr"), target="bonjour")
+
+    prompt = builder.build("hello", Language("en", "en"), Language("fr", "fr"), target="bonjour")
+
     assert prompt == TranslateGemmaPromptMessages(
         source_language=Language("en", "en"), target_language=Language("fr", "fr"), text="hello", target="bonjour"
     )
-    assert isinstance(prompt, TranslateGemmaPromptMessages)
     assert prompt.to_chat_messages() == [
         {
             "role": "user",
@@ -147,18 +139,15 @@ def test_build_prompt_messages_translate_gemma_uses_structured_content():
     ]
 
 
-def test_build_prompt_messages_generic_model_uses_instruction_template():
-    config = _StubLLMConfig(
-        model="google/gemma-2-2b-it",
-        params={
-            "prompt": {
-                "instruction_template": "Translate from {src_lang} to {trg_lang}.\n\n{source}",
-                "system_message": "",
-            }
-        },
-        data={"lang_codes": {"en": "English", "fr": "French"}},
+def test_any_other_model_is_given_the_configured_instruction_with_the_language_names():
+    builder = prompt_builder_for(
+        "google/gemma-2-2b-it",
+        instruction_template="Translate from {src_lang} to {trg_lang}.\n\n{source}",
+        system_message="",
     )
-    prompt = config.build_prompt_messages("hello", config.language("en"), config.language("fr"))
+
+    prompt = builder.build("hello", Language("en", "English"), Language("fr", "French"))
+
     assert prompt == PromptMessages(
         system_message="", instruction="Translate from English to French.\n\nhello", target=None
     )
@@ -178,13 +167,9 @@ class _StubTranslateGemmaTokenizer:
 
 
 def test_apply_prompt_template_translate_gemma_falls_back_for_unrecognized_language_code():
-    config = _StubLLMConfig(
-        model="google/translategemma-4b-it",
-        params={"prompt": {"instruction_template": "unused"}},
-        data={"lang_codes": {"en": "English", "tst": "Test Language"}},
-    )
+    builder = prompt_builder_for("google/translategemma-4b-it", instruction_template="unused")
     tokenizer = _StubTranslateGemmaTokenizer()
-    prompt = config.build_prompt_messages("hello", config.language("en"), config.language("tst"))
+    prompt = builder.build("hello", Language("en", "English"), Language("tst", "Test Language"))
 
     text = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=False)
     assert text == (
