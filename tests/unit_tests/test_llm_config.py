@@ -139,7 +139,7 @@ def _prompt_config(**settings):
         "example_format": "text",
     }
     base.update(settings)
-    return PromptConfig(base, "train.prompt")
+    return PromptConfig(base, "train.prompt", DEFAULTS)
 
 
 def test_prompt_config_creates_the_configured_retriever():
@@ -170,7 +170,7 @@ DEFAULTS = PromptDefaults(
 
 def _resolved(**settings):
     prompt = {"system_message": None, "instruction_template": None, "example_format": None, **settings}
-    PromptConfig(prompt, "train.prompt").resolve_defaults(DEFAULTS)
+    PromptConfig(prompt, "train.prompt", DEFAULTS)
     return prompt
 
 
@@ -190,7 +190,7 @@ def test_resolve_prompt_defaults_uses_the_few_shot_template_with_examples():
 
 def test_resolve_prompt_defaults_leaves_the_user_wording_alone():
     prompt = {"system_message": "mine", "instruction_template": "{source}", "example_format": "json", "num_examples": 3}
-    PromptConfig(prompt, "train.prompt").resolve_defaults(DEFAULTS)
+    PromptConfig(prompt, "train.prompt", DEFAULTS)
     assert prompt == {
         "system_message": "mine",
         "instruction_template": "{source}",
@@ -283,7 +283,7 @@ def test_prompt_template_file_ignores_blank_lines(tmp_path):
 
 
 def test_prompt_template_file_rejects_a_missing_file(tmp_path):
-    with pytest.raises(RuntimeError, match="does not exist"):
+    with pytest.raises(FileNotFoundError, match="does not exist"):
         PromptTemplateCollection.from_file(tmp_path / "nowhere.jsonl")
 
 

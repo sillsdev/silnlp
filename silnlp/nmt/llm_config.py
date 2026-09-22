@@ -7,13 +7,15 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Generic, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Dict, Generic, List, Optional, Sequence, Tuple, TypeVar, Union
 
 from ..common.environment import SilNlpEnv
 from ..common.utils import merge_dict
 from .config import Config, Language
 from .corpora import DataFile
 from .example_retrieval import (
+    CorpusPair,
+    CorpusPairProvider,
     Example,
     ExampleFormatter,
     ExampleFormatterFactory,
@@ -21,6 +23,7 @@ from .example_retrieval import (
     ExamplePoolSummary,
     ExampleRetriever,
     ExampleRetrieverFactory,
+    FixedCorpusPairProvider,
 )
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -166,19 +169,19 @@ class PromptTemplateCollection:
     def __init__(self, prompt_templates: List[PromptTemplate]) -> None:
         self._templates = prompt_templates
 
-    def is_empty(self) -> bool:
-        return len(self._templates) == 0
+    def __len__(self) -> int:
+        return len(self._templates)
 
     def template_for(self, rotation_index: Optional[int]) -> PromptTemplate:
         if rotation_index is None:
             return self._templates[0]
-        return self._templates[rotation_index % len(self._templates)]
+        return self._templates[rotation_index % len(self)]
 
     def validate_for_icl(self, num_examples: int, source: str) -> None:
         for i, template in enumerate(self._templates):
             mismatch = template.describe_examples_mismatch(num_examples)
             if mismatch is not None:
-                where = f"{source}[{i}]" if len(self._templates) > 1 else source
+                where = f"{source}[{i}]" if len(self) > 1 else source
                 LOGGER.warning("num_examples is %d but %s %s.", num_examples, where, mismatch)
 
     @classmethod
@@ -188,7 +191,7 @@ class PromptTemplateCollection:
     @classmethod
     def from_file(cls, prompt_file_path: Path) -> "PromptTemplateCollection":
         if not prompt_file_path.is_file():
-            raise RuntimeError(f"The prompt template file {prompt_file_path} does not exist.")
+            raise FileNotFoundError(f"The prompt template file {prompt_file_path} does not exist.")
         templates: List[PromptTemplate] = []
         with prompt_file_path.open("r", encoding="utf-8") as file:
             for line in file:
@@ -214,7 +217,7 @@ class PromptBuilder(Generic[TPromptMessages]):
         pool: Optional[ExamplePool],
         messages_factory: PromptMessagesFactory[TPromptMessages],
     ) -> None:
-        if templates.is_empty():
+        if len(templates) == 0:
             raise ValueError("No valid prompt templates were supplied.")
         self._templates = templates
         self._num_examples = num_examples
@@ -293,9 +296,10 @@ class PromptDefaults:
 class PromptConfig:
     """A prompt section of an experiment config, e.g., infer.prompt."""
 
-    def __init__(self, settings: dict, name: str) -> None:
+    def __init__(self, settings: dict, name: str, defaults: PromptDefaults) -> None:
         self._settings = settings
         self._name = name
+        self._apply_defaults(defaults)
 
     def get_name(self) -> str:
         return self._name
@@ -320,21 +324,15 @@ class PromptConfig:
             formatter=ExampleFormatterFactory.create(self._settings["example_format"]),
         )
 
-    def get_setting(self, key: str) -> Any:
-        return self._settings[key]
-
-    def is_unset(self, key: str) -> bool:
+    def _is_unset(self, key: str) -> bool:
         return self._settings.get(key) is None
 
-    def set_batch_instruction_template(self, template: str) -> None:
-        self._settings["batch_instruction_template"] = template
-
-    def resolve_defaults(self, defaults: PromptDefaults) -> None:
-        if self.is_unset("system_message"):
+    def _apply_defaults(self, defaults: PromptDefaults) -> None:
+        if self._is_unset("system_message"):
             self._settings["system_message"] = defaults.system_message
-        if self.is_unset("example_format"):
+        if self._is_unset("example_format"):
             self._settings["example_format"] = defaults.example_format
-        if self.is_unset("instruction_template"):
+        if self._is_unset("instruction_template"):
             self._settings["instruction_template"] = defaults.instruction_template_for(
                 int(self._settings.get("num_examples", 0))
             )
@@ -355,7 +353,7 @@ class LLMConfig(Config, Generic[TPromptMessages]):
 
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
         config = merge_dict(self._default_config(exp_dir), config)
-        self._resolve_infer_prompt_defaults(PromptConfig(config["infer"]["prompt"], "infer.prompt"))
+        infer_prompt = self._create_infer_prompt_config(config["infer"]["prompt"])
 
         super().__init__(exp_dir, config, environment)
 
@@ -364,7 +362,6 @@ class LLMConfig(Config, Generic[TPromptMessages]):
                 f"{type(self).__name__} experiments only support a single source language and a single "
                 "target language."
             )
-        infer_prompt = PromptConfig(self.infer["prompt"], "infer.prompt")
         self._infer_example_pool = self._create_example_pool(infer_prompt)
         self._infer_prompt_builder = self._create_prompt_builder(infer_prompt, self._infer_example_pool)
 
@@ -376,8 +373,8 @@ class LLMConfig(Config, Generic[TPromptMessages]):
             self.DEFAULT_EXAMPLE_FORMAT,
         )
 
-    def _resolve_infer_prompt_defaults(self, prompt: PromptConfig) -> None:
-        prompt.resolve_defaults(self.prompt_defaults())
+    def _create_infer_prompt_config(self, settings: dict) -> PromptConfig:
+        return PromptConfig(settings, "infer.prompt", self.prompt_defaults())
 
     def _default_config(self, exp_dir: Path) -> dict:
         return {
@@ -419,10 +416,13 @@ class LLMConfig(Config, Generic[TPromptMessages]):
     def _create_example_pool(self, prompt: PromptConfig) -> Optional[ExamplePool]:
         if prompt.get_num_examples() <= 0:
             return None
-        return ExamplePool(self._example_corpus_paths(), prompt.create_retriever())
+        return ExamplePool(self._create_corpus_pair_provider(), prompt.create_retriever())
 
-    def _example_corpus_paths(self) -> List[Tuple[Path, Path]]:
-        return [(self.exp_dir / self.train_src_filename(), self.exp_dir / self.train_trg_filename())]
+    def _create_corpus_pair_provider(self) -> CorpusPairProvider:
+        return FixedCorpusPairProvider(self._train_corpus_pair())
+
+    def _train_corpus_pair(self) -> CorpusPair:
+        return CorpusPair(self.exp_dir / self.train_src_filename(), self.exp_dir / self.train_trg_filename())
 
     def get_infer_prompt_builder(self) -> PromptBuilder[TPromptMessages]:
         return self._infer_prompt_builder
@@ -456,12 +456,11 @@ class LLMConfig(Config, Generic[TPromptMessages]):
     def get_train_trg_iso(self) -> str:
         return self.default_test_trg_iso or (next(iter(self.trg_isos)) if len(self.trg_isos) > 0 else "")
 
+    # We don't need to build a SentencePiece tokenizer for LLMs -- the vocabulary is built in
     def create_tokenizer(self) -> Tokenizer:
-        # Data prep and test.py only tokenize and detokenize with this; both are raw text here.
         return NullTokenizer()
 
     def _build_vocabs(self, stats: bool = False) -> None:
-        # LLMs come with their own vocabulary; there is no SentencePiece model to build.
         return
 
     def _write_dictionary(

@@ -19,12 +19,19 @@ from ..common.translation_data_structures import DraftGroup, SentenceTranslation
 from ..common.translator import generate_confidence_files
 from ..common.utils import merge_dict
 from .config import CheckpointType, Language, NMTModel
-from .example_retrieval import Example, ExampleRetrieverFactory
+from .example_retrieval import (
+    CorpusPair,
+    CorpusPairProvider,
+    Example,
+    ExampleRetrieverFactory,
+    PreferredCorpusPairProvider,
+)
 from .llm_config import (
     LLMConfig,
     PlainPromptMessagesFactory,
     PromptBuilder,
     PromptConfig,
+    PromptDefaults,
     PromptMessages,
     PromptMessagesFactory,
     PromptTemplateCollection,
@@ -297,6 +304,41 @@ class BatchPromptBuilder(PromptBuilder[PromptMessages]):
         return self._build(numbered, src_lang, trg_lang, len(sources), examples=examples)
 
 
+class RemotePromptConfig(PromptConfig):
+    """The infer.prompt section of a hosted-model experiment, which also has a batch instruction template."""
+
+    def __init__(
+        self,
+        settings: dict,
+        defaults: PromptDefaults,
+        single_default: str,
+        batch_default: str,
+        few_shot_batch_default: str,
+    ) -> None:
+        self._batch_default = batch_default
+        self._few_shot_batch_default = few_shot_batch_default
+        # Captured before the defaults land, since a whole-corpus prompt needs the plain default, not few-shot.
+        self._corpus_instruction_template = settings["instruction_template"] or single_default
+        self._corpus_batch_instruction_template = settings["batch_instruction_template"] or batch_default
+        super().__init__(settings, "infer.prompt", defaults)
+
+    def _apply_defaults(self, defaults: PromptDefaults) -> None:
+        super()._apply_defaults(defaults)
+        if self._is_unset("batch_instruction_template"):
+            self._settings["batch_instruction_template"] = (
+                self._few_shot_batch_default if self.get_num_examples() > 0 else self._batch_default
+            )
+
+    def get_batch_instruction_template(self) -> str:
+        return self._settings["batch_instruction_template"]
+
+    def get_corpus_instruction_template(self) -> str:
+        return self._corpus_instruction_template
+
+    def get_corpus_batch_instruction_template(self) -> str:
+        return self._corpus_batch_instruction_template
+
+
 class RemoteLLMConfig(LLMConfig[PromptMessages]):
     _SYSTEM_MESSAGE = (
         "You are a member of a Bible translation team translating from {src_lang} into {trg_lang}. "
@@ -347,6 +389,8 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
         "style, terminology, exegesis, spelling, and punctuation:"
     )
 
+    _FEW_SHOT_BATCH_INSTRUCTION = _EXAMPLES_HEADING + _BATCH_INSTRUCTION
+
     DEFAULT_SYSTEM_MESSAGE = _SYSTEM_MESSAGE
     DEFAULT_INSTRUCTION_TEMPLATE = _SINGLE_INSTRUCTION
     DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE = _EXAMPLES_HEADING + _SINGLE_INSTRUCTION
@@ -355,11 +399,14 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
         super().__init__(exp_dir, config, environment)
         self._validate()
+        prompt = self._infer_prompt_config()
         self._batch_prompt_builder = self._create_batch_prompt_builder(
-            self.get_prompt()["batch_instruction_template"], "infer.prompt.batch_instruction_template"
+            prompt.get_batch_instruction_template(), "infer.prompt.batch_instruction_template"
         )
-        self._corpus_prompt_builder = self._create_single_prompt_builder(self._corpus_single_instruction_template)
-        self._corpus_batch_prompt_builder = self._create_batch_prompt_builder(self._corpus_batch_instruction_template)
+        self._corpus_prompt_builder = self._create_single_prompt_builder(prompt.get_corpus_instruction_template())
+        self._corpus_batch_prompt_builder = self._create_batch_prompt_builder(
+            prompt.get_corpus_batch_instruction_template()
+        )
         self._disable_eval_if_no_val_split()
 
     def _default_config(self, exp_dir: Path) -> dict:
@@ -401,30 +448,26 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
             },
         )
 
-    def _example_corpus_paths(self) -> List[Tuple[Path, Path]]:
-        detokenized = (
+    def _create_corpus_pair_provider(self) -> CorpusPairProvider:
+        """An experiment preprocessed for a tokenized model has readable text only in the detok files."""
+        detokenized = CorpusPair(
             self.exp_dir / self.train_src_detok_filename(),
             self.exp_dir / self.train_trg_detok_filename(),
         )
-        return [detokenized, *super()._example_corpus_paths()]
+        return PreferredCorpusPairProvider(detokenized, self._train_corpus_pair())
 
     def build_corpus_block(self, rendered_examples: str) -> str:
         return f"{self._CORPUS_HEADING}\n\n{rendered_examples}" if rendered_examples else ""
 
-    def _resolve_infer_prompt_defaults(self, prompt: PromptConfig) -> None:
-        self._corpus_single_instruction_template = (
-            prompt.get_setting("instruction_template") or self._SINGLE_INSTRUCTION
+    def _create_infer_prompt_config(self, settings: dict) -> RemotePromptConfig:
+        self._infer_prompt = RemotePromptConfig(
+            settings,
+            self.prompt_defaults(),
+            self._SINGLE_INSTRUCTION,
+            self._BATCH_INSTRUCTION,
+            self._FEW_SHOT_BATCH_INSTRUCTION,
         )
-        self._corpus_batch_instruction_template = (
-            prompt.get_setting("batch_instruction_template") or self._BATCH_INSTRUCTION
-        )
-        super()._resolve_infer_prompt_defaults(prompt)
-        if prompt.is_unset("batch_instruction_template"):
-            prompt.set_batch_instruction_template(
-                self._EXAMPLES_HEADING + self._BATCH_INSTRUCTION
-                if prompt.get_num_examples() > 0
-                else self._BATCH_INSTRUCTION
-            )
+        return self._infer_prompt
 
     def create_messages_factory(self) -> PromptMessagesFactory[PromptMessages]:
         return PlainPromptMessagesFactory()
@@ -449,8 +492,8 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
             templates, prompt.get_num_examples(), self._infer_example_pool, self.create_messages_factory()
         )
 
-    def _infer_prompt_config(self) -> PromptConfig:
-        return PromptConfig(self.get_prompt(), "infer.prompt")
+    def _infer_prompt_config(self) -> RemotePromptConfig:
+        return self._infer_prompt
 
     def _variant_templates(self, instruction_template: str) -> PromptTemplateCollection:
         """Every variant draws on the single-segment builder's examples, so the corpus is indexed once."""

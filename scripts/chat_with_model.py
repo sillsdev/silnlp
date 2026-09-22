@@ -21,8 +21,10 @@ RESET_COMMANDS = {"/reset", "/new"}
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Chat with a fine-tuned LLM checkpoint, or a base LLM")
-    parser.add_argument("target", help="Experiment name, or a bare HuggingFace model id/path")
+    parser = argparse.ArgumentParser(
+        description="Chat with a local LLM, either a base model or a fine-tuned checkpoint"
+    )
+    parser.add_argument("model_or_checkpoint", help="Experiment name, or a bare HuggingFace model id/path")
     parser.add_argument("--checkpoint", default="last", help="Checkpoint to use (last, best, or a checkpoint step #)")
     parser.add_argument("--system-message", default="", help="Optional system message for the conversation")
     parser.add_argument("--max-new-tokens", type=int, default=512, help="Max tokens to generate per reply")
@@ -32,19 +34,18 @@ def main() -> None:
     args = parser.parse_args()
 
     environment = SilNlpEnv.create_standard_environment()
-    is_experiment = (environment.get_mt_exp_dir(args.target) / "config.yml").is_file()
+    is_experiment = (environment.get_mt_exp_dir(args.model_or_checkpoint) / "config.yml").is_file()
 
     if is_experiment:
-        config = load_config(args.target, environment)
+        config = load_config(args.model_or_checkpoint, environment)
         if not isinstance(config, LocalLLMConfig):
-            parser.error(f"Experiment '{args.target}' is not a local LLM experiment.")
-        label = f"'{args.target}' (checkpoint={args.checkpoint})"
+            parser.error(f"Experiment '{args.model_or_checkpoint}' is not a local LLM experiment.")
+        label = f"'{args.model_or_checkpoint}' (checkpoint={args.checkpoint})"
     else:
-        # A config for a bare model name, with no experiment directory behind it: its model_dir
-        # can never exist, so load_for_inference naturally loads the pristine pretrained model
-        # instead of looking for a checkpoint.
-        config = LocalLLMConfig(Path(tempfile.gettempdir()) / "silnlp-chat-base", {"model": args.target}, environment)
-        label = f"base model '{args.target}'"
+        config = LocalLLMConfig(
+            Path(tempfile.gettempdir()) / "silnlp-chat-base", {"model": args.model_or_checkpoint}, environment
+        )
+        label = f"base model '{args.model_or_checkpoint}'"
 
     if config.has_fixed_prompt():
         print(

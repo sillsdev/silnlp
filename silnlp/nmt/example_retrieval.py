@@ -330,11 +330,53 @@ class ExamplePoolSummary:
     selection_method: str
 
 
+@dataclass(frozen=True)
+class CorpusPair:
+    """The source and target files of one parallel corpus."""
+
+    src_path: Path
+    trg_path: Path
+
+    def exists(self) -> bool:
+        return self.src_path.is_file() and self.trg_path.is_file()
+
+    def read(self) -> Optional[Tuple[List[str], List[str]]]:
+        return read_parallel_text_pairs(self.src_path, self.trg_path)
+
+    def describe(self) -> str:
+        return f"{self.src_path} and {self.trg_path}"
+
+
+class CorpusPairProvider(ABC):
+    """Names the corpus to draw examples from, when asked rather than up front, since the files
+    are written by a preprocess step that runs after the config is built."""
+
+    @abstractmethod
+    def get_corpus_pair(self) -> CorpusPair: ...
+
+
+class FixedCorpusPairProvider(CorpusPairProvider):
+    def __init__(self, corpus_pair: CorpusPair) -> None:
+        self._corpus_pair = corpus_pair
+
+    def get_corpus_pair(self) -> CorpusPair:
+        return self._corpus_pair
+
+
+class PreferredCorpusPairProvider(CorpusPairProvider):
+    def __init__(self, preferred: CorpusPair, fallback: CorpusPair) -> None:
+        self._preferred = preferred
+        self._fallback = fallback
+
+    def get_corpus_pair(self) -> CorpusPair:
+        return self._preferred if self._preferred.exists() else self._fallback
+
+
 class ExamplePool:
     """The parallel corpus that few-shot examples are drawn from, and its retrieval index."""
 
-    def __init__(self, corpus_paths: Sequence[Tuple[Path, Path]], retriever: ExampleRetriever) -> None:
-        self._corpus_paths = list(corpus_paths)
+    def __init__(self, corpus_provider: CorpusPairProvider, retriever: ExampleRetriever) -> None:
+        self._corpus_provider = corpus_provider
         self._retriever = retriever
         self._examples: Optional[List[Example]] = None
         self._fitted = False
@@ -348,24 +390,15 @@ class ExamplePool:
         # Read on first use rather than in __init__, so num_examples: 0 never touches the corpus.
         with self._lock:
             if self._examples is None:
-                pairs = self._read_first_available_corpus()
-                if pairs is None:
+                corpus_pair = self._corpus_provider.get_corpus_pair()
+                lines = corpus_pair.read()
+                if lines is None:
                     raise RuntimeError(
-                        f"num_examples > 0 requires the training corpus at {self._describe_corpus_paths()}. "
+                        f"num_examples > 0 requires the training corpus at {corpus_pair.describe()}. "
                         "Run preprocessing (--preprocess) first."
                     )
-                self._examples = [Example(source=s, target=t) for s, t in zip(*pairs)]
+                self._examples = [Example(source=s, target=t) for s, t in zip(*lines)]
             return self._examples
-
-    def _read_first_available_corpus(self) -> Optional[Tuple[List[str], List[str]]]:
-        for src_path, trg_path in self._corpus_paths:
-            pairs = read_parallel_text_pairs(src_path, trg_path)
-            if pairs is not None:
-                return pairs
-        return None
-
-    def _describe_corpus_paths(self) -> str:
-        return " or ".join(f"{src_path} and {trg_path}" for src_path, trg_path in self._corpus_paths)
 
     def summarize(self) -> "ExamplePoolSummary":
         return ExamplePoolSummary(len(self), self._retriever.method)
@@ -378,8 +411,9 @@ class ExamplePool:
         return k > 0 and k >= len(self)
 
     def select(self, query: str, k: int, pool_index: Optional[int] = None) -> List[Example]:
-        """Most relevant last, so the best examples sit nearest the source text. Excluding
-        `pool_index` keeps the entry being translated from leaking its own target into the prompt."""
+        """Selects the k most relevant examples for `query`, optionally excluding the example at `pool_index`.
+        If k < pool size, the examples are returned in order of relevance; otherwise, corpus order."""
+
         if k <= 0 or len(self) == 0:
             return []
         if self.covers_whole_pool(k):

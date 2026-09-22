@@ -64,6 +64,7 @@ from .llm_config import (
     LLMConfig,
     PromptBuilder,
     PromptConfig,
+    PromptDefaults,
     PromptMessages,
     PromptMessagesFactory,
     PromptTemplateCollection,
@@ -202,6 +203,54 @@ class TranslateGemmaPromptMessages(LocalLLMPromptMessages):
         return text
 
 
+class TrainPromptConfig(PromptConfig):
+    """The train.prompt section, which may rotate through templates read from a file."""
+
+    FIXED = "fixed"
+    ROTATING = "rotating"
+    _VALID_TYPES = (FIXED, ROTATING)
+
+    # Only meaningful for a fixed prompt; a rotating one takes them from its template file.
+    _FIXED_ONLY_KEYS = ("system_message", "instruction_template", "example_format")
+
+    def __init__(self, settings: dict, defaults: PromptDefaults) -> None:
+        self._type = str(settings["type"]).lower()
+        super().__init__(settings, "train.prompt", defaults)
+        self._validate()
+
+    def _apply_defaults(self, defaults: PromptDefaults) -> None:
+        # A rotating prompt takes these fields from its template file, not from the experiment.
+        if not self.rotates_templates():
+            super()._apply_defaults(defaults)
+
+    def _validate(self) -> None:
+        if self._type not in self._VALID_TYPES:
+            raise ValueError(
+                f"Unknown train.prompt.type '{self._settings['type']}'. "
+                f"Valid options: {', '.join(self._VALID_TYPES)}."
+            )
+        if not self.rotates_templates():
+            if not self._is_unset("template_file"):
+                raise ValueError('train.prompt.template_file is only valid with train.prompt.type: "rotating".')
+            return
+
+        set_keys = [key for key in self._FIXED_ONLY_KEYS if not self._is_unset(key)]
+        if set_keys:
+            raise ValueError(
+                f"train.prompt.{', train.prompt.'.join(set_keys)} "
+                f'{"are" if len(set_keys) > 1 else "is"} only valid with train.prompt.type: "fixed"; '
+                "a rotating prompt takes them from its template file."
+            )
+        if self._is_unset("template_file"):
+            raise ValueError('train.prompt.type: "rotating" requires train.prompt.template_file.')
+
+    def rotates_templates(self) -> bool:
+        return self._type == self.ROTATING
+
+    def get_template_file(self) -> str:
+        return str(self._settings["template_file"])
+
+
 class LocalLLMConfig(LLMConfig[LocalLLMPromptMessages]):
 
     # Config keys renamed in transformers 5.0, can remove after users have gotten used to the transition
@@ -216,13 +265,6 @@ class LocalLLMConfig(LLMConfig[LocalLLMPromptMessages]):
     _DORA_METHODS = ("dora", "qdora")
     _VALID_FINETUNE_METHODS = (_FULL_FINETUNE_METHOD,) + _ADAPTER_METHODS
 
-    _PROMPT_TYPE_FIXED = "fixed"
-    _PROMPT_TYPE_ROTATING = "rotating"
-    _VALID_PROMPT_TYPES = (_PROMPT_TYPE_FIXED, _PROMPT_TYPE_ROTATING)
-
-    # Only meaningful for a fixed prompt; a rotating one takes them from its template file.
-    _FIXED_ONLY_PROMPT_KEYS = ("system_message", "instruction_template", "example_format")
-
     # These build the prompt from their own chat template, so a configured one cannot be used.
     _FIXED_PROMPT_MODEL_PREFIXES = ("google/translate-gemma", "google/translategemma")
 
@@ -232,8 +274,9 @@ class LocalLLMConfig(LLMConfig[LocalLLMPromptMessages]):
 
         super().__init__(exp_dir, config, environment)
 
-        self._train_example_pool = self._create_example_pool(PromptConfig(self.train["prompt"], "train.prompt"))
-        self._train_prompt_builder = self._create_train_prompt_builder()
+        train_prompt = TrainPromptConfig(self.train["prompt"], self.prompt_defaults())
+        self._train_example_pool = self._create_example_pool(train_prompt)
+        self._train_prompt_builder = self._create_train_prompt_builder(train_prompt)
         self._disable_eval_if_no_val_split()
 
     def _default_config(self, exp_dir: Path) -> dict:
@@ -255,7 +298,7 @@ class LocalLLMConfig(LLMConfig[LocalLLMPromptMessages]):
                     "log_level": "info",
                     # None means "unset"; resolve_prompt_defaults() fills these in.
                     "prompt": {
-                        "type": self._PROMPT_TYPE_FIXED,
+                        "type": TrainPromptConfig.FIXED,
                         "system_message": None,
                         "instruction_template": None,
                         "example_format": None,
@@ -317,32 +360,11 @@ class LocalLLMConfig(LLMConfig[LocalLLMPromptMessages]):
         self._reject_examples_for_translate_gemma(prompt.get_num_examples(), prompt.get_name())
         return super()._create_prompt_builder(prompt, pool)
 
-    def _create_train_prompt_builder(self) -> PromptBuilder[LocalLLMPromptMessages]:
-        prompt = PromptConfig(self.train["prompt"], "train.prompt")
-        prompt_type = str(prompt.get_setting("type")).lower()
-        if prompt_type not in self._VALID_PROMPT_TYPES:
-            raise ValueError(
-                f"Unknown train.prompt.type '{prompt.get_setting('type')}'. "
-                f"Valid options: {', '.join(self._VALID_PROMPT_TYPES)}."
-            )
-
-        if prompt_type == self._PROMPT_TYPE_FIXED:
-            if not prompt.is_unset("template_file"):
-                raise ValueError('train.prompt.template_file is only valid with train.prompt.type: "rotating".')
-            prompt.resolve_defaults(self.prompt_defaults())
+    def _create_train_prompt_builder(self, prompt: TrainPromptConfig) -> PromptBuilder[LocalLLMPromptMessages]:
+        if not prompt.rotates_templates():
             return self._create_prompt_builder(prompt, self._train_example_pool)
 
-        set_keys = [key for key in self._FIXED_ONLY_PROMPT_KEYS if not prompt.is_unset(key)]
-        if set_keys:
-            raise ValueError(
-                f"train.prompt.{', train.prompt.'.join(set_keys)} "
-                f'{"are" if len(set_keys) > 1 else "is"} only valid with train.prompt.type: "fixed"; '
-                "a rotating prompt takes them from its template file."
-            )
-        if prompt.is_unset("template_file"):
-            raise ValueError('train.prompt.type: "rotating" requires train.prompt.template_file.')
-
-        template_file = prompt.get_setting("template_file")
+        template_file = prompt.get_template_file()
         num_examples = prompt.get_num_examples()
         self._reject_examples_for_translate_gemma(num_examples, prompt.get_name())
         templates = PromptTemplateCollection.from_file(self._resolve_template_file(template_file))

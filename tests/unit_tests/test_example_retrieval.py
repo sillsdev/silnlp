@@ -8,17 +8,21 @@ import pytest
 
 from silnlp.nmt.example_retrieval import (
     BM25ExampleRetriever,
+    CorpusPair,
+    CorpusPairProvider,
     EmbeddingExampleRetriever,
     Example,
+    ExampleFormatterFactory,
     ExamplePool,
     ExampleRetriever,
+    ExampleRetrieverFactory,
+    FixedCorpusPairProvider,
     JsonExampleFormatter,
+    PreferredCorpusPairProvider,
+    RetrievalTokenizer,
     TextExampleFormatter,
     TfidfExampleRetriever,
     XmlExampleFormatter,
-    ExampleFormatterFactory,
-    ExampleRetrieverFactory,
-    RetrievalTokenizer,
 )
 
 
@@ -96,7 +100,8 @@ def test_create_example_retriever_is_case_insensitive():
 def test_create_example_retriever_passes_the_model_name_through(tmp_path):
     retriever = EmbeddingExampleRetriever("some/model", model=_StubEmbeddingModel({"a": [1.0]}))
     _fitted(retriever, ["a"]).save(tmp_path)
-    assert json.loads((tmp_path / "retrieval_meta.json").read_text(encoding="utf-8"))["model_name"] == "some/model"
+    meta = json.loads((tmp_path / "example_retrieval_meta.json").read_text(encoding="utf-8"))
+    assert meta["model_name"] == "some/model"
 
 
 def test_embedding_retriever_does_not_touch_its_model_until_it_is_fitted():
@@ -197,7 +202,10 @@ def _write_pool(tmp_path, sources, targets, retriever=None):
     trg_path = tmp_path / "train.trg.txt"
     src_path.write_text("".join(line + "\n" for line in sources), encoding="utf-8")
     trg_path.write_text("".join(line + "\n" for line in targets), encoding="utf-8")
-    return ExamplePool([(src_path, trg_path)], retriever if retriever is not None else ExampleRetrieverFactory.create("tfidf"))
+    return ExamplePool(
+        FixedCorpusPairProvider(CorpusPair(src_path, trg_path)),
+        retriever if retriever is not None else ExampleRetrieverFactory.create("tfidf"),
+    )
 
 
 def test_example_pool_selects_the_most_relevant_example_last(tmp_path):
@@ -210,7 +218,10 @@ def test_example_pool_selects_the_most_relevant_example_last(tmp_path):
 
 
 def test_example_pool_returns_nothing_and_touches_no_files_when_k_is_zero(tmp_path):
-    pool = ExamplePool([(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt")], ExampleRetrieverFactory.create("tfidf"))
+    pool = ExamplePool(
+        FixedCorpusPairProvider(CorpusPair(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt")),
+        ExampleRetrieverFactory.create("tfidf"),
+    )
     assert pool.select("hello", k=0) == []
 
 
@@ -236,7 +247,10 @@ def test_example_pool_whole_pool_path_builds_no_index(tmp_path):
 
 
 def test_example_pool_raises_a_clear_error_when_the_corpus_is_missing(tmp_path):
-    pool = ExamplePool([(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt")], ExampleRetrieverFactory.create("tfidf"))
+    pool = ExamplePool(
+        FixedCorpusPairProvider(CorpusPair(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt")),
+        ExampleRetrieverFactory.create("tfidf"),
+    )
     with pytest.raises(RuntimeError, match="preprocessing"):
         pool.select("hello", k=1)
 
@@ -281,7 +295,7 @@ def test_example_pool_reports_a_missing_index(tmp_path):
 
 def test_example_pool_rebuilds_rather_than_fail_on_an_unreadable_index(tmp_path):
     _embedding_pool(tmp_path).save_index(tmp_path)
-    (tmp_path / "retrieval_embeddings.npy").write_bytes(b"not an npy file")
+    (tmp_path / "example_retrieval_embeddings.npy").write_bytes(b"not an npy file")
     assert not _embedding_pool(tmp_path).load_index(tmp_path)
 
 
@@ -311,19 +325,19 @@ class _CountingFitRetriever(ExampleRetriever):
         return list(range(len(self._sources)))[:k]
 
 
-class _CountingReadPool(ExamplePool):
+class _CountingCorpusPairProvider(CorpusPairProvider):
     """Counts corpus reads, so a lazy read repeated per thread is visible."""
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, corpus_pair: CorpusPair) -> None:
+        self._corpus_pair = corpus_pair
         self.reads = 0
         self._counter = threading.Lock()
 
-    def _read_first_available_corpus(self):
+    def get_corpus_pair(self) -> CorpusPair:
         with self._counter:
             self.reads += 1
         time.sleep(_LAZY_WORK_SECONDS)
-        return super()._read_first_available_corpus()
+        return self._corpus_pair
 
 
 class _CountingModelLoadRetriever(EmbeddingExampleRetriever):
@@ -370,11 +384,12 @@ def test_example_pool_reads_its_corpus_once_when_threads_select_together(tmp_pat
     trg_path = tmp_path / "train.trg.txt"
     src_path.write_text("a b\nc d\n", encoding="utf-8")
     trg_path.write_text("1\n2\n", encoding="utf-8")
-    pool = _CountingReadPool([(src_path, trg_path)], _CountingFitRetriever())
+    provider = _CountingCorpusPairProvider(CorpusPair(src_path, trg_path))
+    pool = ExamplePool(provider, _CountingFitRetriever())
 
     selected = _run_together(lambda: pool.select("a b", k=1))
 
-    assert pool.reads == 1
+    assert provider.reads == 1
     assert [len(examples) for examples in selected] == [1] * 4
 
 
@@ -429,7 +444,7 @@ def test_embedding_retriever_saves_its_vectors_but_not_its_model(tmp_path):
     retriever = _fitted(EmbeddingExampleRetriever(model=_StubEmbeddingModel(vectors)), ["cat", "dog"])
     retriever.save(tmp_path)
 
-    assert (tmp_path / "retrieval_embeddings.npy").is_file()
+    assert (tmp_path / "example_retrieval_embeddings.npy").is_file()
     # Ranking a known position uses the saved vectors, so it works without any model at all.
     loaded = EmbeddingExampleRetriever()
     assert loaded.load(tmp_path, corpus_size=2)
@@ -439,50 +454,59 @@ def test_embedding_retriever_saves_its_vectors_but_not_its_model(tmp_path):
 def test_retriever_meta_records_the_method_and_model_name(tmp_path):
     retriever = EmbeddingExampleRetriever("some/model", model=_StubEmbeddingModel({"a": [1.0]}))
     _fitted(retriever, ["a"]).save(tmp_path)
-    meta = json.loads((tmp_path / "retrieval_meta.json").read_text(encoding="utf-8"))
+    meta = json.loads((tmp_path / "example_retrieval_meta.json").read_text(encoding="utf-8"))
     assert meta == {"method": "embedding", "model_name": "some/model", "num_sources": 1}
 
 
-def test_example_pool_prefers_the_first_candidate_corpus(tmp_path):
-    (tmp_path / "preferred.src.txt").write_text("preferred\n", encoding="utf-8")
-    (tmp_path / "preferred.trg.txt").write_text("1\n", encoding="utf-8")
-    (tmp_path / "fallback.src.txt").write_text("fallback\n", encoding="utf-8")
-    (tmp_path / "fallback.trg.txt").write_text("2\n", encoding="utf-8")
-    pool = ExamplePool(
-        [
-            (tmp_path / "preferred.src.txt", tmp_path / "preferred.trg.txt"),
-            (tmp_path / "fallback.src.txt", tmp_path / "fallback.trg.txt"),
-        ],
-        ExampleRetrieverFactory.create("tfidf"),
-    )
+def _write_pair(tmp_path, name, source) -> CorpusPair:
+    pair = CorpusPair(tmp_path / f"{name}.src.txt", tmp_path / f"{name}.trg.txt")
+    pair.src_path.write_text(source + "\n", encoding="utf-8")
+    pair.trg_path.write_text("target\n", encoding="utf-8")
+    return pair
+
+
+def test_preferred_corpus_pair_is_used_when_it_exists(tmp_path):
+    preferred = _write_pair(tmp_path, "preferred", "preferred")
+    fallback = _write_pair(tmp_path, "fallback", "fallback")
+    assert PreferredCorpusPairProvider(preferred, fallback).get_corpus_pair() == preferred
+
+
+def test_preferred_corpus_pair_gives_way_to_the_fallback_when_missing(tmp_path):
+    fallback = _write_pair(tmp_path, "fallback", "fallback")
+    missing = CorpusPair(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt")
+    assert PreferredCorpusPairProvider(missing, fallback).get_corpus_pair() == fallback
+
+
+def test_a_half_written_preferred_pair_gives_way_to_the_fallback(tmp_path):
+    # Taking one side from each pair would mix a detokenized source with a tokenized target.
+    fallback = _write_pair(tmp_path, "fallback", "fallback")
+    half = CorpusPair(tmp_path / "half.src.txt", tmp_path / "half.trg.txt")
+    half.src_path.write_text("half\n", encoding="utf-8")
+    assert PreferredCorpusPairProvider(half, fallback).get_corpus_pair() == fallback
+
+
+def test_the_pool_draws_examples_from_the_pair_its_provider_names(tmp_path):
+    preferred = _write_pair(tmp_path, "preferred", "preferred")
+    fallback = _write_pair(tmp_path, "fallback", "fallback")
+    pool = ExamplePool(PreferredCorpusPairProvider(preferred, fallback), ExampleRetrieverFactory.create("tfidf"))
     assert [ex.source for ex in pool.all_examples()] == ["preferred"]
 
 
-def test_example_pool_falls_back_to_a_later_candidate_corpus(tmp_path):
-    (tmp_path / "fallback.src.txt").write_text("fallback\n", encoding="utf-8")
-    (tmp_path / "fallback.trg.txt").write_text("2\n", encoding="utf-8")
+def test_example_pool_names_the_corpus_it_could_not_read(tmp_path):
     pool = ExamplePool(
-        [
-            (tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt"),
-            (tmp_path / "fallback.src.txt", tmp_path / "fallback.trg.txt"),
-        ],
+        FixedCorpusPairProvider(CorpusPair(tmp_path / "a.src.txt", tmp_path / "a.trg.txt")),
         ExampleRetrieverFactory.create("tfidf"),
     )
-    assert [ex.source for ex in pool.all_examples()] == ["fallback"]
-
-
-def test_example_pool_names_every_candidate_when_none_are_present(tmp_path):
-    pool = ExamplePool(
-        [(tmp_path / "a.src.txt", tmp_path / "a.trg.txt"), (tmp_path / "b.src.txt", tmp_path / "b.trg.txt")],
-        ExampleRetrieverFactory.create("tfidf"),
-    )
-    with pytest.raises(RuntimeError, match="a.src.txt and .*a.trg.txt or .*b.src.txt and .*b.trg.txt"):
+    with pytest.raises(RuntimeError, match="a.src.txt and .*a.trg.txt"):
         pool.all_examples()
 
 
 def test_example_pool_ensure_available_reads_the_corpus_up_front(tmp_path):
     with pytest.raises(RuntimeError, match="Run preprocessing"):
-        ExamplePool([(tmp_path / "a.src.txt", tmp_path / "a.trg.txt")], ExampleRetrieverFactory.create("tfidf")).ensure_available()
+        ExamplePool(
+            FixedCorpusPairProvider(CorpusPair(tmp_path / "a.src.txt", tmp_path / "a.trg.txt")),
+            ExampleRetrieverFactory.create("tfidf"),
+        ).ensure_available()
 
 
 def test_tokenize_for_retrieval_drops_punctuation_only_tokens():
@@ -495,7 +519,8 @@ def test_tokenize_for_retrieval_keeps_words_that_contain_punctuation():
 
 
 def test_tokenize_for_retrieval_keeps_non_latin_words():
-    assert RetrievalTokenizer().tokenize("Se dijo: \u00abvengan\u00bb \u0663\u0664") == ["se", "dijo", "vengan", "\u0663\u0664"]
+    tokens = RetrievalTokenizer().tokenize("Se dijo: \u00abvengan\u00bb \u0663\u0664")
+    assert tokens == ["se", "dijo", "vengan", "\u0663\u0664"]
 
 
 def test_tokenize_for_retrieval_yields_nothing_for_punctuation_only_text():
@@ -503,15 +528,36 @@ def test_tokenize_for_retrieval_yields_nothing_for_punctuation_only_text():
 
 
 def test_tfidf_retriever_handles_a_corpus_with_no_word_tokens():
-    # TfidfVectorizer rejects an empty vocabulary outright, where bm25 returns nothing.
+    # Ordinarily TfidfVectorizer raises "empty vocabulary" rather than ranking nothing.
     retriever = _fitted(TfidfExampleRetriever(), ["!!!", "..."])
     assert retriever.rank("anything", k=1) == []
     assert retriever.rank_excluding("!!!", 0, k=1) == []
 
 
-def test_tfidf_retriever_ignores_sources_with_no_word_tokens():
+def test_bm25_retriever_handles_a_corpus_with_no_word_tokens():
+    # Ordinarily BM25Okapi divides by zero on an average document length of zero.
+    pytest.importorskip("rank_bm25")
+    retriever = _fitted(BM25ExampleRetriever(), ["!!!", "..."])
+    assert retriever.rank("anything", k=1) == []
+    assert retriever.rank_excluding("!!!", 0, k=1) == []
+
+
+def test_tfidf_retriever_indexes_a_corpus_where_only_some_sources_have_words():
     retriever = _fitted(TfidfExampleRetriever(), ["!!!", "let there be light"])
     assert retriever.rank("light", k=1) == [1]
+
+
+def test_bm25_retriever_indexes_a_corpus_where_only_some_sources_have_words():
+    # Three sources because BM25 idf is zero for every term of a two-document corpus
+    pytest.importorskip("rank_bm25")
+    retriever = _fitted(BM25ExampleRetriever(), ["!!!", "let there be light", "something else entirely"])
+    assert retriever.rank("light", k=1) == [1]
+
+
+def test_punctuation_carries_no_retrieval_signal():
+    # If not filtered out, the query's three "!!!" would outweigh its one real word
+    retriever = _fitted(TfidfExampleRetriever(), ["the cat sat", "!!! !!! !!! ???", "something else entirely"])
+    assert retriever.rank("!!! !!! !!! cat", k=1) == [0]
 
 
 def test_tfidf_and_bm25_agree_on_what_counts_as_a_word():
