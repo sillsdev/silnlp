@@ -56,6 +56,7 @@ from .config_keys import DeprecatedAdapterKey, RenamedConfigKeys
 from .experiment_files import ExperimentFiles
 from .experiment_languages import ExperimentLanguages
 from .finetune_method import FinetuneMethod
+from .generation_settings import GenerationSettings
 from .model_name import ModelName
 from .prompt_messages import Language, PromptBuilder
 from .dictionary_writer import DictionaryWriter, NoDictionaryWriter
@@ -115,26 +116,6 @@ def is_image_text_to_text_model(model_name_or_path: str, trust_remote_code: bool
     """Return True if the checkpoint is a multimodal image-text-to-text model."""
     config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=trust_remote_code)
     return type(config) in AutoModelForImageTextToText._model_mapping
-
-
-def build_generation_kwargs(infer: dict, num_return_sequences: int, pad_token_id: Optional[int]) -> Dict[str, Any]:
-    gen_kwargs: Dict[str, Any] = {
-        "max_new_tokens": infer["max_new_tokens"],
-        "num_return_sequences": num_return_sequences,
-        "pad_token_id": pad_token_id,
-    }
-    if infer.get("do_sample"):
-        gen_kwargs["do_sample"] = True
-        gen_kwargs["temperature"] = infer["temperature"]
-    else:
-        num_beams: int = infer["num_beams"]
-        if num_return_sequences > num_beams:
-            raise RuntimeError(
-                f"Beam search cannot return {num_return_sequences} drafts with num_beams set to {num_beams}. "
-                "Increase num_beams to at least num_drafts or set do_sample to true."
-            )
-        gen_kwargs["num_beams"] = num_beams
-    return gen_kwargs
 
 
 class LLMConfig(Config):
@@ -265,6 +246,7 @@ class LLMConfig(Config):
             self._hf_tokenizer,
             self.create_prompt_builder(),
             self._finetune_method(),
+            GenerationSettings(self.infer),
             TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING, self.root),
             mixed_precision,
             num_devices,
@@ -450,6 +432,7 @@ class LLMModel(NMTModel):
         tokenizer: CausalLMTokenizer,
         prompts: PromptBuilder,
         finetuning: FinetuneMethod,
+        generation: GenerationSettings,
         training_arguments: TrainingArgumentsMapping,
         mixed_precision: bool,
         num_devices: int,
@@ -463,6 +446,7 @@ class LLMModel(NMTModel):
         self._tokenizer = tokenizer
         self._prompts = prompts
         self._finetuning = finetuning
+        self._generation = generation
         self._training_arguments = training_arguments
         self._mixed_precision = mixed_precision
         self._num_devices = num_devices
@@ -698,11 +682,10 @@ class LLMModel(NMTModel):
         num_drafts = self.get_num_drafts()
         num_return_sequences = num_drafts if (produce_multiple_translations and num_drafts > 1) else 1
 
-        infer = self._config.infer
-        gen_kwargs = build_generation_kwargs(infer, num_return_sequences, tokenizer.pad_token_id)
+        gen_kwargs = self._generation.as_keyword_arguments(num_return_sequences, tokenizer.pad_token_id)
 
         device = model.device
-        for batch in batch_sentences(sentences, infer["infer_batch_size"]):
+        for batch in batch_sentences(sentences, self._generation.batch_size()):
             prompts = [
                 self._prompts.build(sentence, src_lang, trg_lang).apply_prompt_template(
                     tokenizer, add_generation_prompt=True, tokenize=False

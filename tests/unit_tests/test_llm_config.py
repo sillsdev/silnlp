@@ -4,7 +4,8 @@ import pytest
 from jinja2.exceptions import UndefinedError
 
 from silnlp.nmt.config_utils import ConfiguredModelType
-from silnlp.nmt.llm_config import DataCollatorForCausalLM, LLMModel, build_generation_kwargs
+from silnlp.nmt.generation_settings import GenerationSettings
+from silnlp.nmt.llm_config import DataCollatorForCausalLM, LLMModel
 from silnlp.nmt.model_name import ModelName
 from silnlp.nmt.prompt_messages import (
     Language,
@@ -86,7 +87,7 @@ def test_data_collator_right_pads_inputs_and_masks_label_padding():
 
 def test_build_generation_kwargs_beam_search():
     infer = {"max_new_tokens": 256, "num_beams": 4, "do_sample": False, "temperature": 0.7}
-    gen_kwargs = build_generation_kwargs(infer, num_return_sequences=2, pad_token_id=0)
+    gen_kwargs = GenerationSettings(infer).as_keyword_arguments(num_return_sequences=2, pad_token_id=0)
     assert gen_kwargs["num_beams"] == 4
     assert gen_kwargs["num_return_sequences"] == 2
     assert "do_sample" not in gen_kwargs
@@ -95,7 +96,7 @@ def test_build_generation_kwargs_beam_search():
 
 def test_build_generation_kwargs_sampling_does_not_set_num_beams():
     infer = {"max_new_tokens": 256, "num_beams": 4, "do_sample": True, "temperature": 0.7}
-    gen_kwargs = build_generation_kwargs(infer, num_return_sequences=3, pad_token_id=0)
+    gen_kwargs = GenerationSettings(infer).as_keyword_arguments(num_return_sequences=3, pad_token_id=0)
     assert gen_kwargs["do_sample"] is True
     assert gen_kwargs["temperature"] == 0.7
     assert gen_kwargs["num_return_sequences"] == 3
@@ -105,7 +106,7 @@ def test_build_generation_kwargs_sampling_does_not_set_num_beams():
 def test_build_generation_kwargs_rejects_more_drafts_than_beams():
     infer = {"max_new_tokens": 256, "num_beams": 1, "do_sample": False, "temperature": 0.7}
     with pytest.raises(RuntimeError, match="num_beams"):
-        build_generation_kwargs(infer, num_return_sequences=2, pad_token_id=0)
+        GenerationSettings(infer).as_keyword_arguments(num_return_sequences=2, pad_token_id=0)
 
 
 def test_data_collator_pad_to_multiple_of():

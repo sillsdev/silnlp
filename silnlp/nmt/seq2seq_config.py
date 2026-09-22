@@ -61,6 +61,7 @@ from .config import (
     NMTModel,
 )
 from .training_arguments import TrainingArgumentsMapping
+from .translation_settings import CheckpointRetention, ModelSettings, TranslationSettings
 from .config_keys import RenamedConfigKeys
 from .dictionary_writer import DictionaryWriter, TermDictionaryWriter
 from .decoder_inputs import DecoderInputs
@@ -352,6 +353,9 @@ class Seq2SeqConfig(Config):
             self.files,
             self.model_name,
             self._pretrained_tokenizer,
+            TranslationSettings(self.infer, self.params),
+            ModelSettings(self.params),
+            CheckpointRetention(self.train),
             TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING, self.root),
             mixed_precision,
             num_devices,
@@ -470,6 +474,9 @@ class Seq2SeqNMTModel(NMTModel):
         files: ExperimentFiles,
         model_name: ModelName,
         pretrained_tokenizer: PretrainedTokenizer,
+        translation: TranslationSettings,
+        model_settings: ModelSettings,
+        retention: CheckpointRetention,
         training_arguments: TrainingArgumentsMapping,
         mixed_precision: bool,
         num_devices: int,
@@ -482,6 +489,9 @@ class Seq2SeqNMTModel(NMTModel):
         self._files = files
         self._model_name = model_name
         self._pretrained_tokenizer = pretrained_tokenizer
+        self._translation = translation
+        self._model_settings = model_settings
+        self._retention = retention
         self._training_arguments = training_arguments
         self._mixed_precision = mixed_precision
         set_seed(self._config.data["seed"])
@@ -509,13 +519,13 @@ class Seq2SeqNMTModel(NMTModel):
         model_config = AutoConfig.from_pretrained(
             self._config.model,
             use_cache=not training_args.gradient_checkpointing,
-            dropout=self._config.params["dropout"],
-            attention_dropout=self._config.params["attention_dropout"],
-            activation_dropout=self._config.params["activation_dropout"],
+            dropout=self._model_settings.dropout(),
+            attention_dropout=self._model_settings.attention_dropout(),
+            activation_dropout=self._model_settings.activation_dropout(),
             label2id={},
             id2label={},
             num_labels=0,
-            attn_implementation=self._config.params["attn_implementation"],
+            attn_implementation=self._model_settings.attention_implementation(),
             token=False,
         )
         if self._num_devices == 2 and self._model_name.is_nllb():
@@ -718,12 +728,10 @@ class Seq2SeqNMTModel(NMTModel):
         trainer.save_metrics("train", metrics)
         trainer.save_state()
 
-        delete_checkpoint_optimizer_state = self._config.train["delete_checkpoint_optimizer_state"]
-        delete_checkpoint_tokenizer = self._config.train["delete_checkpoint_tokenizer"]
         written_checkpoints = CheckpointDirectory(Path(training_args.output_dir))
-        if delete_checkpoint_optimizer_state:
+        if not self._retention.keeps_optimizer_state():
             written_checkpoints.discard_optimizer_state()
-        if delete_checkpoint_tokenizer:
+        if not self._retention.keeps_tokenizers():
             written_checkpoints.discard_tokenizers()
 
     def save_effective_config(self, path: Path) -> None:
@@ -878,7 +886,7 @@ class Seq2SeqNMTModel(NMTModel):
         sentences: Iterable[TSent],
         produce_multiple_translations: bool = False,
     ) -> Iterable[ModelOutputGroup]:
-        batch_size: int = self._config.infer["infer_batch_size"]
+        batch_size = self._translation.batch_size()
 
         current_batch_size = batch_size
         for batch in batch_sentences(sentences, batch_size):
@@ -913,7 +921,7 @@ class Seq2SeqNMTModel(NMTModel):
     ) -> Iterable[ModelOutputGroup]:
         num_drafts = self.get_num_drafts()
         if produce_multiple_translations and num_drafts > 1:
-            multiple_translations_method: str = self._config.infer.get("multiple_translations_method")
+            multiple_translations_method: str = self._translation.multiple_translations_method()
 
             if multiple_translations_method == "hybrid":
                 beam_search_results: List[List[dict]] = self._translate_with_beam_search(
@@ -979,13 +987,9 @@ class Seq2SeqNMTModel(NMTModel):
         sentences: Iterable[TSent],
         num_return_sequences: int = 1,
     ) -> List[List[dict]]:
-        num_beams: Optional[int] = self._config.infer.get("num_beams")
-        if num_beams is None:
-            num_beams = self._config.params.get("generation_num_beams")
-
         return translator(
             sentences,
-            num_beams=num_beams,
+            num_beams=self._translation.beam_count(),
             num_return_sequences=num_return_sequences,
         )
 
@@ -995,12 +999,10 @@ class Seq2SeqNMTModel(NMTModel):
         sentences: Iterable[TSent],
         num_return_sequences: int = 1,
     ) -> List[List[dict]]:
-        temperature: Optional[int] = self._config.infer.get("temperature")
-
         return translator(
             sentences,
             do_sample=True,
-            temperature=temperature,
+            temperature=self._translation.temperature(),
             num_return_sequences=num_return_sequences,
         )
 
