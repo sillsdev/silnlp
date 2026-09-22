@@ -20,6 +20,10 @@ class TokenizerSettings:
     def updates_both(self) -> bool:
         return self.updates_source() and self.updates_target()
 
+    def initializes_unknown(self) -> bool:
+        """Whether embeddings added for new tokens start from the unknown token's."""
+        return bool(self._settings.get("init_unk"))
+
     def shares_vocab(self) -> bool:
         return bool(self._settings.get("share_vocab"))
 

@@ -55,6 +55,7 @@ from .causal_lm_tokenizer import CausalLMTokenizer
 from .config_keys import DeprecatedAdapterKey, RenamedConfigKeys
 from .experiment_files import ExperimentFiles
 from .experiment_languages import ExperimentLanguages
+from .experiment_settings import EvaluationSettings, TrainerSettings
 from .finetune_method import FinetuneMethod
 from .generation_settings import GenerationSettings
 from .model_name import ModelName
@@ -240,13 +241,22 @@ class LLMConfig(Config):
         if pretrained_model_provider_factory is None:
             pretrained_model_provider_factory = FileCausalLMProviderFactory()
         return LLMModel(
-            self,
+            CheckpointDirectory(self.model_dir),
+            self.infer.get("num_drafts", 1),
             self.create_languages(),
             self.files,
             self._hf_tokenizer,
             self.create_prompt_builder(),
             self._finetune_method(),
             GenerationSettings(self.infer),
+            EvaluationSettings(self.eval),
+            TrainerSettings(self.train),
+            self.adapter,
+            self.model,
+            self.params,
+            self.params["max_seq_length"],
+            self.params["torch_dtype"],
+            self.data["seed"],
             TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING, self.root),
             mixed_precision,
             num_devices,
@@ -280,16 +290,19 @@ class CausalLMProvider:
     """Loads the underlying causal LM for training and inference. Indirected so tests can
     substitute a mock provider (mirrors PreTrainedModelProvider in seq2seq_config.py)."""
 
-    config: "LLMConfig"
+    model: str
+    params: dict
+    finetuning: FinetuneMethod
+    trainer_settings: TrainerSettings
     mixed_precision: bool
 
     def _dtype(self) -> Any:
         if not self.mixed_precision:
             return "auto"
-        return getattr(torch, self.config.params["torch_dtype"], torch.bfloat16)
+        return getattr(torch, self.params["torch_dtype"], torch.bfloat16)
 
     def _determine_auto_model_class(self, model_name_or_path: str) -> type:
-        if is_image_text_to_text_model(model_name_or_path, self.config.params["trust_remote_code"]):
+        if is_image_text_to_text_model(model_name_or_path, self.params["trust_remote_code"]):
             return AutoModelForImageTextToText
         return AutoModelForCausalLM
 
@@ -305,10 +318,10 @@ class CausalLMProvider:
             text_config.use_cache = use_cache
 
     def create_model_for_training(self) -> PreTrainedModel:
-        params = self.config.params
+        params = self.params
         quantization_config = None
         device_map = None
-        if self.config.uses_quantization:
+        if self.finetuning.uses_quantization():
             from transformers import BitsAndBytesConfig
 
             quantization_config = BitsAndBytesConfig(
@@ -318,34 +331,34 @@ class CausalLMProvider:
                 bnb_4bit_use_double_quant=True,
             )
             device_map = {"": 0}
-        model_class = self._determine_auto_model_class(self.config.model)
+        model_class = self._determine_auto_model_class(self.model)
         model = model_class.from_pretrained(
-            self.config.model,
+            self.model,
             quantization_config=quantization_config,
             torch_dtype=self._dtype(),
             attn_implementation=params["attn_implementation"],
             trust_remote_code=params["trust_remote_code"],
             device_map=device_map,
         )
-        self._set_use_cache(model, not self.config.train["gradient_checkpointing"])
+        self._set_use_cache(model, not self.trainer_settings.checkpoints_gradients())
         return model
 
     def create_model_for_inference(self, checkpoint_path: Optional[Path]) -> PreTrainedModel:
-        params = self.config.params
+        params = self.params
         load_kwargs = dict(
             torch_dtype=self._dtype(),
             attn_implementation=params["attn_implementation"],
             trust_remote_code=params["trust_remote_code"],
         )
         if checkpoint_path is None:
-            model_class = self._determine_auto_model_class(self.config.model)
-            return model_class.from_pretrained(self.config.model, **load_kwargs)
+            model_class = self._determine_auto_model_class(self.model)
+            return model_class.from_pretrained(self.model, **load_kwargs)
 
         if (checkpoint_path / "adapter_config.json").is_file():
             from peft import PeftModel
 
-            model_class = self._determine_auto_model_class(self.config.model)
-            base_model = model_class.from_pretrained(self.config.model, **load_kwargs)
+            model_class = self._determine_auto_model_class(self.model)
+            base_model = model_class.from_pretrained(self.model, **load_kwargs)
             base_dtype = next(base_model.parameters()).dtype
             model = PeftModel.from_pretrained(base_model, str(checkpoint_path))
             merged = model.merge_and_unload()
@@ -355,13 +368,27 @@ class CausalLMProvider:
 
 
 class CausalLMProviderFactory:
-    def create(self, config: "LLMConfig", mixed_precision: bool) -> CausalLMProvider:
+    def create(
+        self,
+        model: str,
+        params: dict,
+        finetuning: FinetuneMethod,
+        trainer_settings: TrainerSettings,
+        mixed_precision: bool,
+    ) -> CausalLMProvider:
         raise NotImplementedError
 
 
 class FileCausalLMProviderFactory(CausalLMProviderFactory):
-    def create(self, config: "LLMConfig", mixed_precision: bool) -> CausalLMProvider:
-        return CausalLMProvider(config, mixed_precision)
+    def create(
+        self,
+        model: str,
+        params: dict,
+        finetuning: FinetuneMethod,
+        trainer_settings: TrainerSettings,
+        mixed_precision: bool,
+    ) -> CausalLMProvider:
+        return CausalLMProvider(model, params, finetuning, trainer_settings, mixed_precision)
 
 
 @dataclass
@@ -426,33 +453,48 @@ class SilCausalTrainer(Trainer):
 class LLMModel(NMTModel):
     def __init__(
         self,
-        config: LLMConfig,
+        checkpoints: CheckpointDirectory,
+        num_drafts: int,
         languages: ExperimentLanguages,
         files: ExperimentFiles,
         tokenizer: CausalLMTokenizer,
         prompts: PromptBuilder,
         finetuning: FinetuneMethod,
         generation: GenerationSettings,
+        evaluation: EvaluationSettings,
+        trainer_settings: TrainerSettings,
+        adapter: dict,
+        model: str,
+        params: dict,
+        max_sequence_length: int,
+        torch_dtype: str,
+        seed: int,
         training_arguments: TrainingArgumentsMapping,
         mixed_precision: bool,
         num_devices: int,
         clearml_queue: Optional[str] = None,
         pretrained_model_provider_factory: CausalLMProviderFactory = FileCausalLMProviderFactory(),
     ) -> None:
-        super().__init__(config)
-        self._config: LLMConfig = config
+        super().__init__(checkpoints, num_drafts)
         self._languages = languages
         self._files = files
         self._tokenizer = tokenizer
         self._prompts = prompts
         self._finetuning = finetuning
         self._generation = generation
+        self._evaluation = evaluation
+        self._trainer_settings = trainer_settings
+        self._adapter = adapter
+        self._max_sequence_length = max_sequence_length
+        self._torch_dtype = torch_dtype
         self._training_arguments = training_arguments
         self._mixed_precision = mixed_precision
         self._num_devices = num_devices
         self._clearml_queue = clearml_queue
-        set_seed(self._config.data["seed"])
-        self._provider = pretrained_model_provider_factory.create(config, mixed_precision)
+        set_seed(seed)
+        self._provider = pretrained_model_provider_factory.create(
+            model, params, finetuning, trainer_settings, mixed_precision
+        )
 
     # --- training -----------------------------------------------------------------
 
@@ -464,7 +506,7 @@ class LLMModel(NMTModel):
         model = self._provider.create_model_for_training()
         model = self._apply_finetuning_config(model)
 
-        max_seq_length: int = self._config.params["max_seq_length"]
+        max_seq_length: int = self._max_sequence_length
         src_lang = self._languages.of(self._languages.training_source_iso())
         trg_lang = self._languages.of(self._languages.training_target_iso())
         eos_token_id = tokenizer.eos_token_id
@@ -501,9 +543,9 @@ class LLMModel(NMTModel):
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             processing_class=tokenizer,
-            auto_grad_acc=self._config.train.get("auto_grad_acc", False),
+            auto_grad_acc=self._trainer_settings.accumulates_gradient_automatically(),
         )
-        early_stopping: Optional[dict] = self._config.eval["early_stopping"]
+        early_stopping: Optional[dict] = self._evaluation.early_stopping()
         if early_stopping:
             trainer.add_callback(
                 EarlyStoppingCallback(
@@ -527,13 +569,13 @@ class LLMModel(NMTModel):
 
         from peft import get_peft_model, prepare_model_for_kbit_training
 
-        gradient_checkpointing = self._config.train["gradient_checkpointing"]
+        gradient_checkpointing = self._trainer_settings.checkpoints_gradients()
         if self._finetuning.uses_quantization():
             model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=gradient_checkpointing)
         elif gradient_checkpointing:
             model.enable_input_require_grads()
 
-        peft_config = self._build_adapter_config(self._config.adapter, use_dora=self._finetuning.uses_dora())
+        peft_config = self._build_adapter_config(self._adapter, use_dora=self._finetuning.uses_dora())
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
         return model
@@ -567,7 +609,7 @@ class LLMModel(NMTModel):
         return Dataset.from_dict({"src": sources, "trg": targets})
 
     def _create_training_arguments(self) -> TrainingArguments:
-        dtype = self._config.params["torch_dtype"]
+        dtype = self._torch_dtype
         args = self._training_arguments.collect(
             {
                 "bf16": self._mixed_precision and dtype == "bfloat16",

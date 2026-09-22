@@ -5,7 +5,9 @@ import torch
 from transformers import LlamaForCausalLM, PreTrainedModel
 from transformers.generation.utils import GenerateDecoderOnlyOutput
 
-from silnlp.nmt.llm_config import CausalLMProvider, CausalLMProviderFactory, LLMConfig
+from silnlp.nmt.experiment_settings import TrainerSettings
+from silnlp.nmt.finetune_method import FinetuneMethod
+from silnlp.nmt.llm_config import CausalLMProvider, CausalLMProviderFactory
 
 _TINY_MODEL_NAME = "hf-internal-testing/tiny-random-LlamaForCausalLM"
 
@@ -54,8 +56,16 @@ class GeneratingStandInCausalModel(StandInCausalModel):
 
 
 class MockCausalLMProvider(CausalLMProvider):
-    def __init__(self, config: LLMConfig, mixed_precision: bool, stats: CausalModelTrainingStats):
-        super().__init__(config, mixed_precision)
+    def __init__(
+        self,
+        model: str,
+        params: dict,
+        finetuning: FinetuneMethod,
+        trainer_settings: TrainerSettings,
+        mixed_precision: bool,
+        stats: CausalModelTrainingStats,
+    ):
+        super().__init__(model, params, finetuning, trainer_settings, mixed_precision)
         self._stats = stats
 
     def create_model_for_training(self) -> PreTrainedModel:
@@ -73,5 +83,12 @@ class MockCausalLMProviderFactory(CausalLMProviderFactory):
     def stats(self) -> CausalModelTrainingStats:
         return self._stats
 
-    def create(self, config: LLMConfig, mixed_precision: bool) -> CausalLMProvider:
-        return MockCausalLMProvider(config, mixed_precision, self._stats)
+    def create(
+        self,
+        model: str,
+        params: dict,
+        finetuning: FinetuneMethod,
+        trainer_settings: TrainerSettings,
+        mixed_precision: bool,
+    ) -> CausalLMProvider:
+        return MockCausalLMProvider(model, params, finetuning, trainer_settings, mixed_precision, self._stats)

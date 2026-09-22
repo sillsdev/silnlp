@@ -7,7 +7,11 @@ from transformers import M2M100ForConditionalGeneration, PretrainedConfig, PreTr
 from transformers.generation.utils import GenerateBeamEncoderDecoderOutput
 from transformers.modeling_outputs import Seq2SeqLMOutput
 
-from silnlp.nmt.seq2seq_config import PreTrainedModelProvider, PreTrainedModelProviderFactory, Seq2SeqConfig
+from silnlp.nmt.experiment_languages import ExperimentLanguages
+from silnlp.nmt.model_name import ModelName
+from silnlp.nmt.pretrained_tokenizer import PretrainedTokenizer
+from silnlp.nmt.seq2seq_config import PreTrainedModelProvider, PreTrainedModelProviderFactory
+from silnlp.nmt.translation_settings import ModelSettings
 
 _TINY_MODEL_NAME = "hf-internal-testing/tiny-random-nllb"
 
@@ -181,7 +185,12 @@ class MockPreTrainedModelProviderFactory(PreTrainedModelProviderFactory):
         return self._model_stats
 
     def create_pretrained_model_provider(
-        self, config: Seq2SeqConfig, mixed_precision: bool = False
+        self,
+        model_settings: ModelSettings,
+        model_name: ModelName,
+        pretrained_tokenizer: PretrainedTokenizer,
+        languages: ExperimentLanguages,
+        mixed_precision: bool = False,
     ) -> PreTrainedModelProvider:
         return MockPretrainedModelProvider(iter(self._mock_outputs), self._model_stats)
 
@@ -206,8 +215,11 @@ def mock_sequence_log_prob(sentence_index: int) -> float:
 
 
 class TranslationTokenIds:
-    def __init__(self, config: Seq2SeqConfig, translation: str) -> None:
-        self._config = config
+    def __init__(
+        self, pretrained_tokenizer: PretrainedTokenizer, languages: ExperimentLanguages, translation: str
+    ) -> None:
+        self._pretrained_tokenizer = pretrained_tokenizer
+        self._languages = languages
         self._translation = translation
         self._token_ids: Optional[List[int]] = None
 
@@ -215,9 +227,8 @@ class TranslationTokenIds:
         # Resolved on first use, because the experiment's tokenizer is not written to the
         # experiment directory until the preprocess step runs.
         if self._token_ids is None:
-            tokenizer = self._config.get_tokenizer()
-            languages = self._config.create_languages()
-            trg_lang = languages.test_target() or languages.validation_target()
+            tokenizer = self._pretrained_tokenizer.load()
+            trg_lang = self._languages.test_target() or self._languages.validation_target()
             translation_token_ids = tokenizer.convert_tokens_to_ids(tokenizer.tokenize(self._translation))
             # A generated sequence starts with the decoder start token, followed by the forced
             # target language token, and ends with the end-of-sequence token.
@@ -233,12 +244,13 @@ class TranslationTokenIds:
 class FixedTranslationPretrainedModelProvider(PreTrainedModelProvider):
     def __init__(
         self,
-        config: Seq2SeqConfig,
+        pretrained_tokenizer: PretrainedTokenizer,
+        languages: ExperimentLanguages,
         translation: str,
         model_stats: ModelTrainingStats,
         inference_model_names: List[str],
     ):
-        self._translation_token_ids = TranslationTokenIds(config, translation)
+        self._translation_token_ids = TranslationTokenIds(pretrained_tokenizer, languages, translation)
         self._model_stats = model_stats
         self._inference_model_names = inference_model_names
 
@@ -282,8 +294,13 @@ class FixedTranslationPreTrainedModelProviderFactory(PreTrainedModelProviderFact
         return self._inference_model_names
 
     def create_pretrained_model_provider(
-        self, config: Seq2SeqConfig, mixed_precision: bool = False
+        self,
+        model_settings: ModelSettings,
+        model_name: ModelName,
+        pretrained_tokenizer: PretrainedTokenizer,
+        languages: ExperimentLanguages,
+        mixed_precision: bool = False,
     ) -> PreTrainedModelProvider:
         return FixedTranslationPretrainedModelProvider(
-            config, self._translation, self._model_stats, self._inference_model_names
+            pretrained_tokenizer, languages, self._translation, self._model_stats, self._inference_model_names
         )

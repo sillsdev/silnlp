@@ -43,9 +43,9 @@ class InferenceModelParams:
 
 
 class NMTModel(ABC):
-    def __init__(self, config: "Config") -> None:
-        self._config = config
-        self._checkpoints = CheckpointDirectory(config.model_dir)
+    def __init__(self, checkpoints: CheckpointDirectory, num_drafts: int) -> None:
+        self._checkpoints = checkpoints
+        self._num_drafts = num_drafts
         # The cached inference model is framework-specific (a torch model), so it is typed loosely
         # here to keep this base module free of transformers/torch imports.
         self._cached_inference_model: Optional[Any] = None
@@ -98,7 +98,7 @@ class NMTModel(ABC):
         self._inference_model_params = None
 
     def get_num_drafts(self) -> int:
-        return self._config.infer.get("num_drafts", 1)
+        return self._num_drafts
 
 
 class Config(ABC):
