@@ -53,10 +53,11 @@ from .training_arguments import TrainingArgumentsMapping
 from .vocabulary_builder import NoVocabularyBuilder, VocabularyBuilder
 from .causal_lm_tokenizer import CausalLMTokenizer
 from .config_keys import DeprecatedAdapterKey, RenamedConfigKeys
+from .experiment_files import ExperimentFiles
 from .experiment_languages import ExperimentLanguages
 from .finetune_method import FinetuneMethod
 from .model_name import ModelName
-from .prompt_messages import Language, PromptBuilder, PromptMessages
+from .prompt_messages import Language, PromptBuilder
 from .dictionary_writer import DictionaryWriter, NoDictionaryWriter
 from .seq2seq_config import batch_sentences, find_executable_batch_size
 from .tokenizer import NullTokenizer, Tokenizer
@@ -260,6 +261,9 @@ class LLMConfig(Config):
         return LLMModel(
             self,
             self.create_languages(),
+            self.files,
+            self.create_prompt_builder(),
+            self._finetune_method(),
             mixed_precision,
             num_devices,
             clearml_queue,
@@ -277,12 +281,8 @@ class LLMConfig(Config):
     def create_languages(self) -> ExperimentLanguages:
         return ExperimentLanguages(self.data["lang_codes"], self.inventory)
 
-    def build_prompt_messages(
-        self, source: str, src_lang: Language, trg_lang: Language, target: Optional[str] = None
-    ) -> PromptMessages:
-        return PromptBuilder(ModelName(self.model), self.params["prompt"]).build(
-            source, src_lang, trg_lang, target
-        )
+    def create_prompt_builder(self) -> PromptBuilder:
+        return PromptBuilder(ModelName(self.model), self.params["prompt"])
 
     def create_vocabulary_builder(self) -> VocabularyBuilder:
         return NoVocabularyBuilder()
@@ -444,6 +444,9 @@ class LLMModel(NMTModel):
         self,
         config: LLMConfig,
         languages: ExperimentLanguages,
+        files: ExperimentFiles,
+        prompts: PromptBuilder,
+        finetuning: FinetuneMethod,
         mixed_precision: bool,
         num_devices: int,
         clearml_queue: Optional[str] = None,
@@ -452,6 +455,9 @@ class LLMModel(NMTModel):
         super().__init__(config)
         self._config: LLMConfig = config
         self._languages = languages
+        self._files = files
+        self._prompts = prompts
+        self._finetuning = finetuning
         self._mixed_precision = mixed_precision
         self._num_devices = num_devices
         self._clearml_queue = clearml_queue
@@ -474,7 +480,7 @@ class LLMModel(NMTModel):
         eos_token_id = tokenizer.eos_token_id
 
         def encode(example: dict) -> dict:
-            prompt = self._config.build_prompt_messages(example["src"], src_lang, trg_lang)
+            prompt = self._prompts.build(example["src"], src_lang, trg_lang)
             prompt_ids = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=True)
             completion_ids = tokenizer(example["trg"], add_special_tokens=False)["input_ids"] + [eos_token_id]
             input_ids = (prompt_ids + completion_ids)[:max_seq_length]
@@ -482,12 +488,12 @@ class LLMModel(NMTModel):
             return {"input_ids": input_ids, "labels": labels, "attention_mask": [1] * len(input_ids)}
 
         train_dataset = self._load_text_dataset(
-            self._config.files.train_source(),
-            self._config.files.train_target(),
+            self._files.train_source(),
+            self._files.train_target(),
         )
         eval_dataset = self._load_text_dataset(
-            self._config.files.validation_source(),
-            self._config.files.validation_target(),
+            self._files.validation_source(),
+            self._files.validation_target(),
         )
         if train_dataset is not None:
             train_dataset = train_dataset.map(encode, remove_columns=train_dataset.column_names)
@@ -526,18 +532,18 @@ class LLMModel(NMTModel):
         trainer.save_state()
 
     def _apply_finetuning_config(self, model: PreTrainedModel) -> PreTrainedModel:
-        if FinetuneMethod(self._config.finetune_method).is_full():
+        if self._finetuning.is_full():
             return model
 
         from peft import get_peft_model, prepare_model_for_kbit_training
 
         gradient_checkpointing = self._config.train["gradient_checkpointing"]
-        if self._config.uses_quantization:
+        if self._finetuning.uses_quantization():
             model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=gradient_checkpointing)
         elif gradient_checkpointing:
             model.enable_input_require_grads()
 
-        peft_config = self._build_adapter_config(self._config.adapter, use_dora=self._config.uses_dora)
+        peft_config = self._build_adapter_config(self._config.adapter, use_dora=self._finetuning.uses_dora())
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
         return model
@@ -695,7 +701,7 @@ class LLMModel(NMTModel):
         device = model.device
         for batch in batch_sentences(sentences, infer["infer_batch_size"]):
             prompts = [
-                self._config.build_prompt_messages(sentence, src_lang, trg_lang).apply_prompt_template(
+                self._prompts.build(sentence, src_lang, trg_lang).apply_prompt_template(
                     tokenizer, add_generation_prompt=True, tokenize=False
                 )
                 for sentence in batch

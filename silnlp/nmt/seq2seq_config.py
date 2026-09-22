@@ -64,6 +64,7 @@ from .training_arguments import TrainingArgumentsMapping
 from .config_keys import RenamedConfigKeys
 from .dictionary_writer import DictionaryWriter, TermDictionaryWriter
 from .decoder_inputs import DecoderInputs
+from .experiment_files import ExperimentFiles
 from .experiment_languages import ExperimentLanguages
 from .huggingface_tokenizer import HuggingFaceTokenizer, PunctuationNormalizingTokenizer
 from .experiment_settings import TrainingSettings
@@ -348,6 +349,8 @@ class Seq2SeqConfig(Config):
         return Seq2SeqNMTModel(
             self,
             self.create_languages(),
+            self.files,
+            self.model_name,
             mixed_precision,
             num_devices,
             clearml_queue,
@@ -462,6 +465,8 @@ class Seq2SeqNMTModel(NMTModel):
         self,
         config: Seq2SeqConfig,
         languages: ExperimentLanguages,
+        files: ExperimentFiles,
+        model_name: ModelName,
         mixed_precision: bool,
         num_devices: int,
         clearml_queue: Optional[str] = None,
@@ -470,10 +475,12 @@ class Seq2SeqNMTModel(NMTModel):
         super().__init__(config)
         self._config: Seq2SeqConfig = config
         self._languages = languages
+        self._files = files
+        self._model_name = model_name
         self._mixed_precision = mixed_precision
         set_seed(self._config.data["seed"])
         self._dictionary: Optional[Dict[VerseRef, Set[str]]] = None
-        self._is_t5 = self._config.model_name.is_t5()
+        self._is_t5 = self._model_name.is_t5()
         self._num_devices = num_devices
         self._clearml_queue = clearml_queue
         self._pretrained_model_provider = pretrained_model_provider_factory.create_pretrained_model_provider(
@@ -505,7 +512,7 @@ class Seq2SeqNMTModel(NMTModel):
             attn_implementation=self._config.params["attn_implementation"],
             token=False,
         )
-        if self._num_devices == 2 and self._config.model_name.is_nllb():
+        if self._num_devices == 2 and self._model_name.is_nllb():
             device_map = {
                 "lm_head": 0,
                 "model.shared": 0,
@@ -561,13 +568,13 @@ class Seq2SeqNMTModel(NMTModel):
             return Dataset.from_dict({"translation": data})
 
         train_dataset = load_text_dataset(
-            self._config.files.train_source(),
-            self._config.files.train_target(),
+            self._files.train_source(),
+            self._files.train_target(),
         )
 
         eval_dataset = load_text_dataset(
-            self._config.files.validation_source(),
-            self._config.files.validation_target(),
+            self._files.validation_source(),
+            self._files.validation_target(),
         )
 
         def encode(examples: dict) -> dict:
@@ -769,8 +776,8 @@ class Seq2SeqNMTModel(NMTModel):
         iso_specified_file_pattern = re.compile(r"^test\.([a-z]{2,3})\.([a-z]{2,3})\..*")
         if iso_specified_file_pattern.match(input_path.name):
             src_iso, trg_iso = iso_specified_file_pattern.match(input_path.name).groups()
-            src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
-            trg_lang = self._config.data["lang_codes"].get(trg_iso, trg_iso)
+            src_lang = self._languages.name_of(src_iso)
+            trg_lang = self._languages.name_of(trg_iso)
         else:
             src_lang = self._languages.test_source()
             trg_lang = self._languages.test_target()
@@ -809,8 +816,8 @@ class Seq2SeqNMTModel(NMTModel):
         produce_multiple_translations: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Generator[SentenceTranslationGroup, None, None]:
-        src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
-        trg_lang = self._config.data["lang_codes"].get(trg_iso, trg_iso)
+        src_lang = self._languages.name_of(src_iso)
+        trg_lang = self._languages.name_of(trg_iso)
         inference_model_params = InferenceModelParams(ckpt, src_lang, trg_lang)
         tokenizer = self._config.get_tokenizer()
         if self._inference_model_params == inference_model_params and self._cached_inference_model is not None:
@@ -1024,7 +1031,7 @@ class Seq2SeqNMTModel(NMTModel):
         if trg_lang != "" and model.config.decoder_start_token_id is None and isinstance(tokenizer, MBartTokenizer):
             model.config.decoder_start_token_id = tokenizer.convert_tokens_to_ids(trg_lang)
 
-        if self._config.model_name.is_madlad():
+        if self._model_name.is_madlad():
             model.config.decoder_start_token_id = tokenizer.pad_token_id
             model.generation_config.decoder_start_token_id = tokenizer.pad_token_id
             model.generation_config.max_length = 256
