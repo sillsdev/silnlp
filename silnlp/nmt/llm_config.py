@@ -50,6 +50,7 @@ from .config import (
     NMTModel,
 )
 from .training_arguments import TrainingArgumentsMapping
+from .vocabulary_builder import NoVocabularyBuilder, VocabularyBuilder
 from .causal_lm_tokenizer import CausalLMTokenizer
 from .config_keys import DeprecatedAdapterKey, RenamedConfigKeys
 from .finetune_method import FinetuneMethod
@@ -289,9 +290,8 @@ class LLMConfig(Config):
             source, src_lang, trg_lang, target
         )
 
-    def _build_vocabs(self, stats: bool = False) -> None:
-        # No vocabulary surgery for decoder-only LLMs; they use their own tokenizer.
-        return
+    def create_vocabulary_builder(self) -> VocabularyBuilder:
+        return NoVocabularyBuilder()
 
     def _dictionary_writer(self, tokenizer: Tokenizer) -> DictionaryWriter:
         return NoDictionaryWriter()

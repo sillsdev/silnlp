@@ -4,6 +4,7 @@ import logging
 from ..common.environment import SilNlpEnv
 from ..common.utils import get_git_revision_hash
 from .config_utils import load_config
+from .preprocessing import Preprocessing
 
 LOGGER = logging.getLogger((__package__ or "") + ".preprocess")
 
@@ -24,7 +25,7 @@ def main() -> None:
     config = load_config(exp_name, environment)
 
     config.set_seed()
-    config.preprocess(args.stats, args.force_align)
+    Preprocessing(config).run(args.stats, args.force_align)
 
 
 if __name__ == "__main__":

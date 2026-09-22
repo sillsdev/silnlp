@@ -20,6 +20,7 @@ from .model_name import ModelName
 from .pretrained_tokenizer import PretrainedTokenizer
 from .token_occurrence_logger import TokenOccurrenceLogger
 from .tokenizer_settings import TokenizerSettings, TokenizerSource
+from .vocabulary_builder import VocabularyBuilder
 
 TrainedTokenizer = Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]
 
@@ -281,7 +282,7 @@ class VocabularyStatistics:
         report.to_excel(self._exp_dir / "tokenization_stats.xlsx")
 
 
-class VocabularyBuilder:
+class TokenizerVocabularyBuilder(VocabularyBuilder):
     """Extends an experiment's pretrained tokenizer with the tokens, language codes and tags its corpora need."""
 
     def __init__(

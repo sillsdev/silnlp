@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from silnlp.nmt.config_utils import load_config
+from silnlp.nmt.preprocessing import Preprocessing
 from tests.smoke_tests.smoke_test_utils import (
     PREPROCESS_OUTPUT_PATTERNS,
     TEST_MT_DIR,
@@ -39,7 +40,7 @@ def test_preprocess_creates_data_sets():
     config = load_config(EXPERIMENT_NAME, environment)
     config.set_seed()
     # The tokenization statistics are only created when stats is set, as the --stats option does
-    config.preprocess(stats=True, force_align=False)
+    Preprocessing(config).run(stats=True, force_align=False)
 
     check_expected_outputs(exp_dir)
     check_tokenizer_files_exist(exp_dir)

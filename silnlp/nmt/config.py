@@ -17,6 +17,7 @@ from .corpus_inventory import CorpusInventory
 from .dictionary_writer import DictionaryWriter
 from .experiment_files import ExperimentFiles
 from .experiment_settings import EvaluationSettings
+from .vocabulary_builder import VocabularyBuilder
 from .experiment_preprocessor import ExperimentPreprocessor, ScriptureDataSetWriters, TermsSettings
 from .terms import GlossLanguage, TermCategories
 from .terms_data_set import TermsDataSet
@@ -158,17 +159,6 @@ class Config(ABC):
         seed = self.data["seed"]
         set_seed(seed)
 
-    def preprocess(self, stats: bool, force_align: bool = False) -> None:
-        missing_files = self.inventory.missing_input_files()
-        if len(missing_files) > 0:
-            raise RuntimeError("These corpus files do not exist: " + ", ".join(str(f) for f in missing_files))
-
-        if self.data["tokenize"]:
-            self._build_vocabs(stats)
-        tokenizer = self.create_tokenizer()
-        self._preprocessor(tokenizer, force_align).write(stats)
-        LOGGER.info("Preprocessing completed")
-
     @abstractmethod
     def create_model(
         self, mixed_precision: bool = True, num_devices: int = 1, clearml_queue: Optional[str] = None
@@ -179,7 +169,7 @@ class Config(ABC):
     def create_tokenizer(self) -> Tokenizer:
         ...
 
-    def _preprocessor(self, tokenizer: Tokenizer, force_align: bool) -> ExperimentPreprocessor:
+    def create_corpus_writer(self, tokenizer: Tokenizer, force_align: bool) -> ExperimentPreprocessor:
         return ExperimentPreprocessor(
             self.corpus_pairs,
             self.files,
@@ -220,7 +210,7 @@ class Config(ABC):
         )
 
     @abstractmethod
-    def _build_vocabs(self, stats: bool = False) -> None:
+    def create_vocabulary_builder(self) -> VocabularyBuilder:
         ...
 
     @abstractmethod

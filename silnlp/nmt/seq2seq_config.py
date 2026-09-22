@@ -70,7 +70,8 @@ from .model_name import ModelName
 from .parent_model import ParentModel
 from .pretrained_tokenizer import PretrainedTokenizer
 from .tokenizer_settings import TokenizerSettings, TokenizerSource
-from .vocabulary import LanguageCodes, MissingTokens, VocabularyBuilder
+from .vocabulary import LanguageCodes, MissingTokens, TokenizerVocabularyBuilder
+from .vocabulary_builder import VocabularyBuilder
 from .tokenizer import NullTokenizer, Tokenizer
 
 LOGGER = logging.getLogger(__name__)
@@ -368,8 +369,8 @@ class Seq2SeqConfig(Config):
             return NullTokenizer()
         return self._pretrained_tokenizer.sil_tokenizer()
 
-    def _build_vocabs(self, stats: bool = False) -> None:
-        VocabularyBuilder(
+    def create_vocabulary_builder(self) -> VocabularyBuilder:
+        return TokenizerVocabularyBuilder(
             self._pretrained_tokenizer,
             MissingTokens(
                 self._pretrained_tokenizer,
@@ -384,7 +385,7 @@ class Seq2SeqConfig(Config):
             self.exp_dir,
             add_new_lang_code=self.data["add_new_lang_code"],
             tokenize=self.data["tokenize"],
-        ).build(stats)
+        )
 
     def get_or_create_tokenizer(self) -> PreTrainedTokenizerBase:
         return self._pretrained_tokenizer.build()
