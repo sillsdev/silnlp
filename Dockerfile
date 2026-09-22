@@ -38,7 +38,6 @@ RUN apt-get upgrade -y
 RUN apt-get install --no-install-recommends -y \
     git \
     python$PYTHON_VERSION \
-    python$PYTHON_VERSION-venv \
     python3-pip \
     python3-dev \
     wget \
@@ -52,16 +51,15 @@ RUN apt-get install --no-install-recommends -y \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-RUN python${PYTHON_VERSION} -m venv /opt/venv
-ENV PATH="/opt/venv/bin:${PATH}"
-
 # Make some useful symlinks that are expected to exist
 RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
     ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python
 
 # Install dependencies from poetry
 COPY --from=builder /src/requirements.txt .
-RUN pip install -r requirements.txt && rm requirements.txt
+RUN sed -i '/^wheel==/d' requirements.txt \
+    && pip install --break-system-packages -r requirements.txt \
+    && rm requirements.txt
 
 # Install fast_align
 RUN apt-get update && \
