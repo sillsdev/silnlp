@@ -11,7 +11,7 @@ from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config, NMTModel
-from .preprocessing import Preprocessing
+from .preprocessor import Preprocessor
 from .test import SUPPORTED_SCORERS, test
 from .translate import TranslationTask
 
@@ -65,7 +65,11 @@ class SILExperiment:
         config_file = Path(exp_dir, "config.yml")
         if not config_file.exists():
             raise RuntimeError(f"ERROR: Config file does not exist in experiment folder {exp_dir}.")
-        Preprocessing(self.config).run(self.make_stats, self.force_align)
+        Preprocessor(
+            self.config.inventory,
+            self.config.create_vocabulary_builder(),
+            self.config.create_data_set_writer(self.force_align),
+        ).run(self.make_stats)
 
     def train(self):
         os.system("nvidia-smi")

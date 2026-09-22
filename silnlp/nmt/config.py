@@ -169,7 +169,8 @@ class Config(ABC):
     def create_tokenizer(self) -> Tokenizer:
         ...
 
-    def create_corpus_writer(self, tokenizer: Tokenizer, force_align: bool) -> ExperimentPreprocessor:
+    def create_data_set_writer(self, force_align: bool) -> ExperimentPreprocessor:
+        tokenizer = self.create_tokenizer()
         return ExperimentPreprocessor(
             self.corpus_pairs,
             self.files,

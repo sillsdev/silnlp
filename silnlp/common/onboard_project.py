@@ -27,7 +27,7 @@ from silnlp.nmt.config import Config
 from silnlp.nmt.terms import GlossLanguages
 
 from ..nmt.config_utils import create_config
-from ..nmt.preprocessing import Preprocessing
+from ..nmt.preprocessor import Preprocessor
 from .collect_verse_counts import collect_verse_counts
 from .environment import SilNlpEnv
 from .extract_corpora import ExtractOutput, extract_corpora
@@ -192,7 +192,11 @@ class OnboardingProject:
 
         config.set_seed()
         try:
-            Preprocessing(config).run(stats=True, force_align=True)
+            Preprocessor(
+                config.inventory,
+                config.create_vocabulary_builder(),
+                config.create_data_set_writer(force_align=True),
+            ).run(stats=True)
 
             tokenization_stats_csv = stats_dir / "tokenization_stats.csv"
             tokenization_stats_xlsx = stats_dir / "tokenization_stats.xlsx"

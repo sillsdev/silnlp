@@ -1,12 +1,11 @@
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.models.nllb.tokenization_nllb import FAIRSEQ_LANGUAGE_CODES, NllbTokenizer
 from transformers.models.t5.tokenization_t5 import T5Tokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
-from .huggingface_tokenizer import HuggingFaceTokenizer
 from .model_name import ModelName
 from .tokenizer_settings import TokenizerSource
 
@@ -19,23 +18,11 @@ class PretrainedTokenizer:
         source: TokenizerSource,
         model_name: ModelName,
         exp_dir: Path,
-        lang_codes: Optional[Dict[str, str]] = None,
-        max_source_length: int = 0,
-        max_target_length: int = 0,
     ) -> None:
         self._source = source
         self._model_name = model_name
         self._exp_dir = exp_dir
-        self._lang_codes = lang_codes if lang_codes is not None else {}
-        self._max_source_length = max_source_length
-        self._max_target_length = max_target_length
         self._tokenizer: Optional[PreTrainedTokenizerBase] = None
-
-    def sil_tokenizer(self) -> HuggingFaceTokenizer:
-        """The tokenizer seen through this codebase's own interface, over whichever instance is current."""
-        return HuggingFaceTokenizer(
-            self.load(), self._lang_codes, self._max_source_length, self._max_target_length
-        )
 
     def build(self) -> PreTrainedTokenizerBase:
         """The tokenizer to extend, converting a SentencePiece model the experiment carries if there is one."""

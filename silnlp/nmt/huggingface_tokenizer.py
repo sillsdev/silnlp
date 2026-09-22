@@ -1,5 +1,5 @@
 import re
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Set, Union
 
 from sacremoses import MosesPunctNormalizer
 from tokenizers import NormalizedString, Regex
@@ -9,6 +9,7 @@ from transformers.tokenization_utils_base import BatchEncoding, PreTrainedTokeni
 from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 
 from ..common.utils import Side
+from .pretrained_tokenizer import PretrainedTokenizer
 from .tokenizer import Tokenizer
 
 
@@ -49,18 +50,33 @@ class PunctuationNormalizingTokenizer(PreTrainedTokenizerFast):
 class HuggingFaceTokenizer(Tokenizer):
     def __init__(
         self,
-        tokenizer: PreTrainedTokenizerBase,
+        pretrained: PretrainedTokenizer,
         lang_codes: Dict[str, str],
         max_source_length: int,
         max_target_length: int,
     ) -> None:
-        self._tokenizer = tokenizer
+        self._pretrained = pretrained
         self._mpn = MosesPunctNormalizer()
         self._mpn.substitutions = [(re.compile(r), sub) for r, sub in self._mpn.substitutions]
-        self._all_special_tokens = set(self._tokenizer.all_special_tokens)
         self._lang_codes = lang_codes
         self._max_source_length = max_source_length
         self._max_target_length = max_target_length
+        self._special_tokens_of: Optional[PreTrainedTokenizerBase] = None
+        self._special_tokens: Set[str] = set()
+
+    @property
+    def _tokenizer(self) -> PreTrainedTokenizerBase:
+        """Whichever tokenizer is current: extending the vocabulary replaces it with one read back
+        from disk, so holding on to a particular instance would leave this one a version behind."""
+        return self._pretrained.load()
+
+    @property
+    def _all_special_tokens(self) -> Set[str]:
+        tokenizer = self._tokenizer
+        if self._special_tokens_of is not tokenizer:
+            self._special_tokens_of = tokenizer
+            self._special_tokens = set(tokenizer.all_special_tokens)
+        return self._special_tokens
 
     def set_src_lang(self, src_lang: str) -> None:
         self._tokenizer.src_lang = self._lang_codes.get(src_lang, src_lang)
