@@ -262,8 +262,10 @@ class LLMConfig(Config):
             self,
             self.create_languages(),
             self.files,
+            self._hf_tokenizer,
             self.create_prompt_builder(),
             self._finetune_method(),
+            TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING, self.root),
             mixed_precision,
             num_devices,
             clearml_queue,
@@ -445,8 +447,10 @@ class LLMModel(NMTModel):
         config: LLMConfig,
         languages: ExperimentLanguages,
         files: ExperimentFiles,
+        tokenizer: CausalLMTokenizer,
         prompts: PromptBuilder,
         finetuning: FinetuneMethod,
+        training_arguments: TrainingArgumentsMapping,
         mixed_precision: bool,
         num_devices: int,
         clearml_queue: Optional[str] = None,
@@ -456,8 +460,10 @@ class LLMModel(NMTModel):
         self._config: LLMConfig = config
         self._languages = languages
         self._files = files
+        self._tokenizer = tokenizer
         self._prompts = prompts
         self._finetuning = finetuning
+        self._training_arguments = training_arguments
         self._mixed_precision = mixed_precision
         self._num_devices = num_devices
         self._clearml_queue = clearml_queue
@@ -468,7 +474,7 @@ class LLMModel(NMTModel):
 
     def train(self) -> None:
         training_args = self._create_training_arguments()
-        tokenizer = self._config.get_hf_tokenizer()
+        tokenizer = self._tokenizer.load()
         tokenizer.padding_side = "right"
 
         model = self._provider.create_model_for_training()
@@ -578,8 +584,7 @@ class LLMModel(NMTModel):
 
     def _create_training_arguments(self) -> TrainingArguments:
         dtype = self._config.params["torch_dtype"]
-        args = TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING).collect(
-            self._config.root,
+        args = self._training_arguments.collect(
             {
                 "bf16": self._mixed_precision and dtype == "bfloat16",
                 "fp16": self._mixed_precision and dtype == "float16",
@@ -589,9 +594,7 @@ class LLMModel(NMTModel):
         return HfArgumentParser(TrainingArguments).parse_dict(args)[0]
 
     def save_effective_config(self, path: Path) -> None:
-        TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING).write_effective_config(
-            path, self._config.root, self._create_training_arguments()
-        )
+        self._training_arguments.write_effective_config(path, self._create_training_arguments())
 
     # --- inference ----------------------------------------------------------------
 
@@ -629,7 +632,7 @@ class LLMModel(NMTModel):
         src_lang = self._languages.of(src_iso)
         trg_lang = self._languages.of(trg_iso)
         model = self._get_inference_model(ckpt, src_lang.name, trg_lang.name)
-        tokenizer = self._config.get_hf_tokenizer()
+        tokenizer = self._tokenizer.load()
         yield from self._generate(model, tokenizer, sentences, src_lang, trg_lang, produce_multiple_translations, False)
 
     def translate_test_files(
@@ -640,7 +643,7 @@ class LLMModel(NMTModel):
         save_confidences: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
-        tokenizer = self._config.get_hf_tokenizer()
+        tokenizer = self._tokenizer.load()
         src_iso = self._languages.training_source_iso()
         trg_iso = self._languages.training_target_iso()
         src_lang = self._languages.of(src_iso)

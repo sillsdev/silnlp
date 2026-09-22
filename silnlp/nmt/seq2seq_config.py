@@ -351,6 +351,8 @@ class Seq2SeqConfig(Config):
             self.create_languages(),
             self.files,
             self.model_name,
+            self._pretrained_tokenizer,
+            TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING, self.root),
             mixed_precision,
             num_devices,
             clearml_queue,
@@ -467,6 +469,8 @@ class Seq2SeqNMTModel(NMTModel):
         languages: ExperimentLanguages,
         files: ExperimentFiles,
         model_name: ModelName,
+        pretrained_tokenizer: PretrainedTokenizer,
+        training_arguments: TrainingArgumentsMapping,
         mixed_precision: bool,
         num_devices: int,
         clearml_queue: Optional[str] = None,
@@ -477,6 +481,8 @@ class Seq2SeqNMTModel(NMTModel):
         self._languages = languages
         self._files = files
         self._model_name = model_name
+        self._pretrained_tokenizer = pretrained_tokenizer
+        self._training_arguments = training_arguments
         self._mixed_precision = mixed_precision
         set_seed(self._config.data["seed"])
         self._dictionary: Optional[Dict[VerseRef, Set[str]]] = None
@@ -528,7 +534,7 @@ class Seq2SeqNMTModel(NMTModel):
             self._config.model, model_config, device_map=device_map
         )
 
-        tokenizer = self._config.get_tokenizer()
+        tokenizer = self._pretrained_tokenizer.load()
 
         old_embeddings = model.get_input_embeddings()
         old_num_tokens = old_embeddings.weight.size(dim=0)
@@ -721,9 +727,7 @@ class Seq2SeqNMTModel(NMTModel):
             written_checkpoints.discard_tokenizers()
 
     def save_effective_config(self, path: Path) -> None:
-        TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING).write_effective_config(
-            path, self._config.root, self._create_training_arguments()
-        )
+        self._training_arguments.write_effective_config(path, self._create_training_arguments())
 
     def translate_test_files(
         self,
@@ -733,7 +737,7 @@ class Seq2SeqNMTModel(NMTModel):
         save_confidences: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
-        tokenizer = self._config.get_tokenizer()
+        tokenizer = self._pretrained_tokenizer.load()
         model = self._create_inference_model(ckpt, tokenizer, self._languages.test_source(), self._languages.test_target())
         compiled_model = cast(PreTrainedModel, torch.compile(model))
 
@@ -819,7 +823,7 @@ class Seq2SeqNMTModel(NMTModel):
         src_lang = self._languages.name_of(src_iso)
         trg_lang = self._languages.name_of(trg_iso)
         inference_model_params = InferenceModelParams(ckpt, src_lang, trg_lang)
-        tokenizer = self._config.get_tokenizer()
+        tokenizer = self._pretrained_tokenizer.load()
         if self._inference_model_params == inference_model_params and self._cached_inference_model is not None:
             model = self._cached_inference_model
         else:
@@ -857,8 +861,7 @@ class Seq2SeqNMTModel(NMTModel):
             yield model_output_group.convert_to_sentence_translation_group(tokenizer)
 
     def _create_training_arguments(self) -> Seq2SeqTrainingArguments:
-        args = TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING).collect(
-            self._config.root,
+        args = self._training_arguments.collect(
             # For context on floating point precision, see https://github.com/sillsdev/silnlp/issues/647
             {
                 "fp16": self._mixed_precision and not self._is_t5,
