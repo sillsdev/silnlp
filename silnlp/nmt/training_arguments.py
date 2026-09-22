@@ -10,12 +10,12 @@ class TrainingArgumentsMapping:
     """Which experiment config values become HuggingFace TrainingArguments fields. The seq2seq and LLM
     models differ only in this mapping, the arguments class, and the precision flags they pass."""
 
-    def __init__(self, mapping: Dict[str, Set[str]]) -> None:
+    def __init__(self, mapping: Dict[str, Set[str]], config_root: dict) -> None:
         self._mapping = mapping
+        self._config_root = config_root
 
-    def collect(
-        self, config_root: dict, precision_args: Dict[str, Any], clearml_queue: Optional[str]
-    ) -> Dict[str, Any]:
+    def collect(self, precision_args: Dict[str, Any], clearml_queue: Optional[str]) -> Dict[str, Any]:
+        config_root = self._config_root
         args: Dict[str, Any] = {}
         for section, params in self._mapping.items():
             section_config: dict = config_root[section]
@@ -26,10 +26,10 @@ class TrainingArgumentsMapping:
         args["report_to"] = "none" if clearml_queue is None else "all"
         return args
 
-    def write_effective_config(self, path: Path, config_root: dict, training_args: Any) -> None:
+    def write_effective_config(self, path: Path, training_args: Any) -> None:
         """Write the resolved experiment config, overlaying onto a copy of it the values the training
         arguments actually settled on."""
-        config = deepcopy(config_root)
+        config = deepcopy(self._config_root)
         for section, params in self._mapping.items():
             section_config: dict = config[section]
             for param in params:
