@@ -11,7 +11,8 @@ from tqdm import tqdm
 from ..alignment.config import get_aligner_name
 from ..alignment.utils import add_alignment_scores
 from ..nmt.clearml_connection import TAGS_LIST, SILClearML
-from ..nmt.config import Config, get_data_file_pairs
+from ..nmt.config import Config
+from ..nmt.corpora import get_data_file_pairs
 from .collect_verse_counts import DT_CANON, NT_CANON, OT_CANON, collect_verse_counts
 from .corpus import filter_parallel_corpus, get_scripture_parallel_corpus, include_chapters
 from .environment import SilNlpEnv
