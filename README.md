@@ -144,7 +144,7 @@ The rest of these instructions are to be carried out in a WSL/Linux terminal as 
 
 9. Configure Poetry to use the active Python
    ```
-	poetry config virtualenvs.prefer-active-python true
+	poetry config virtualenvs.use-poetry-python true
    ```
 
 10. Install the Python packages for the silnlp repo
@@ -257,11 +257,11 @@ Follow the instructions below to set up a Dev Container in VS Code. This is the 
       * Note: If you don't have a local GPU, you may need to comment out the `gpus --all` part of the `runArgs` field of the `.devcontainer/devcontainer.json` file.
 
 10. Install and activate Poetry environment.
-      * In the VS Code terminal, run `poetry install` to install the necessary Python libraries, and then run `poetry shell` to enter the environment in the terminal. 
+      * In the VS Code terminal, run `poetry install` to install the necessary Python libraries, and then run `poetry env activate` to enter the environment in the terminal. 
 
 11. (Optional) Locally mount the MinIO and/or B2 bucket(s). This will allow you to interact directly with the bucket(s) from your local terminal (outside of the dev container). See instructions [here](bucket_setup.md).
 
-To get back into the dev container and poetry environment each subsequent time, open the silnlp folder in VS Code, select the "Reopen in Container" option from the Remote Connection menu (bottom left corner), and use the `poetry shell` command in the terminal.
+To get back into the dev container and poetry environment each subsequent time, open the silnlp folder in VS Code, select the "Reopen in Container" option from the Remote Connection menu (bottom left corner), and use the `poetry env activate` command in the terminal.
 
 ## Setting Up and Running Experiments
 See the [wiki](../../wiki) for information on setting up and running experiments. The most important pages for getting started are the ones on [file structure](../../wiki/File-conventions-and-cleanup), [model configuration](../../wiki/Configure-a-model), and [running experiments](../../wiki/NMT:-Usage). A lot of the instructions are specific to NMT, but are still helpful starting points for doing other things like [alignment](../../wiki/Alignment:-Usage).
