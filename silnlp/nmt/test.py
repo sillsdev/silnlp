@@ -3,6 +3,7 @@ import csv
 import logging
 import random
 from contextlib import ExitStack
+from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 from typing import Dict, List, Optional, Set, TextIO, Tuple
@@ -14,7 +15,7 @@ from scipy.stats import gmean
 
 from ..common.environment import SilNlpEnv
 from ..common.linear_regression import perform_enhanced_linear_regression
-from ..common.utils import get_git_revision_hash
+from ..common.utils import get_git_revision_hash, set_seed
 from .checkpoints import CheckpointType
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config, NMTModel
@@ -532,110 +533,127 @@ def load_test_data(
     return sys, refs, confidences, book_dict
 
 
-def test_checkpoint(
-    files: ScoreFiles,
-    inventory: CorpusInventory,
-    scoring: ScoringSettings,
-    config: Config,
-    model: NMTModel,
-    tokenizer: Tokenizer,
-    force_infer: bool,
-    by_book: bool,
-    ref_projects: Set[str],
-    checkpoint_type: CheckpointType,
-    step: int,
-    scorers: Set[str],
-    books: Dict[int, List[int]],
-    produce_multiple_translations: bool = False,
-    save_confidences: bool = False,
-) -> List[PairScore]:
-    config.set_seed()
-    test_sets = files.test_sets(step, books)
-    checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
+@dataclass(frozen=True)
+class TestRequest:
+    """What a test run was asked to do: which translations to produce and how to score them."""
 
-    source_paths: List[Path] = []
-    translation_paths: List[Path] = []
-    for test_set in test_sets:
-        if force_infer or not model.has_completed_translation(test_set.source(), test_set.predictions()):
-            source_paths.append(test_set.source())
-            translation_paths.append(test_set.predictions())
-    if len(translation_paths) > 0:
-        LOGGER.info(f"Inferencing {checkpoint_name}")
-        model.translate_test_files(
-            source_paths,
-            translation_paths,
-            produce_multiple_translations,
-            save_confidences,
-            step if checkpoint_type is CheckpointType.OTHER else checkpoint_type,
-        )
+    scorers: Set[str]
+    ref_projects: Set[str]
+    books: Dict[int, List[int]]
+    by_book: bool = False
+    force_infer: bool = False
+    produce_multiple_translations: bool = False
+    save_confidences: bool = False
 
-    if produce_multiple_translations:
-        test_sets = files.test_sets(step, books, produce_multiple_translations, model.get_num_drafts())
 
-    confidence_files: List[Optional[TestConfidenceFile]] = [None] * len(translation_conf_file_names)
-    if "confidence" in scorers:
-        confidence_files = [TestConfidenceFile(config.exp_dir / name) for name in translation_conf_file_names]
-        if not any(confidence_file.exists() for confidence_file in confidence_files):
-            raise FileNotFoundError(
-                f"Cannot use confidence as a scorer because no confidences files were found for {checkpoint_name}. "
-                "Include the --save-confidences option, and --force-infer if the predictions already exist. "
-                "Confidences are only calculated for drafts that are translated with beam search."
+class TestRun:
+    """Scores an experiment's test sets against one checkpoint of a model at a time."""
+
+    def __init__(
+        self,
+        files: ScoreFiles,
+        inventory: CorpusInventory,
+        scoring: ScoringSettings,
+        model: NMTModel,
+        tokenizer: Tokenizer,
+        seed: int,
+        request: TestRequest,
+    ) -> None:
+        self._files = files
+        self._inventory = inventory
+        self._scoring = scoring
+        self._model = model
+        self._tokenizer = tokenizer
+        self._seed = seed
+        self._request = request
+
+    def score_checkpoint(self, checkpoint_type: CheckpointType, step: int) -> List[PairScore]:
+        set_seed(self._seed)
+        test_sets = self._files.test_sets(step, self._request.books)
+        checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
+
+        source_paths: List[Path] = []
+        translation_paths: List[Path] = []
+        for test_set in test_sets:
+            if self._request.force_infer or not self._model.has_completed_translation(
+                test_set.source(), test_set.predictions()
+            ):
+                source_paths.append(test_set.source())
+                translation_paths.append(test_set.predictions())
+        if len(translation_paths) > 0:
+            LOGGER.info(f"Inferencing {checkpoint_name}")
+            self._model.translate_test_files(
+                source_paths,
+                translation_paths,
+                self._request.produce_multiple_translations,
+                self._request.save_confidences,
+                step if checkpoint_type is CheckpointType.OTHER else checkpoint_type,
             )
-        for i, confidence_file in enumerate(confidence_files):
-            if not confidence_file.exists():
-                LOGGER.warning(
-                    f"Not scoring confidence for {translation_file_names[i]}, because it has no confidences file. "
-                    "This is expected for drafts that were not translated with beam search."
-                )
-                confidence_files[i] = None
 
-    LOGGER.info(f"Scoring {checkpoint_name}")
-    scores: List[PairScore] = []
-    overall_sys: List[str] = []
-    overall_refs: List[List[str]] = []
-    for test_set in test_sets:
-        pair_sys, pair_refs, book_dict = load_test_data(tokenizer, test_set, ref_projects, books, by_book)
+        if self._request.produce_multiple_translations:
+            test_sets = self._files.test_sets(
+                step,
+                self._request.books,
+                self._request.produce_multiple_translations,
+                self._model.get_num_drafts(),
+            )
 
-        start_index = len(overall_sys)
-        overall_sys.extend(pair_sys)
-        for i, ref in enumerate(pair_refs):
-            if i == len(overall_refs):
-                overall_refs.append([""] * start_index)
-            overall_refs[i].extend(ref)
-        # ensure that all refs are the same length as the sys
-        for overall_ref in filter(lambda r: len(r) < len(overall_sys), overall_refs):
-            overall_ref.extend([""] * (len(overall_sys) - len(overall_ref)))
-
-        scores.append(
-            score_pair(
-                pair_sys,
-                pair_refs,
-                "ALL",
+        LOGGER.info(f"Scoring {checkpoint_name}")
+        scores: List[PairScore] = []
+        overall_sys: List[str] = []
+        overall_refs: List[List[str]] = []
+        for test_set in test_sets:
+            pair_sys, pair_refs, book_dict = load_test_data(
+                self._tokenizer,
                 test_set,
-                scorers,
-                scoring,
-                ref_projects,
-                test_set.draft_index(),
-                write_linear_regression=True,
+                self._request.ref_projects,
+                self._request.books,
+                self._request.by_book,
             )
-        )
 
-        if by_book:
-            if len(book_dict) != 0:
-                book_scores = score_individual_books(book_dict, test_set, scorers, scoring, ref_projects)
-                scores.extend(book_scores)
-            else:
-                LOGGER.error("Error: book_dict did not load correctly. Not scoring individual books.")
-    if len(inventory.test_source_isos()) > 1 or len(inventory.test_target_isos()) > 1:
-        bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)
-        scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), ref_projects))
+            start_index = len(overall_sys)
+            overall_sys.extend(pair_sys)
+            for i, ref in enumerate(pair_refs):
+                if i == len(overall_refs):
+                    overall_refs.append([""] * start_index)
+                overall_refs[i].extend(ref)
+            # ensure that all refs are the same length as the sys
+            for overall_ref in filter(lambda r: len(r) < len(overall_sys), overall_refs):
+                overall_ref.extend([""] * (len(overall_sys) - len(overall_ref)))
 
-    with files.scores(step, books, ref_projects).open("w", encoding="utf-8") as scores_file:
-        if len(scores) > 0:
-            scores[0].writeHeader(scores_file)
-        for results in scores:
-            results.write(scores_file)
-    return scores
+            scores.append(
+                score_pair(
+                    pair_sys,
+                    pair_refs,
+                    "ALL",
+                    test_set,
+                    self._request.scorers,
+                    self._scoring,
+                    self._request.ref_projects,
+                    test_set.draft_index(),
+                    write_linear_regression=True,
+                )
+            )
+
+            if self._request.by_book:
+                if len(book_dict) != 0:
+                    book_scores = score_individual_books(
+                        book_dict, test_set, self._request.scorers, self._scoring, self._request.ref_projects
+                    )
+                    scores.extend(book_scores)
+                else:
+                    LOGGER.error("Error: book_dict did not load correctly. Not scoring individual self._request.books.")
+        if len(self._inventory.test_source_isos()) > 1 or len(self._inventory.test_target_isos()) > 1:
+            bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)
+            scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), self._request.ref_projects))
+
+        scores_path = self._files.scores(step, self._request.books, self._request.ref_projects)
+        with scores_path.open("w", encoding="utf-8") as scores_file:
+            if len(scores) > 0:
+                scores[0].writeHeader(scores_file)
+            for results in scores:
+                results.write(scores_file)
+        return scores
 
 
 def test(
@@ -656,7 +674,6 @@ def test(
     model: Optional[NMTModel] = None,
 ):
     files = ScoreFiles(config.exp_dir, config.corpus_inventory)
-    scoring = config.create_scoring_settings()
     if not files.has_test_data():
         LOGGER.info("No test dataset.")
         return
@@ -676,27 +693,28 @@ def test(
         model = config.create_model(clearml_queue=clearml_queue)
     if force_infer:
         model.discard_saved_inference()
+    run = TestRun(
+        files,
+        config.corpus_inventory,
+        config.create_scoring_settings(),
+        model,
+        tokenizer,
+        config.seed,
+        TestRequest(
+            scorers=scorers,
+            ref_projects=ref_projects,
+            books=books_nums,
+            by_book=by_book,
+            force_infer=force_infer,
+            produce_multiple_translations=produce_multiple_translations,
+            save_confidences=save_confidences,
+        ),
+    )
     results: Dict[int, List[PairScore]] = {}
     step: int
     if checkpoint is not None:
         step = int(checkpoint)
-        results[step] = test_checkpoint(
-            files,
-            config.corpus_inventory,
-            scoring,
-            config,
-            model,
-            tokenizer,
-            force_infer,
-            by_book,
-            ref_projects,
-            CheckpointType.OTHER,
-            step,
-            scorers,
-            books_nums,
-            produce_multiple_translations,
-            save_confidences,
-        )
+        results[step] = run.score_checkpoint(CheckpointType.OTHER, step)
 
     if all_checkpoints:
         all_steps = model.checkpoint_steps()
@@ -704,44 +722,12 @@ def test(
             LOGGER.warning("No checkpoints found to test.")
         for step in all_steps:
             if step not in results:
-                results[step] = test_checkpoint(
-                    files,
-                    config.corpus_inventory,
-                    scoring,
-                    config,
-                    model,
-                    tokenizer,
-                    force_infer,
-                    by_book,
-                    ref_projects,
-                    CheckpointType.OTHER,
-                    step,
-                    scorers,
-                    books_nums,
-                    produce_multiple_translations,
-                    save_confidences,
-                )
+                results[step] = run.score_checkpoint(CheckpointType.OTHER, step)
 
     if avg:
         try:
             step = -1
-            results[step] = test_checkpoint(
-                files,
-                config.corpus_inventory,
-                scoring,
-                config,
-                model,
-                tokenizer,
-                force_infer,
-                by_book,
-                ref_projects,
-                CheckpointType.AVERAGE,
-                step,
-                scorers,
-                books_nums,
-                produce_multiple_translations,
-                save_confidences,
-            )
+            results[step] = run.score_checkpoint(CheckpointType.AVERAGE, step)
         except ValueError:
             LOGGER.warning("No average checkpoint available.")
 
@@ -750,63 +736,15 @@ def test(
         best_step = model.resolve_checkpoint(CheckpointType.BEST).step
         step = best_step
         if step not in results:
-            results[step] = test_checkpoint(
-                files,
-                config.corpus_inventory,
-                scoring,
-                config,
-                model,
-                tokenizer,
-                force_infer,
-                by_book,
-                ref_projects,
-                CheckpointType.BEST,
-                step,
-                scorers,
-                books_nums,
-                produce_multiple_translations,
-                save_confidences,
-            )
+            results[step] = run.score_checkpoint(CheckpointType.BEST, step)
 
     if last or (not best and checkpoint is None and not avg and model.has_been_trained()):
         step = model.resolve_checkpoint(CheckpointType.LAST).step
         if step not in results:
-            results[step] = test_checkpoint(
-                files,
-                config.corpus_inventory,
-                scoring,
-                config,
-                model,
-                tokenizer,
-                force_infer,
-                by_book,
-                ref_projects,
-                CheckpointType.LAST,
-                step,
-                scorers,
-                books_nums,
-                produce_multiple_translations,
-                save_confidences,
-            )
+            results[step] = run.score_checkpoint(CheckpointType.LAST, step)
 
     if not model.has_been_trained():
-        results[0] = test_checkpoint(
-            files,
-            config.corpus_inventory,
-            scoring,
-            config,
-            model,
-            tokenizer,
-            force_infer,
-            by_book,
-            ref_projects,
-            CheckpointType.OTHER,
-            0,
-            scorers,
-            books_nums,
-            produce_multiple_translations,
-            save_confidences,
-        )
+        results[0] = run.score_checkpoint(CheckpointType.OTHER, 0)
 
     for step in sorted(results.keys()):
         num_refs = results[step][0].num_refs
