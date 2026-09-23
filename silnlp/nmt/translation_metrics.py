@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Optional, Set
+from typing import Any, Dict, Optional, Set
 
 import evaluate
 import numpy as np
@@ -63,7 +63,7 @@ class TranslationMetrics:
             decoded_preds = [self._joined(pred, tokenizer, special_ids) for pred in preds]
             decoded_labels = [[self._joined(label, tokenizer, special_ids)] for label in labels]
 
-        result = {self._name: self._score(decoded_preds, decoded_labels)}
+        result: Dict[str, Any] = {self._name: self._score(decoded_preds, decoded_labels)}
         prediction_lens = [np.count_nonzero(pred != tokenizer.pad_token_id) for pred in preds]
         result["gen_len"] = np.mean(prediction_lens)
         return {key: round(value, 4) for key, value in result.items()}
