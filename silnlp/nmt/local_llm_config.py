@@ -53,7 +53,7 @@ from .config import InferenceModelParams, Language, NMTModel
 from .config_keys import RenamedConfigKeys
 from .corpora import read_parallel_text_pairs
 from .example_retrieval import ExamplePool, ExampleRetrieverFactory
-from .experiment_preprocessor import DataSetWriter
+from .experiment_data_set_writer import DataSetWriter
 from .instruction_data import InstructionData, InstructionDataSetWriter
 from .llm_config import (
     LLMConfig,
