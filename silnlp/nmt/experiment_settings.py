@@ -30,6 +30,18 @@ class EvaluationSettings:
         self._evaluation["metric_for_best_model"] = None
 
 
+class ScoringSettings:
+    """How the test step scores translations against its references."""
+
+    _DEFAULT_SACREBLEU_TOKENIZER = "13a"
+
+    def __init__(self, data: dict) -> None:
+        self._data = data
+
+    def sacrebleu_tokenizer(self) -> str:
+        return self._data.get("sacrebleu_tokenize", self._DEFAULT_SACREBLEU_TOKENIZER)
+
+
 class TrainingSettings:
     """The training section of the config, with the adjustments the chosen model and the automatic
     gradient accumulation setting force on whatever was configured."""
