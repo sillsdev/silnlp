@@ -10,8 +10,6 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
 
 import datasets.utils.logging as datasets_logging
-import evaluate
-import numpy as np
 import safetensors.torch
 import torch
 import transformers.utils.logging as transformers_logging
@@ -37,7 +35,6 @@ from transformers import (
     PreTrainedTokenizerBase,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
-    TensorType,
     TrainerCallback,
     set_seed,
 )
@@ -61,6 +58,8 @@ from .config import (
     NMTModel,
 )
 from .training_arguments import TrainingArgumentsMapping
+from .training_data_sets import Seq2SeqTrainingDataSets, TokenizedBatchEncoder
+from .translation_metrics import TranslationMetrics
 from .translation_settings import CheckpointRetention, ModelSettings, TranslationSettings
 from .config_keys import RenamedConfigKeys
 from .dictionary_writer import DictionaryWriter, TermDictionaryWriter
@@ -127,22 +126,6 @@ _TRAINING_ARGS_CONFIG_MAPPING = {
         "warmup_steps",
         "weight_decay",
     },
-}
-
-# Config keys renamed from huggingface 4.x to 5.x, so we need to warn team members if they have them in their config
-# rather than silently dropping the arguments. Can be removed once team is accustomed to 5.x.
-# "loss" and "eval_loss" are both evaluation loss
-# The early stopping callback adds "eval_" to all metrics that don't already start with it
-DEFAULT_METRICS = ["loss", "eval_loss"]
-EVAL_METRICS_MODULES = {
-    "bleu": "sacrebleu",
-    "chrf3": "chrf",
-    "chrf3+": "chrf",
-    "chrf3++": "chrf",
-    "m-bleu": "sacrebleu",
-    "m-chrf3": "chrf",
-    "m-chrf3+": "chrf",
-    "m-chrf3++": "chrf",
 }
 
 
@@ -416,15 +399,6 @@ class Seq2SeqConfig(Config):
         )
 
 
-def batch_prepare_for_model(
-    tokenizer: PreTrainedTokenizerBase,
-    batch_tokens: List[List[str]],
-    return_tensors: Optional[Union[str, TensorType]] = None,
-) -> BatchEncoding:
-    input_ids = [cast(List[int], tokenizer.convert_tokens_to_ids(tokens)) for tokens in batch_tokens]
-    return tokenizer.pad({"input_ids": input_ids}, padding=False, return_tensors=return_tensors)
-
-
 TSent = TypeVar("TSent")
 
 
@@ -594,54 +568,9 @@ class Seq2SeqNMTModel(NMTModel):
             self._languages.validation_target() if self._languages.validation_target() else self._languages.test_target(),
         )
 
-        def load_text_dataset(src_path: Path, trg_path: Path) -> Optional[Dataset]:
-            if not src_path.is_file() or not trg_path.is_file():
-                return None
-            data = []
-            with (
-                open(src_path, "r", encoding="utf-8-sig") as src_file,
-                open(trg_path, "r", encoding="utf-8-sig") as trg_file,
-            ):
-                for src_line, trg_line in zip(src_file, trg_file):
-                    data.append({"src": src_line.strip(), "trg": trg_line.strip()})
-            return Dataset.from_dict({"translation": data})
-
-        train_dataset = load_text_dataset(
-            self._files.train_source(),
-            self._files.train_target(),
-        )
-
-        eval_dataset = load_text_dataset(
-            self._files.validation_source(),
-            self._files.validation_target(),
-        )
-
-        def encode(examples: dict) -> dict:
-            inputs = [ex["src"].split() for ex in examples["translation"]]
-            model_inputs = batch_prepare_for_model(tokenizer, inputs)
-
-            targets = [ex["trg"].split() for ex in examples["translation"]]
-            labels = batch_prepare_for_model(tokenizer, targets)
-            model_inputs["labels"] = labels["input_ids"]
-            return model_inputs
-
-        if train_dataset is not None:
-            with training_args.main_process_first(desc="train dataset map encoding"):
-                train_dataset = train_dataset.map(
-                    encode,
-                    batched=True,
-                    remove_columns=train_dataset.column_names,
-                    desc="Encoding train dataset",
-                )
-
-        if eval_dataset is not None:
-            with training_args.main_process_first(desc="validation dataset map encoding"):
-                eval_dataset = eval_dataset.map(
-                    encode,
-                    batched=True,
-                    remove_columns=eval_dataset.column_names,
-                    desc="Encoding validation dataset",
-                )
+        data_sets = Seq2SeqTrainingDataSets(self._files, self._pretrained_tokenizer)
+        train_dataset = data_sets.training(training_args)
+        eval_dataset = data_sets.validation(training_args)
 
         src_noise = self._trainer_settings.source_noise()
         for noise_method in src_noise:
@@ -656,70 +585,7 @@ class Seq2SeqNMTModel(NMTModel):
             src_noise=src_noise,
         )
 
-        metric_name = self._evaluation.metric_for_best_model() or ""
-        if metric_name != "":
-            if metric_name not in DEFAULT_METRICS:
-                metric_module = EVAL_METRICS_MODULES.get(metric_name)
-                if metric_module is None:
-                    raise ValueError(f"{metric_name} is not a supported metric.")
-                metric = evaluate.load(metric_module)
-        all_special_ids = set(tokenizer.all_special_ids)
-
-        def compute_metrics(eval_preds):
-            preds, labels = eval_preds
-            if isinstance(preds, tuple):
-                preds = preds[0]
-
-            # Replace -100 in the labels as we can't decode them.
-            preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
-            labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
-            if self._evaluation.detokenizes():
-                decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
-                decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
-
-                # Some simple post-processing
-                decoded_preds = [pred.strip() for pred in decoded_preds]
-                decoded_labels = [[label.strip()] for label in decoded_labels]
-            else:
-                decoded_preds = [
-                    " ".join(
-                        tokenizer.convert_ids_to_tokens(int(id)) for id in pred if id not in all_special_ids
-                    ).strip()
-                    for pred in preds
-                ]
-
-                decoded_labels = [
-                    [
-                        " ".join(
-                            tokenizer.convert_ids_to_tokens(int(id)) for id in label if id not in all_special_ids
-                        ).strip()
-                    ]
-                    for label in labels
-                ]
-
-            if metric_name == "bleu":
-                result = metric.compute(
-                    predictions=decoded_preds,
-                    references=decoded_labels,
-                    lowercase=True,
-                    force=not self._evaluation.detokenizes(),
-                )
-            elif metric_module == "chrf":
-                result = metric.compute(
-                    predictions=decoded_preds,
-                    references=decoded_labels,
-                    char_order=6,
-                    word_order=metric_name.count("+"),
-                    beta=3,
-                    lowercase=True,
-                    eps_smoothing="+" in metric_name,
-                )
-            result = {metric_name: result["score"]}
-
-            prediction_lens = [np.count_nonzero(pred != tokenizer.pad_token_id) for pred in preds]
-            result["gen_len"] = np.mean(prediction_lens)
-            result = {k: round(v, 4) for k, v in result.items()}
-            return result
+        metrics = TranslationMetrics(self._evaluation, self._pretrained_tokenizer)
 
         trainer = SilSeq2SeqTrainer(
             model,
@@ -728,7 +594,7 @@ class Seq2SeqNMTModel(NMTModel):
             train_dataset,
             eval_dataset,
             processing_class=tokenizer,
-            compute_metrics=None if metric_name in DEFAULT_METRICS else compute_metrics,
+            compute_metrics=None if metrics.is_produced_by_the_trainer() else metrics.compute,
             sequential_sampling=self._trainer_settings.samples_sequentially(),
             auto_grad_acc=self._trainer_settings.accumulates_gradient_automatically(),
         )
@@ -743,11 +609,11 @@ class Seq2SeqNMTModel(NMTModel):
         last_checkpoint = get_last_checkpoint(training_args.output_dir)
         train_result = trainer.train(resume_from_checkpoint=last_checkpoint)
 
-        metrics = train_result.metrics
-        metrics["train_samples"] = len(train_dataset) if train_dataset is not None else 0
+        train_metrics = train_result.metrics
+        train_metrics["train_samples"] = len(train_dataset) if train_dataset is not None else 0
 
-        trainer.log_metrics("train", metrics)
-        trainer.save_metrics("train", metrics)
+        trainer.log_metrics("train", train_metrics)
+        trainer.save_metrics("train", train_metrics)
         trainer.save_state()
 
         written_checkpoints = CheckpointDirectory(Path(training_args.output_dir))
@@ -1213,7 +1079,7 @@ class SilTranslator:
 
 class PretokenizedTranslator(SilTranslator):
     def preprocess(self, sentences: List[Any]) -> BatchEncoding:
-        model_inputs = batch_prepare_for_model(self.tokenizer, sentences)
+        model_inputs = TokenizedBatchEncoder(self.tokenizer).encode(sentences)
         model_inputs = self.tokenizer.pad(model_inputs, padding=True, return_tensors="pt")
         model_inputs["forced_bos_token_id"] = self.tokenizer.convert_tokens_to_ids(self.tgt_lang)
         return model_inputs

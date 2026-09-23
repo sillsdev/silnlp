@@ -24,8 +24,6 @@ from pathlib import Path
 from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple, Union
 
 import torch
-from datasets import Dataset
-from machine.corpora import TextFileTextCorpus
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -50,6 +48,7 @@ from .config import (
     NMTModel,
 )
 from .training_arguments import TrainingArgumentsMapping
+from .training_data_sets import CausalLMTrainingDataSets
 from .vocabulary_builder import NoVocabularyBuilder, VocabularyBuilder
 from .causal_lm_tokenizer import CausalLMTokenizer
 from .config_keys import DeprecatedAdapterKey, RenamedConfigKeys
@@ -506,31 +505,11 @@ class LLMModel(NMTModel):
         model = self._provider.create_model_for_training()
         model = self._apply_finetuning_config(model)
 
-        max_seq_length: int = self._max_sequence_length
-        src_lang = self._languages.of(self._languages.training_source_iso())
-        trg_lang = self._languages.of(self._languages.training_target_iso())
-        eos_token_id = tokenizer.eos_token_id
-
-        def encode(example: dict) -> dict:
-            prompt = self._prompts.build(example["src"], src_lang, trg_lang)
-            prompt_ids = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=True)
-            completion_ids = tokenizer(example["trg"], add_special_tokens=False)["input_ids"] + [eos_token_id]
-            input_ids = (prompt_ids + completion_ids)[:max_seq_length]
-            labels = ([LABEL_PAD_TOKEN_ID] * len(prompt_ids) + completion_ids)[:max_seq_length]
-            return {"input_ids": input_ids, "labels": labels, "attention_mask": [1] * len(input_ids)}
-
-        train_dataset = self._load_text_dataset(
-            self._files.train_source(),
-            self._files.train_target(),
+        data_sets = CausalLMTrainingDataSets(
+            self._files, self._tokenizer, self._prompts, self._languages, self._max_sequence_length
         )
-        eval_dataset = self._load_text_dataset(
-            self._files.validation_source(),
-            self._files.validation_target(),
-        )
-        if train_dataset is not None:
-            train_dataset = train_dataset.map(encode, remove_columns=train_dataset.column_names)
-        if eval_dataset is not None:
-            eval_dataset = eval_dataset.map(encode, remove_columns=eval_dataset.column_names)
+        train_dataset = data_sets.training()
+        eval_dataset = data_sets.validation()
 
         data_collator = DataCollatorForCausalLM(
             tokenizer, pad_to_multiple_of=8 if (training_args.fp16 or training_args.bf16) else None
@@ -594,19 +573,6 @@ class LLMModel(NMTModel):
             bias="none",
             task_type=TaskType.CAUSAL_LM,
         )
-
-    def _load_text_dataset(self, src_path: Path, trg_path: Path) -> Optional[Dataset]:
-        if not src_path.is_file() or not trg_path.is_file():
-            return None
-        corpus = TextFileTextCorpus(src_path).align_rows(TextFileTextCorpus(trg_path))
-        sources: List[str] = []
-        targets: List[str] = []
-        for row in corpus:
-            sources.append(row.source_text)
-            targets.append(row.target_text)
-        if len(sources) == 0:
-            return None
-        return Dataset.from_dict({"src": sources, "trg": targets})
 
     def _create_training_arguments(self) -> TrainingArguments:
         dtype = self._torch_dtype
