@@ -142,12 +142,7 @@ The rest of these instructions are to be carried out in a WSL/Linux terminal as 
       echo "export PATH="/root/.local/bin:$PATH"" >> ~/.bashrc
       ```
 
-9. Configure Poetry to use the active Python
-   ```
-	poetry config virtualenvs.use-poetry-python true
-   ```
-
-10. Install the Python packages for the silnlp repo
+9. Install the Python packages for the silnlp repo
     In a terminal at the silnlp repo, run:
    ```
 	poetry install
