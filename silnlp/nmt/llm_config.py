@@ -60,7 +60,8 @@ from .generation_settings import GenerationSettings
 from .model_name import ModelName
 from .prompt_messages import Language, PromptBuilder
 from .dictionary_writer import DictionaryWriter, NoDictionaryWriter
-from .seq2seq_config import batch_sentences, find_executable_batch_size
+from .batch_size import find_executable_batch_size
+from .seq2seq_config import batch_sentences
 from .tokenizer import NullTokenizer, Tokenizer
 
 LOGGER = logging.getLogger(__name__)

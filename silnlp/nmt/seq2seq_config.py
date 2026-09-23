@@ -7,18 +7,16 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from math import prod
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
+from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Tuple, TypeVar, Union, cast
 
 import datasets.utils.logging as datasets_logging
 import safetensors.torch
 import torch
 import transformers.utils.logging as transformers_logging
-from accelerate.utils.memory import should_reduce_batch_size
 from datasets import Dataset
 from torch import Tensor, nn, optim
 from torch.utils.data import Dataset as TorchDataset
 from torch.utils.data import Sampler
-from tqdm.std import tqdm as std_tqdm
 from transformers import (
     AutoModelForSeq2SeqLM,
     DataCollatorForSeq2Seq,
@@ -49,6 +47,7 @@ from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
 from ..common.utils import NoiseMethod, ReplaceRandomToken, merge_dict
+from .batch_size import find_executable_batch_size, indicates_out_of_memory
 from .checkpoints import CheckpointDirectory, CheckpointType
 from .config import (
     Config,
@@ -741,7 +740,7 @@ class Seq2SeqNMTModel(NMTModel):
                     )
                     index += effective_size
                 except RuntimeError as e:
-                    if not _should_reduce_batch_size(e) or current_batch_size <= 1:
+                    if not indicates_out_of_memory(e) or current_batch_size <= 1:
                         raise
                     current_batch_size //= 2
                     LOGGER.warning(
@@ -1096,57 +1095,3 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
                 trial=trial,
                 ignore_keys_for_eval=ignore_keys_for_eval,
             )
-
-
-def find_executable_batch_size(function: callable = None, starting_batch_size: int = 64, accelerator=None):
-    batch_size = starting_batch_size
-
-    def decorator(*args, **kwargs):
-        nonlocal batch_size
-        gc.collect()
-        torch.cuda.empty_cache()
-        last_exception = None
-
-        while True:
-            if batch_size == 0:
-                raise RuntimeError("No executable batch size found, reached zero.") from last_exception
-            open_bars = set(getattr(std_tqdm, "_instances", []))
-            try:
-                return function(batch_size, *args, **kwargs)
-            except Exception as e:
-                if _should_reduce_batch_size(e):
-                    last_exception = e
-                    _close_orphaned_progress_bars(open_bars)
-                    LOGGER.warning(
-                        f"Reducing batch size from {batch_size} to {batch_size // 2} after exception: {e}. "
-                        f"CUDA memory allocated={torch.cuda.memory_allocated() / 1e9:.2f}GB, "
-                        f"reserved={torch.cuda.memory_reserved() / 1e9:.2f}GB, "
-                        f"max allocated={torch.cuda.max_memory_allocated() / 1e9:.2f}GB"
-                    )
-                    gc.collect()
-                    torch.cuda.empty_cache()
-                    batch_size //= 2
-                    accelerator.gradient_accumulation_steps = accelerator.gradient_accumulation_steps * 2
-                    kwargs["args"].gradient_accumulation_steps = accelerator.gradient_accumulation_steps
-                else:
-                    raise
-
-    return decorator
-
-
-def _close_orphaned_progress_bars(open_bars: Set[Any]) -> None:
-    for bar in list(getattr(std_tqdm, "_instances", [])):
-        if bar not in open_bars:
-            try:
-                bar.close()
-            except Exception:
-                pass
-
-
-def _should_reduce_batch_size(exception: Exception) -> bool:
-    if should_reduce_batch_size(exception):
-        return True
-    # Check for MIG Out of Memory error. Can remove when should_reduce_batch_size works on MIGs.
-    if 'NVML_SUCCESS == r INTERNAL ASSERT FAILED at "../c10/cuda/CUDACachingAllocator.cpp"' in str(exception):
-        return True
-    return False
