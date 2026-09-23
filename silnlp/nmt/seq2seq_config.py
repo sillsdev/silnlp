@@ -9,27 +9,21 @@ from math import prod
 from pathlib import Path
 from typing import Any, Generator, Iterable, List, Optional, TypeVar, Union, cast
 
-import datasets.utils.logging as datasets_logging
 import safetensors.torch
 import torch
-import transformers.utils.logging as transformers_logging
 from transformers import (
     AutoModelForSeq2SeqLM,
-    EarlyStoppingCallback,
-    HfArgumentParser,
     M2M100Tokenizer,
     MBart50Tokenizer,
     MBartTokenizer,
     NllbTokenizer,
     PreTrainedModel,
     PreTrainedTokenizerBase,
-    Seq2SeqTrainingArguments,
     set_seed,
 )
 from transformers.modeling_utils import unwrap_model
 from transformers.tokenization_utils_base import BatchEncoding, TruncationStrategy
 from transformers.trainer import TRAINING_ARGS_NAME
-from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import SAFE_WEIGHTS_NAME
 from transformers.utils.generic import to_py_obj
 from transformers.utils.logging import tqdm
@@ -38,7 +32,7 @@ from ..common.corpus import count_lines
 from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
-from ..common.utils import ReplaceRandomToken, merge_dict
+from ..common.utils import merge_dict
 from .batch_size import indicates_out_of_memory
 from .checkpoints import CheckpointDirectory, CheckpointType
 from .config import (
@@ -46,15 +40,12 @@ from .config import (
     InferenceModelParams,
     NMTModel,
 )
-from .seq2seq_trainer import DataCollatorForSeq2SeqNoising, SilSeq2SeqTrainer
+from .seq2seq_training_run import Seq2SeqTrainingRun
+from .training_data_sets import TokenizedBatchEncoder
 from .training_arguments import TrainingArgumentsMapping
-from .training_data_sets import Seq2SeqTrainingDataSets, TokenizedBatchEncoder
-from .translation_metrics import TranslationMetrics
 from .translation_settings import CheckpointRetention, ModelSettings, TranslationSettings
 from .config_keys import RenamedConfigKeys
 from .dictionary_writer import DictionaryWriter, TermDictionaryWriter
-from .decoder_inputs import DecoderInputs
-from .experiment_files import ExperimentFiles
 from .experiment_languages import ExperimentLanguages
 from .huggingface_tokenizer import HuggingFaceTokenizer, PunctuationNormalizingTokenizer
 from .experiment_settings import EvaluationSettings, TrainerSettings, TrainingSettings
@@ -337,31 +328,37 @@ class Seq2SeqConfig(Config):
             self.create_languages(),
             mixed_precision,
         )
+        model_loader = PretrainedModelLoader(
+            provider,
+            self.model,
+            self.model_name,
+            self._pretrained_tokenizer,
+            self._tokenizer_settings,
+            ModelSettings(self.params),
+            CheckpointDirectory(self.model_dir),
+            num_devices,
+        )
         return Seq2SeqNMTModel(
             CheckpointDirectory(self.model_dir),
             self.infer.get("num_drafts", 1),
             self.create_languages(),
-            self.files,
             self._pretrained_tokenizer,
-            PretrainedModelLoader(
-                provider,
-                self.model,
-                self.model_name,
-                self._pretrained_tokenizer,
-                self._tokenizer_settings,
-                ModelSettings(self.params),
-                CheckpointDirectory(self.model_dir),
-                num_devices,
-            ),
+            model_loader,
             TranslationSettings(self.infer, self.params),
-            EvaluationSettings(self.eval),
-            TrainerSettings(self.train),
-            CheckpointRetention(self.train),
-            TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING, self.root),
+            Seq2SeqTrainingRun(
+                model_loader,
+                self._pretrained_tokenizer,
+                self.files,
+                self.create_languages(),
+                EvaluationSettings(self.eval),
+                TrainerSettings(self.train),
+                CheckpointRetention(self.train),
+                TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING, self.root),
+                self.model_name.is_t5(),
+                mixed_precision,
+                clearml_queue,
+            ),
             self.data["seed"],
-            self.model_name.is_t5(),
-            mixed_precision,
-            clearml_queue,
         )
 
     def create_tokenizer(self) -> Tokenizer:
@@ -464,109 +461,26 @@ class Seq2SeqNMTModel(NMTModel):
         checkpoints: CheckpointDirectory,
         num_drafts: int,
         languages: ExperimentLanguages,
-        files: ExperimentFiles,
         pretrained_tokenizer: PretrainedTokenizer,
         model_loader: PretrainedModelLoader,
         translation: TranslationSettings,
-        evaluation: EvaluationSettings,
-        trainer_settings: TrainerSettings,
-        retention: CheckpointRetention,
-        training_arguments: TrainingArgumentsMapping,
+        training_run: Seq2SeqTrainingRun,
         seed: int,
-        is_t5: bool,
-        mixed_precision: bool,
-        clearml_queue: Optional[str] = None,
     ) -> None:
         super().__init__(checkpoints, num_drafts)
         self._languages = languages
-        self._files = files
         self._pretrained_tokenizer = pretrained_tokenizer
         self._model_loader = model_loader
         self._translation = translation
-        self._evaluation = evaluation
-        self._trainer_settings = trainer_settings
-        self._retention = retention
-        self._training_arguments = training_arguments
-        self._mixed_precision = mixed_precision
-        self._is_t5 = is_t5
-        self._clearml_queue = clearml_queue
+        self._training_run = training_run
         set_seed(seed)
 
     def train(self) -> None:
-        training_args = self._create_training_arguments()
-
-        if training_args.should_log:
-            # The default of training_args.log_level is passive, so we set log level at info here to have that default.
-            transformers_logging.set_verbosity_info()
-
-        log_level = training_args.get_process_log_level()
-        datasets_logging.set_verbosity(log_level)
-        transformers_logging.set_verbosity(log_level)
-        transformers_logging.enable_default_handler()
-        transformers_logging.enable_explicit_format()
-
-        model, tokenizer = self._model_loader.for_training(
-            training_args,
-            self._languages.validation_source() or self._languages.test_source(),
-            self._languages.validation_target() or self._languages.test_target(),
-        )
-
-        data_sets = Seq2SeqTrainingDataSets(self._files, self._pretrained_tokenizer)
-        train_dataset = data_sets.training(training_args)
-        eval_dataset = data_sets.validation(training_args)
-
-        src_noise = self._trainer_settings.source_noise()
-        for noise_method in src_noise:
-            if isinstance(noise_method, ReplaceRandomToken):
-                noise_method.filler_token = tokenizer.convert_tokens_to_ids(noise_method.filler_token)
-
-        data_collator = DataCollatorForSeq2SeqNoising(
-            tokenizer,
-            DecoderInputs(model),
-            label_pad_token_id=-100,
-            pad_to_multiple_of=8 if training_args.fp16 or training_args.bf16 else None,
-            src_noise=src_noise,
-        )
-
-        metrics = TranslationMetrics(self._evaluation, self._pretrained_tokenizer)
-
-        trainer = SilSeq2SeqTrainer(
-            model,
-            training_args,
-            data_collator,
-            train_dataset,
-            eval_dataset,
-            processing_class=tokenizer,
-            compute_metrics=None if metrics.is_produced_by_the_trainer() else metrics.compute,
-            sequential_sampling=self._trainer_settings.samples_sequentially(),
-            auto_grad_acc=self._trainer_settings.accumulates_gradient_automatically(),
-        )
-        early_stopping: Optional[dict] = self._evaluation.early_stopping()
-        if early_stopping:
-            trainer.add_callback(
-                EarlyStoppingCallback(
-                    early_stopping_patience=early_stopping["steps"],
-                    early_stopping_threshold=early_stopping["min_improvement"],
-                )
-            )
-        last_checkpoint = get_last_checkpoint(training_args.output_dir)
-        train_result = trainer.train(resume_from_checkpoint=last_checkpoint)
-
-        train_metrics = train_result.metrics
-        train_metrics["train_samples"] = len(train_dataset) if train_dataset is not None else 0
-
-        trainer.log_metrics("train", train_metrics)
-        trainer.save_metrics("train", train_metrics)
-        trainer.save_state()
-
-        written_checkpoints = CheckpointDirectory(Path(training_args.output_dir))
-        if not self._retention.keeps_optimizer_state():
-            written_checkpoints.discard_optimizer_state()
-        if not self._retention.keeps_tokenizers():
-            written_checkpoints.discard_tokenizers()
+        self._training_run.train()
+        self._training_run.save()
 
     def save_effective_config(self, path: Path) -> None:
-        self._training_arguments.write_effective_config(path, self._create_training_arguments())
+        self._training_run.write_effective_config(path)
 
     def translate_test_files(
         self,
@@ -698,18 +612,6 @@ class Seq2SeqNMTModel(NMTModel):
             unit="ex",
         ):
             yield model_output_group.convert_to_sentence_translation_group(tokenizer)
-
-    def _create_training_arguments(self) -> Seq2SeqTrainingArguments:
-        args = self._training_arguments.collect(
-            # For context on floating point precision, see https://github.com/sillsdev/silnlp/issues/647
-            {
-                "fp16": self._mixed_precision and not self._is_t5,
-                "bf16": self._mixed_precision and self._is_t5,
-                "tf32": self._mixed_precision,
-            },
-            self._clearml_queue,
-        )
-        return HfArgumentParser(Seq2SeqTrainingArguments).parse_dict(args)[0]
 
     def _translate_sentences(
         self,
