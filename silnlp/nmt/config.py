@@ -154,9 +154,12 @@ class Config(ABC):
     def create_scoring_settings(self) -> ScoringSettings:
         return ScoringSettings(self.data)
 
+    @property
+    def seed(self) -> int:
+        return self.data["seed"]
+
     def set_seed(self) -> None:
-        seed = self.data["seed"]
-        set_seed(seed)
+        set_seed(self.seed)
 
     @abstractmethod
     def create_model(
