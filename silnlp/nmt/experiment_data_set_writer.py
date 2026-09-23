@@ -35,7 +35,7 @@ class TermsSettings:
         return self.writes_dictionary() or self.writes_training_sentences()
 
 
-class ScriptureDataSetWriters:
+class ScriptureDataSetWriterFactory:
     """Builds the writer for each scripture corpus pair of an experiment."""
 
     def __init__(
@@ -72,14 +72,14 @@ class ScriptureDataSetWriters:
         )
 
 
-class ExperimentPreprocessor:
+class ExperimentDataSetWriter:
     """Writes an experiment's corpora into the data sets a training run reads."""
 
     def __init__(
         self,
         corpus_pairs: List[CorpusPair],
         files: ExperimentFiles,
-        scripture_writers: ScriptureDataSetWriters,
+        scripture_writer_factory: ScriptureDataSetWriterFactory,
         basic_writer: BasicDataSetWriter,
         terms_writer: TermsWriter,
         dictionary_writer: DictionaryWriter,
@@ -88,7 +88,7 @@ class ExperimentPreprocessor:
     ) -> None:
         self._corpus_pairs = corpus_pairs
         self._files = files
-        self._scripture_writers = scripture_writers
+        self._scripture_writer_factory = scripture_writer_factory
         self._basic_writer = basic_writer
         self._terms_writer = terms_writer
         self._dictionary_writer = dictionary_writer
@@ -103,7 +103,7 @@ class ExperimentPreprocessor:
         trg_terms_files: TermsFiles = []
         for pair in self._corpus_pairs:
             if pair.is_scripture:
-                train_count += self._scripture_writers.writer_for(pair).write()
+                train_count += self._scripture_writer_factory.writer_for(pair).write()
             else:
                 train_count += self._basic_writer.write(pair)
 

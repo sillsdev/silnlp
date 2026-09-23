@@ -15,14 +15,14 @@ from .checkpoints import Checkpoint, CheckpointDirectory, CheckpointType
 from .corpora import parse_corpus_pairs
 from .corpus_inventory import CorpusInventory
 from .dictionary_writer import DictionaryWriter
+from .experiment_data_set_writer import ExperimentDataSetWriter, ScriptureDataSetWriterFactory, TermsSettings
 from .experiment_files import ExperimentFiles
 from .experiment_settings import EvaluationSettings
-from .vocabulary_builder import VocabularyBuilder
-from .experiment_preprocessor import ExperimentPreprocessor, ScriptureDataSetWriters, TermsSettings
 from .terms import GlossLanguage, TermCategories
 from .terms_data_set import TermsDataSet
 from .terms_writer import TermsWriter
 from .tokenizer import Tokenizer
+from .vocabulary_builder import VocabularyBuilder
 
 LOGGER = logging.getLogger((__package__ or "") + ".config")
 
@@ -169,12 +169,12 @@ class Config(ABC):
     def create_tokenizer(self) -> Tokenizer:
         ...
 
-    def create_data_set_writer(self, force_align: bool) -> ExperimentPreprocessor:
+    def create_data_set_writer(self, force_align: bool) -> ExperimentDataSetWriter:
         tokenizer = self.create_tokenizer()
-        return ExperimentPreprocessor(
+        return ExperimentDataSetWriter(
             self.corpus_pairs,
             self.files,
-            ScriptureDataSetWriters(
+            ScriptureDataSetWriterFactory(
                 self.files,
                 self.inventory,
                 tokenizer,
