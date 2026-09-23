@@ -725,6 +725,11 @@ class Seq2SeqNMTModel(NMTModel):
 
 
 class SilTranslator:
+    """Duplicates sil-machine's HuggingFaceNmtEngine, which cannot replace it until that engine takes
+    the tokenizer it is given rather than loading one from the model path: checkpoints hold no
+    tokenizer when delete_checkpoint_tokenizer is set, which is the default. Its output_attentions
+    default of True, which forces the slower eager attention, wants changing there too."""
+
     def __init__(
         self,
         model: PreTrainedModel,
