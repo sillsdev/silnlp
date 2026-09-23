@@ -21,19 +21,15 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple, Union
+from typing import Any, Generator, Iterable, List, Optional, Tuple, Union
 
 import torch
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
     AutoModelForImageTextToText,
-    EarlyStoppingCallback,
-    HfArgumentParser,
     PreTrainedModel,
     PreTrainedTokenizerBase,
-    Trainer,
-    TrainingArguments,
     set_seed,
 )
 
@@ -51,6 +47,8 @@ from .training_arguments import TrainingArgumentsMapping
 from .training_data_sets import CausalLMTrainingDataSets
 from .vocabulary_builder import NoVocabularyBuilder, VocabularyBuilder
 from .causal_lm_tokenizer import CausalLMTokenizer
+from .causal_lm_training_run import CausalLMTrainingRun
+from .finetuning import Finetuning
 from .config_keys import DeprecatedAdapterKey, RenamedConfigKeys
 from .experiment_files import ExperimentFiles
 from .experiment_languages import ExperimentLanguages
@@ -60,7 +58,6 @@ from .generation_settings import GenerationSettings
 from .model_name import ModelName
 from .prompt_messages import Language, PromptBuilder
 from .dictionary_writer import DictionaryWriter, NoDictionaryWriter
-from .batch_size import find_executable_batch_size
 from .seq2seq_config import batch_sentences
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -109,8 +106,6 @@ _TRAINING_ARGS_CONFIG_MAPPING = {
         "weight_decay",
     },
 }
-
-LABEL_PAD_TOKEN_ID = -100
 
 
 def is_image_text_to_text_model(model_name_or_path: str, trust_remote_code: bool = False) -> bool:
@@ -240,28 +235,36 @@ class LLMConfig(Config):
     ) -> NMTModel:
         if pretrained_model_provider_factory is None:
             pretrained_model_provider_factory = FileCausalLMProviderFactory()
+        trainer_settings = TrainerSettings(self.train)
+        provider = pretrained_model_provider_factory.create(
+            self.model, self.params, self._finetune_method(), trainer_settings, mixed_precision
+        )
+        languages = self.create_languages()
+        prompts = self.create_prompt_builder()
         return LLMModel(
             CheckpointDirectory(self.model_dir),
             self.infer.get("num_drafts", 1),
-            self.create_languages(),
+            languages,
             self.files,
             self._hf_tokenizer,
-            self.create_prompt_builder(),
-            self._finetune_method(),
+            prompts,
             GenerationSettings(self.infer),
-            EvaluationSettings(self.eval),
-            TrainerSettings(self.train),
-            self.adapter,
-            self.model,
-            self.params,
-            self.params["max_seq_length"],
-            self.params["torch_dtype"],
+            CausalLMTrainingRun(
+                provider,
+                self._hf_tokenizer,
+                CausalLMTrainingDataSets(
+                    self.files, self._hf_tokenizer, prompts, languages, self.params["max_seq_length"]
+                ),
+                Finetuning(self._finetune_method(), self.adapter, trainer_settings),
+                EvaluationSettings(self.eval),
+                trainer_settings,
+                TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING, self.root),
+                self.params["torch_dtype"],
+                mixed_precision,
+                clearml_queue,
+            ),
+            provider,
             self.data["seed"],
-            TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING, self.root),
-            mixed_precision,
-            num_devices,
-            clearml_queue,
-            pretrained_model_provider_factory,
         )
 
     def create_tokenizer(self) -> Tokenizer:
@@ -391,65 +394,6 @@ class FileCausalLMProviderFactory(CausalLMProviderFactory):
         return CausalLMProvider(model, params, finetuning, trainer_settings, mixed_precision)
 
 
-@dataclass
-class DataCollatorForCausalLM:
-    tokenizer: PreTrainedTokenizerBase
-    label_pad_token_id: int = LABEL_PAD_TOKEN_ID
-    pad_to_multiple_of: Optional[int] = None
-
-    def __call__(self, features: List[Dict[str, List[int]]]) -> Dict[str, torch.Tensor]:
-        max_length = max(len(f["input_ids"]) for f in features)
-        if self.pad_to_multiple_of is not None:
-            max_length = (
-                (max_length + self.pad_to_multiple_of - 1) // self.pad_to_multiple_of
-            ) * self.pad_to_multiple_of
-
-        pad_token_id = self.tokenizer.pad_token_id
-        input_ids: List[List[int]] = []
-        attention_mask: List[List[int]] = []
-        labels: List[List[int]] = []
-        for feature in features:
-            ids = feature["input_ids"]
-            mask = feature.get("attention_mask", [1] * len(ids))
-            label = feature["labels"]
-            pad_len = max_length - len(ids)
-            # Right padding for training.
-            input_ids.append(ids + [pad_token_id] * pad_len)
-            attention_mask.append(mask + [0] * pad_len)
-            labels.append(label + [self.label_pad_token_id] * pad_len)
-        return {
-            "input_ids": torch.tensor(input_ids, dtype=torch.long),
-            "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
-            "labels": torch.tensor(labels, dtype=torch.long),
-        }
-
-
-class SilCausalTrainer(Trainer):
-    def __init__(self, *args, auto_grad_acc: bool = False, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._auto_grad_acc = auto_grad_acc
-
-    def _inner_training_loop(
-        self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
-    ):
-        if self._auto_grad_acc and args is not None:
-            args.auto_find_batch_size = True
-            inner_training_loop = find_executable_batch_size(super()._inner_training_loop, batch_size, self.accelerator)
-            return inner_training_loop(
-                args=args,
-                resume_from_checkpoint=resume_from_checkpoint,
-                trial=trial,
-                ignore_keys_for_eval=ignore_keys_for_eval,
-            )
-        return super()._inner_training_loop(
-            batch_size=batch_size,
-            args=args,
-            resume_from_checkpoint=resume_from_checkpoint,
-            trial=trial,
-            ignore_keys_for_eval=ignore_keys_for_eval,
-        )
-
-
 class LLMModel(NMTModel):
     def __init__(
         self,
@@ -459,137 +403,27 @@ class LLMModel(NMTModel):
         files: ExperimentFiles,
         tokenizer: CausalLMTokenizer,
         prompts: PromptBuilder,
-        finetuning: FinetuneMethod,
         generation: GenerationSettings,
-        evaluation: EvaluationSettings,
-        trainer_settings: TrainerSettings,
-        adapter: dict,
-        model: str,
-        params: dict,
-        max_sequence_length: int,
-        torch_dtype: str,
+        training_run: CausalLMTrainingRun,
+        provider: CausalLMProvider,
         seed: int,
-        training_arguments: TrainingArgumentsMapping,
-        mixed_precision: bool,
-        num_devices: int,
-        clearml_queue: Optional[str] = None,
-        pretrained_model_provider_factory: CausalLMProviderFactory = FileCausalLMProviderFactory(),
     ) -> None:
         super().__init__(checkpoints, num_drafts)
         self._languages = languages
         self._files = files
         self._tokenizer = tokenizer
         self._prompts = prompts
-        self._finetuning = finetuning
         self._generation = generation
-        self._evaluation = evaluation
-        self._trainer_settings = trainer_settings
-        self._adapter = adapter
-        self._max_sequence_length = max_sequence_length
-        self._torch_dtype = torch_dtype
-        self._training_arguments = training_arguments
-        self._mixed_precision = mixed_precision
-        self._num_devices = num_devices
-        self._clearml_queue = clearml_queue
+        self._training_run = training_run
+        self._provider = provider
         set_seed(seed)
-        self._provider = pretrained_model_provider_factory.create(
-            model, params, finetuning, trainer_settings, mixed_precision
-        )
-
-    # --- training -----------------------------------------------------------------
 
     def train(self) -> None:
-        training_args = self._create_training_arguments()
-        tokenizer = self._tokenizer.load()
-        tokenizer.padding_side = "right"
-
-        model = self._provider.create_model_for_training()
-        model = self._apply_finetuning_config(model)
-
-        data_sets = CausalLMTrainingDataSets(
-            self._files, self._tokenizer, self._prompts, self._languages, self._max_sequence_length
-        )
-        train_dataset = data_sets.training()
-        eval_dataset = data_sets.validation()
-
-        data_collator = DataCollatorForCausalLM(
-            tokenizer, pad_to_multiple_of=8 if (training_args.fp16 or training_args.bf16) else None
-        )
-
-        trainer = SilCausalTrainer(
-            model=model,
-            args=training_args,
-            data_collator=data_collator,
-            train_dataset=train_dataset,
-            eval_dataset=eval_dataset,
-            processing_class=tokenizer,
-            auto_grad_acc=self._trainer_settings.accumulates_gradient_automatically(),
-        )
-        early_stopping: Optional[dict] = self._evaluation.early_stopping()
-        if early_stopping:
-            trainer.add_callback(
-                EarlyStoppingCallback(
-                    early_stopping_patience=early_stopping["steps"],
-                    early_stopping_threshold=early_stopping["min_improvement"],
-                )
-            )
-
-        last_checkpoint = CheckpointDirectory(Path(training_args.output_dir)).latest()
-        train_result = trainer.train(resume_from_checkpoint=str(last_checkpoint.path) if last_checkpoint else None)
-
-        metrics = train_result.metrics
-        metrics["train_samples"] = len(train_dataset) if train_dataset is not None else 0
-        trainer.log_metrics("train", metrics)
-        trainer.save_metrics("train", metrics)
-        trainer.save_state()
-
-    def _apply_finetuning_config(self, model: PreTrainedModel) -> PreTrainedModel:
-        if self._finetuning.is_full():
-            return model
-
-        from peft import get_peft_model, prepare_model_for_kbit_training
-
-        gradient_checkpointing = self._trainer_settings.checkpoints_gradients()
-        if self._finetuning.uses_quantization():
-            model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=gradient_checkpointing)
-        elif gradient_checkpointing:
-            model.enable_input_require_grads()
-
-        peft_config = self._build_adapter_config(self._adapter, use_dora=self._finetuning.uses_dora())
-        model = get_peft_model(model, peft_config)
-        model.print_trainable_parameters()
-        return model
-
-    @staticmethod
-    def _build_adapter_config(adapter: dict, use_dora: bool) -> Any:
-        from peft import LoraConfig, TaskType
-
-        return LoraConfig(
-            r=adapter["rank"],
-            lora_alpha=adapter["alpha"],
-            lora_dropout=adapter["dropout"],
-            target_modules=adapter["target_modules"],
-            modules_to_save=adapter.get("modules_to_save"),
-            use_dora=use_dora,
-            bias="none",
-            task_type=TaskType.CAUSAL_LM,
-        )
-
-    def _create_training_arguments(self) -> TrainingArguments:
-        dtype = self._torch_dtype
-        args = self._training_arguments.collect(
-            {
-                "bf16": self._mixed_precision and dtype == "bfloat16",
-                "fp16": self._mixed_precision and dtype == "float16",
-            },
-            self._clearml_queue,
-        )
-        return HfArgumentParser(TrainingArguments).parse_dict(args)[0]
+        self._training_run.train()
+        self._training_run.save()
 
     def save_effective_config(self, path: Path) -> None:
-        self._training_arguments.write_effective_config(path, self._create_training_arguments())
-
-    # --- inference ----------------------------------------------------------------
+        self._training_run.write_effective_config(path)
 
     def _create_inference_model(self, ckpt: Union[CheckpointType, str, int]) -> PreTrainedModel:
         if self.has_been_trained():

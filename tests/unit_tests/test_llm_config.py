@@ -5,7 +5,10 @@ from jinja2.exceptions import UndefinedError
 
 from silnlp.nmt.config_utils import ConfiguredModelType
 from silnlp.nmt.generation_settings import GenerationSettings
-from silnlp.nmt.llm_config import DataCollatorForCausalLM, LLMModel
+from silnlp.nmt.causal_lm_trainer import DataCollatorForCausalLM
+from silnlp.nmt.experiment_settings import TrainerSettings
+from silnlp.nmt.finetune_method import FinetuneMethod
+from silnlp.nmt.finetuning import Finetuning
 from silnlp.nmt.model_name import ModelName
 from silnlp.nmt.prompt_messages import (
     Language,
@@ -187,33 +190,42 @@ def test_apply_prompt_template_translate_gemma_falls_back_for_unrecognized_langu
     assert token_ids == [ord(c) for c in text]
 
 
-def test_build_adapter_config_plain_lora():
-    peft_config = LLMModel._build_adapter_config(
-        {"rank": 16, "alpha": 32, "dropout": 0.05, "target_modules": "all-linear"}, use_dora=False
-    )
-    assert peft_config.r == 16
-    assert peft_config.lora_alpha == 32
-    assert peft_config.modules_to_save is None
-    assert peft_config.use_dora is False
+def finetuning_for(adapter: dict, method: str = "lora") -> Finetuning:
+    return Finetuning(FinetuneMethod(method), adapter, TrainerSettings({"gradient_checkpointing": False}))
 
 
-def test_build_adapter_config_passes_through_modules_to_save():
-    peft_config = LLMModel._build_adapter_config(
+def test_the_adapter_is_built_with_the_configured_rank_and_scaling():
+    config = finetuning_for({"rank": 16, "alpha": 32, "dropout": 0.05, "target_modules": "all-linear"}).adapter_config()
+
+    assert config.r == 16
+    assert config.lora_alpha == 32
+    assert config.modules_to_save is None
+    assert config.use_dora is False
+
+
+def test_the_layers_to_train_in_full_are_passed_through():
+    config = finetuning_for(
         {
             "rank": 64,
             "alpha": 256,
             "dropout": 0.05,
             "target_modules": "all-linear",
             "modules_to_save": ["embed_tokens", "lm_head"],
-        },
-        use_dora=False,
-    )
-    assert peft_config.r == 64
-    assert peft_config.lora_alpha == 256
-    assert peft_config.modules_to_save == ["embed_tokens", "lm_head"]
+        }
+    ).adapter_config()
+
+    assert config.r == 64
+    assert config.lora_alpha == 256
+    assert config.modules_to_save == ["embed_tokens", "lm_head"]
 
 
-def test_build_adapter_config_dora():
+def test_a_dora_method_builds_a_dora_adapter():
     adapter = {"rank": 64, "alpha": 256, "dropout": 0.05, "target_modules": "all-linear"}
-    peft_config = LLMModel._build_adapter_config(adapter, use_dora=True)
-    assert peft_config.use_dora is True
+
+    assert finetuning_for(adapter, method="dora").adapter_config().use_dora is True
+
+
+def test_a_model_finetuned_in_full_is_left_unwrapped():
+    model = object()
+
+    assert finetuning_for({}, method="full").applied_to(model) is model
