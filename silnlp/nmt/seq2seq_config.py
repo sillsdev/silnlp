@@ -15,7 +15,6 @@ import torch
 import transformers.utils.logging as transformers_logging
 from accelerate.utils.memory import should_reduce_batch_size
 from datasets import Dataset
-from machine.scripture import VerseRef
 from torch import Tensor, nn, optim
 from torch.utils.data import Dataset as TorchDataset
 from torch.utils.data import Sampler
@@ -351,7 +350,6 @@ class Seq2SeqConfig(Config):
             self.infer.get("num_drafts", 1),
             self.create_languages(),
             self.files,
-            self.model_name,
             self._pretrained_tokenizer,
             PretrainedModelLoader(
                 provider,
@@ -364,16 +362,13 @@ class Seq2SeqConfig(Config):
                 num_devices,
             ),
             TranslationSettings(self.infer, self.params),
-            ModelSettings(self.params),
             EvaluationSettings(self.eval),
             TrainerSettings(self.train),
-            self._tokenizer_settings,
-            self.data["seed"],
-            self.model,
             CheckpointRetention(self.train),
             TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING, self.root),
+            self.data["seed"],
+            self.model_name.is_t5(),
             mixed_precision,
-            num_devices,
             clearml_queue,
         )
 
@@ -478,42 +473,32 @@ class Seq2SeqNMTModel(NMTModel):
         num_drafts: int,
         languages: ExperimentLanguages,
         files: ExperimentFiles,
-        model_name: ModelName,
         pretrained_tokenizer: PretrainedTokenizer,
         model_loader: PretrainedModelLoader,
         translation: TranslationSettings,
-        model_settings: ModelSettings,
         evaluation: EvaluationSettings,
         trainer_settings: TrainerSettings,
-        tokenizer_settings: TokenizerSettings,
-        seed: int,
-        model: str,
         retention: CheckpointRetention,
         training_arguments: TrainingArgumentsMapping,
+        seed: int,
+        is_t5: bool,
         mixed_precision: bool,
-        num_devices: int,
         clearml_queue: Optional[str] = None,
     ) -> None:
         super().__init__(checkpoints, num_drafts)
         self._languages = languages
         self._files = files
-        self._model_name = model_name
         self._pretrained_tokenizer = pretrained_tokenizer
         self._model_loader = model_loader
         self._translation = translation
-        self._model_settings = model_settings
         self._evaluation = evaluation
         self._trainer_settings = trainer_settings
-        self._tokenizer_settings = tokenizer_settings
-        self._model = model
         self._retention = retention
         self._training_arguments = training_arguments
         self._mixed_precision = mixed_precision
-        set_seed(seed)
-        self._dictionary: Optional[Dict[VerseRef, Set[str]]] = None
-        self._is_t5 = self._model_name.is_t5()
-        self._num_devices = num_devices
+        self._is_t5 = is_t5
         self._clearml_queue = clearml_queue
+        set_seed(seed)
 
     def train(self) -> None:
         training_args = self._create_training_arguments()
