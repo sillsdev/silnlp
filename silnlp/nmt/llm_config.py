@@ -374,7 +374,7 @@ class LLMConfig(Config, Generic[TPromptMessages]):
 
         super().__init__(exp_dir, config, environment)
 
-        if len(self.inventory.source_isos()) > 1 or len(self.inventory.target_isos()) > 1:
+        if len(self.corpus_inventory.source_isos()) > 1 or len(self.corpus_inventory.target_isos()) > 1:
             raise RuntimeError(
                 f"{type(self).__name__} experiments only support a single source language and a single "
                 "target language."
@@ -476,10 +476,10 @@ class LLMConfig(Config, Generic[TPromptMessages]):
         return Language(iso=iso, name=self.lang_name(iso))
 
     def get_train_src_iso(self) -> str:
-        return self.inventory.default_test_source_iso() or self._any_iso(self.inventory.source_isos())
+        return self.corpus_inventory.default_test_source_iso() or self._any_iso(self.corpus_inventory.source_isos())
 
     def get_train_trg_iso(self) -> str:
-        return self.inventory.default_test_target_iso() or self._any_iso(self.inventory.target_isos())
+        return self.corpus_inventory.default_test_target_iso() or self._any_iso(self.corpus_inventory.target_isos())
 
     def _any_iso(self, isos: Set[str]) -> str:
         return next(iter(isos)) if len(isos) > 0 else ""

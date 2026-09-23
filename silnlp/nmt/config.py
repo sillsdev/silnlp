@@ -122,12 +122,12 @@ class Config(ABC):
 
         data_config: dict = config["data"]
         self.corpus_pairs = parse_corpus_pairs(data_config.get("corpus_pairs", []), self._environment)
-        self.inventory = CorpusInventory(
+        self.corpus_inventory = CorpusInventory(
             self.corpus_pairs,
             include_glosses=data_config["terms"]["include_glosses"],
             environment=self._environment,
         )
-        self.files = ExperimentFiles(exp_dir, self.inventory, multi_ref_eval=config["eval"]["multi_ref_eval"])
+        self.files = ExperimentFiles(exp_dir, self.corpus_inventory, multi_ref_eval=config["eval"]["multi_ref_eval"])
 
     @property
     def model(self) -> str:
@@ -166,7 +166,7 @@ class Config(ABC):
         return "parent" in self.data
 
     def _disable_eval_if_no_val_split(self) -> None:
-        EvaluationSettings(self.root["eval"]).disable_unless(self.inventory.has_validation_split())
+        EvaluationSettings(self.root["eval"]).disable_unless(self.corpus_inventory.has_validation_split())
 
     def set_seed(self) -> None:
         seed = self.data["seed"]
@@ -188,7 +188,7 @@ class Config(ABC):
             self.files,
             ScriptureDataSetWriterFactory(
                 self.files,
-                self.inventory,
+                self.corpus_inventory,
                 tokenizer,
                 alignment_scores,
                 self._environment,
@@ -196,7 +196,7 @@ class Config(ABC):
                 mirror=self.mirror,
                 multi_ref_eval=self.root["eval"]["multi_ref_eval"],
             ),
-            BasicDataSetWriter(self.files, self.inventory, tokenizer, alignment_scores, mirror=self.mirror),
+            BasicDataSetWriter(self.files, self.corpus_inventory, tokenizer, alignment_scores, mirror=self.mirror),
             TermsWriter(
                 TermsDataSet(self.files, tokenizer, mirror=self.mirror),
                 self._term_categories(),
@@ -219,7 +219,9 @@ class Config(ABC):
 
     def _gloss_language(self) -> GlossLanguage:
         return GlossLanguage(
-            self.data["terms"]["include_glosses"], self.inventory.source_isos(), self.inventory.target_isos()
+            self.data["terms"]["include_glosses"],
+            self.corpus_inventory.source_isos(),
+            self.corpus_inventory.target_isos(),
         )
 
     @abstractmethod

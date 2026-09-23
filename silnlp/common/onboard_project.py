@@ -193,7 +193,7 @@ class OnboardingProject:
         config.set_seed()
         try:
             Preprocessor(
-                config.inventory,
+                config.corpus_inventory,
                 config.create_vocabulary_builder(),
                 config.create_data_set_writer(force_align=True),
             ).run(stats=True)
@@ -627,9 +627,9 @@ class OnboardingReportCreator:
         self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books to Translate"] = ";".join(
             self.planned_books
         )
-        self.report_df.loc[
-            self.report_df["Project Type"] == ProjectType.MAIN.value, "Books Missing/Incomplete"
-        ] = ";".join([book for book in self.completed_books if book not in self.main_project.report.completed_books])
+        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books Missing/Incomplete"] = (
+            ";".join([book for book in self.completed_books if book not in self.main_project.report.completed_books])
+        )
         self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Extra Books"] = ";".join(
             [book for book in self.main_project.report.completed_books if book not in self.completed_books]
         )
@@ -647,9 +647,9 @@ class OnboardingReportCreator:
             self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books to Translate"] = (
                 "yes" if len(books_missing) == 0 else "no"
             )
-            self.report_df.loc[
-                self.report_df["Name on Bucket"] == project.project_name, "Books Missing/Incomplete"
-            ] = ";".join(books_missing)
+            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books Missing/Incomplete"] = (
+                ";".join(books_missing)
+            )
             self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Extra Books"] = ";".join(
                 extra_books
             )

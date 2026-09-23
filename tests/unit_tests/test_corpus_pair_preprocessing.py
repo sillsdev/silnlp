@@ -53,7 +53,7 @@ class PreprocessingExperiment:
         config = Seq2SeqConfig(self._exp_dir, {"data": data, "eval": eval_settings or {}}, environment)
         config.set_seed()
         Preprocessor(
-            config.inventory, config.create_vocabulary_builder(), config.create_data_set_writer(force_align)
+            config.corpus_inventory, config.create_vocabulary_builder(), config.create_data_set_writer(force_align)
         ).run(stats=False)
 
     def read_sources(self, split: str) -> List[str]:
