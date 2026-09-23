@@ -37,29 +37,29 @@ from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
 from ..common.utils import merge_dict
+from .causal_lm_tokenizer import CausalLMTokenizer
+from .causal_lm_training_run import CausalLMTrainingRun
 from .checkpoints import CheckpointDirectory, CheckpointType
 from .config import (
     Config,
     InferenceModelParams,
     NMTModel,
 )
-from .training_arguments import TrainingArgumentsMapping
-from .training_data_sets import CausalLMTrainingDataSets
-from .vocabulary_builder import NoVocabularyBuilder, VocabularyBuilder
-from .causal_lm_tokenizer import CausalLMTokenizer
-from .causal_lm_training_run import CausalLMTrainingRun
-from .finetuning import Finetuning
 from .config_keys import DeprecatedAdapterKey, RenamedConfigKeys
+from .dictionary_writer import DictionaryWriter, NoDictionaryWriter
 from .experiment_files import ExperimentFiles
 from .experiment_languages import ExperimentLanguages
 from .experiment_settings import EvaluationSettings, TrainerSettings
 from .finetune_method import FinetuneMethod
+from .finetuning import Finetuning
 from .generation_settings import GenerationSettings
 from .model_name import ModelName
 from .prompt_messages import Language, PromptBuilder
-from .dictionary_writer import DictionaryWriter, NoDictionaryWriter
 from .seq2seq_config import batch_sentences
 from .tokenizer import NullTokenizer, Tokenizer
+from .training_arguments import TrainingArgumentsMapping
+from .training_data_sets import CausalLMTrainingDataSets
+from .vocabulary_builder import NoVocabularyBuilder, VocabularyBuilder
 
 LOGGER = logging.getLogger(__name__)
 
@@ -202,7 +202,7 @@ class LLMConfig(Config):
         super().__init__(exp_dir, config, environment)
         self._hf_tokenizer = CausalLMTokenizer(self.model, self.params["trust_remote_code"])
 
-        if len(self.inventory.source_isos()) > 1 or len(self.inventory.target_isos()) > 1:
+        if len(self.corpus_inventory.source_isos()) > 1 or len(self.corpus_inventory.target_isos()) > 1:
             raise RuntimeError("LLM experiments only support a single source language and a single target language.")
 
         self._disable_eval_if_no_val_split()
@@ -276,7 +276,7 @@ class LLMConfig(Config):
         return self._hf_tokenizer.load()
 
     def create_languages(self) -> ExperimentLanguages:
-        return ExperimentLanguages(self.data["lang_codes"], self.inventory)
+        return ExperimentLanguages(self.data["lang_codes"], self.corpus_inventory)
 
     def create_prompt_builder(self) -> PromptBuilder:
         return PromptBuilder(ModelName(self.model), self.params["prompt"])

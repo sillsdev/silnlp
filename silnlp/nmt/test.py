@@ -16,8 +16,8 @@ from ..common.environment import SilNlpEnv
 from ..common.linear_regression import perform_enhanced_linear_regression
 from ..common.translator import CONFIDENCE_SUFFIX
 from ..common.utils import get_git_revision_hash
-from .clearml_connection import TAGS_LIST, SILClearML
 from .checkpoints import CheckpointType
+from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config, NMTModel
 from .config_utils import load_config
 from .tokenizer import Tokenizer
@@ -514,10 +514,12 @@ def load_test_data(
             if len(ref_projects) == 0:
                 # no refs specified, so randomly select verses from all available train refs to build one ref
                 select_rand_ref_line = True
-                ref_file_paths = [p for p in ref_file_paths if config.inventory.is_train_reference(p)]
+                ref_file_paths = [p for p in ref_file_paths if config.corpus_inventory.is_train_reference(p)]
             else:
                 # use specified refs only
-                ref_file_paths = [p for p in ref_file_paths if config.inventory.references_one_of(ref_projects, p)]
+                ref_file_paths = [
+                    p for p in ref_file_paths if config.corpus_inventory.references_one_of(ref_projects, p)
+                ]
         ref_files: List[TextIO] = []
         vref_file: Optional[TextIO] = None
         vref_file_path = config.exp_dir / vref_file_name
@@ -600,8 +602,8 @@ def test_checkpoint(
         translation_conf_file_names.append(f"{TEST_TRG_PREDICTIONS_PREFIX}.txt.{suffix_str}{CONFIDENCE_SUFFIX}")
     else:
         # test data is split into separate files
-        for src_iso in sorted(config.inventory.test_source_isos()):
-            for trg_iso in sorted(config.inventory.test_target_isos()):
+        for src_iso in sorted(config.corpus_inventory.test_source_isos()):
+            for trg_iso in sorted(config.corpus_inventory.test_target_isos()):
                 if src_iso == trg_iso:
                     continue
                 prefix = f"test.{src_iso}.{trg_iso}"
@@ -677,8 +679,8 @@ def test_checkpoint(
         translation_conf_file_names,
         draft_indices,
     ):
-        src_iso = config.inventory.default_test_source_iso()
-        trg_iso = config.inventory.default_test_target_iso()
+        src_iso = config.corpus_inventory.default_test_source_iso()
+        trg_iso = config.corpus_inventory.default_test_target_iso()
         split_by_pair = features_file_name != "test.src.txt"
         if split_by_pair:
             parts = features_file_name.split(".")
@@ -744,7 +746,7 @@ def test_checkpoint(
                 scores.extend(book_scores)
             else:
                 LOGGER.error("Error: book_dict did not load correctly. Not scoring individual books.")
-    if len(config.inventory.test_source_isos()) > 1 or len(config.inventory.test_target_isos()) > 1:
+    if len(config.corpus_inventory.test_source_isos()) > 1 or len(config.corpus_inventory.test_target_isos()) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)
         scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), ref_projects))
 

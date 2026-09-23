@@ -66,7 +66,7 @@ class SILExperiment:
         if not config_file.exists():
             raise RuntimeError(f"ERROR: Config file does not exist in experiment folder {exp_dir}.")
         Preprocessor(
-            self.config.inventory,
+            self.config.corpus_inventory,
             self.config.create_vocabulary_builder(),
             self.config.create_data_set_writer(self.force_align),
         ).run(self.make_stats)
@@ -209,7 +209,7 @@ def main() -> None:
         "--multiple-translations",
         default=False,
         action="store_true",
-        help='Produce multiple translations of each verse. '
+        help="Produce multiple translations of each verse. "
         + 'These will be saved in separate files with suffixes like ".1.txt", ".2.txt", etc.',
     )
     parser.add_argument(

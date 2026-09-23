@@ -26,7 +26,7 @@ def main() -> None:
 
     config.set_seed()
     Preprocessor(
-        config.inventory,
+        config.corpus_inventory,
         config.create_vocabulary_builder(),
         config.create_data_set_writer(args.force_align),
     ).run(args.stats)

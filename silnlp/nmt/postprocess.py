@@ -29,11 +29,11 @@ from ..common.postprocesser import (
 )
 from ..common.usfm_utils import PARAGRAPH_TYPE_EMBEDS
 from ..common.utils import get_git_revision_hash
+from .checkpoints import CheckpointDirectory
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config
 from .config_utils import load_config
 from .corpora import CorpusPair
-from .checkpoints import CheckpointDirectory
 
 LOGGER = logging.getLogger(__package__ + ".postprocess")
 
@@ -109,7 +109,7 @@ def get_draft_paths_from_exp(config: Config, environment: SilNlpEnv) -> List[Dra
 
     draft_metadata_list = []
     for translate_request in translate_requests:
-        src_project = translate_request.get("src_project", next(iter(config.inventory.source_projects())))
+        src_project = translate_request.get("src_project", next(iter(config.corpus_inventory.source_projects())))
 
         ckpt = translate_request.get("checkpoint", "last")
         if ckpt == "best":

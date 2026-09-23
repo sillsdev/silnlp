@@ -41,7 +41,7 @@ def test_preprocess_creates_data_sets():
     config.set_seed()
     # The tokenization statistics are only created when stats is set, as the --stats option does
     Preprocessor(
-        config.inventory,
+        config.corpus_inventory,
         config.create_vocabulary_builder(),
         config.create_data_set_writer(force_align=False),
     ).run(stats=True)

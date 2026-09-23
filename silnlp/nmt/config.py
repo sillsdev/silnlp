@@ -52,12 +52,10 @@ class NMTModel(ABC):
         self._inference_model_params: Optional[InferenceModelParams] = None
 
     @abstractmethod
-    def train(self) -> None:
-        ...
+    def train(self) -> None: ...
 
     @abstractmethod
-    def save_effective_config(self, path: Path) -> None:
-        ...
+    def save_effective_config(self, path: Path) -> None: ...
 
     @abstractmethod
     def translate_test_files(
@@ -67,8 +65,7 @@ class NMTModel(ABC):
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @abstractmethod
     def translate(
@@ -78,8 +75,7 @@ class NMTModel(ABC):
         trg_iso: str,
         produce_multiple_translations: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> Generator[SentenceTranslationGroup, None, None]:
-        ...
+    ) -> Generator[SentenceTranslationGroup, None, None]: ...
 
     def resolve_checkpoint(self, ckpt: Union[CheckpointType, str, int]) -> Checkpoint:
         return self._checkpoints.resolve(ckpt)
@@ -109,12 +105,12 @@ class Config(ABC):
 
         data_config: dict = config["data"]
         self.corpus_pairs = parse_corpus_pairs(data_config.get("corpus_pairs", []), self._environment)
-        self.inventory = CorpusInventory(
+        self.corpus_inventory = CorpusInventory(
             self.corpus_pairs,
             include_glosses=data_config["terms"]["include_glosses"],
             environment=self._environment,
         )
-        self.files = ExperimentFiles(exp_dir, self.inventory, multi_ref_eval=config["eval"]["multi_ref_eval"])
+        self.files = ExperimentFiles(exp_dir, self.corpus_inventory, multi_ref_eval=config["eval"]["multi_ref_eval"])
 
     @property
     def model(self) -> str:
@@ -153,7 +149,7 @@ class Config(ABC):
         return "parent" in self.data
 
     def _disable_eval_if_no_val_split(self) -> None:
-        EvaluationSettings(self.root["eval"]).disable_unless(self.inventory.has_validation_split())
+        EvaluationSettings(self.root["eval"]).disable_unless(self.corpus_inventory.has_validation_split())
 
     def set_seed(self) -> None:
         seed = self.data["seed"]
@@ -162,12 +158,10 @@ class Config(ABC):
     @abstractmethod
     def create_model(
         self, mixed_precision: bool = True, num_devices: int = 1, clearml_queue: Optional[str] = None
-    ) -> NMTModel:
-        ...
+    ) -> NMTModel: ...
 
     @abstractmethod
-    def create_tokenizer(self) -> Tokenizer:
-        ...
+    def create_tokenizer(self) -> Tokenizer: ...
 
     def create_data_set_writer(self, force_align: bool) -> ExperimentDataSetWriter:
         tokenizer = self.create_tokenizer()
@@ -176,7 +170,7 @@ class Config(ABC):
             self.files,
             ScriptureDataSetWriterFactory(
                 self.files,
-                self.inventory,
+                self.corpus_inventory,
                 tokenizer,
                 AlignmentScores(self.exp_dir, self.data["aligner"], force=force_align),
                 self._environment,
@@ -184,7 +178,7 @@ class Config(ABC):
                 mirror=self.mirror,
                 multi_ref_eval=self.root["eval"]["multi_ref_eval"],
             ),
-            BasicDataSetWriter(self.files, self.inventory, tokenizer, mirror=self.mirror),
+            BasicDataSetWriter(self.files, self.corpus_inventory, tokenizer, mirror=self.mirror),
             TermsWriter(
                 TermsDataSet(self.files, tokenizer, mirror=self.mirror),
                 self._term_categories(),
@@ -207,13 +201,13 @@ class Config(ABC):
 
     def _gloss_language(self) -> GlossLanguage:
         return GlossLanguage(
-            self.data["terms"]["include_glosses"], self.inventory.source_isos(), self.inventory.target_isos()
+            self.data["terms"]["include_glosses"],
+            self.corpus_inventory.source_isos(),
+            self.corpus_inventory.target_isos(),
         )
 
     @abstractmethod
-    def create_vocabulary_builder(self) -> VocabularyBuilder:
-        ...
+    def create_vocabulary_builder(self) -> VocabularyBuilder: ...
 
     @abstractmethod
-    def _dictionary_writer(self, tokenizer: Tokenizer) -> DictionaryWriter:
-        ...
+    def _dictionary_writer(self, tokenizer: Tokenizer) -> DictionaryWriter: ...
