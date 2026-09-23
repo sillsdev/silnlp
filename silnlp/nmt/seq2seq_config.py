@@ -13,9 +13,6 @@ import safetensors.torch
 import torch
 from transformers import (
     AutoModelForSeq2SeqLM,
-    M2M100Tokenizer,
-    MBart50Tokenizer,
-    MBartTokenizer,
     NllbTokenizer,
     PreTrainedModel,
     PreTrainedTokenizerBase,
@@ -109,19 +106,6 @@ _TRAINING_ARGS_CONFIG_MAPPING = {
         "weight_decay",
     },
 }
-
-
-def add_lang_code_to_tokenizer(tokenizer: PreTrainedTokenizerBase, lang_code: str) -> None:
-    tokenizer.add_special_tokens({"extra_special_tokens": [lang_code]}, replace_extra_special_tokens=False)
-    lang_id = tokenizer.convert_tokens_to_ids(lang_code)
-    if isinstance(tokenizer, (MBart50Tokenizer, MBartTokenizer)):
-        tokenizer.id_to_lang_code[lang_id] = lang_code
-        tokenizer.fairseq_tokens_to_ids[lang_code] = lang_id
-        tokenizer.fairseq_ids_to_tokens[lang_id] = lang_code
-    elif isinstance(tokenizer, M2M100Tokenizer):
-        tokenizer.lang_code_to_token[lang_code] = lang_code
-        tokenizer.lang_token_to_id[lang_code] = lang_id
-        tokenizer.id_to_lang_token[lang_id] = lang_code
 
 
 def is_sublist(sub: List[int], lst: List[int]) -> bool:
