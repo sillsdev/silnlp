@@ -166,7 +166,7 @@ def split_corpus(
     if split_size >= len(population):
         return None
 
-    return set(random.sample(population, split_size))
+    return set(random.sample(sorted(population), split_size))
 
 
 def parse_scripture_path(data_file_path: Path) -> Tuple[str, str]:

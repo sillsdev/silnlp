@@ -1,6 +1,6 @@
 [tool.black]
 line-length = 120
-target-version = ['py310']
+target-version = ['py312']
 include = '\.pyi?$'
 exclude = '''
 /(
@@ -46,7 +46,7 @@ silnlp-alignment-test = "silnlp.alignment.test:main"
 silnlp-alignment-aggregate-results = "silnlp.alignment.aggregate_results:main"
 
 [tool.poetry.dependencies]
-python = ">=3.10,<3.11"
+python = ">=3.12,<3.13"
 pandas = "^2.2"
 sentencepiece = "^0.2.0"
 nltk = "^3.5"
@@ -58,7 +58,7 @@ psutil = "^5.7.3"
 scikit-learn = "^1.1.2"
 numpy = ">=2.2.6,<3.0.0"
 scipy = "^1.11.2"
-clearml = ">=1.4.1"
+clearml = "^2.1.12"
 XlsxWriter = "^3.2.0"
 python-Levenshtein = "^0.27.1"
 lxml = "^4.6.3"
@@ -81,20 +81,20 @@ attrs = "^24.3.0"
 jsonschema = "^4.18.0"
 requests = "^2.31"
 openpyxl = "^3.1.2"
-packaging = "^22.0"
+packaging = "^24.0"
 hanzidentifier = "^1.2.0"
 jarowinkler = "^2.0.1"
 wildebeest-nlp = ">=0.9.0"
 
 [tool.poetry.group.dev.dependencies]
 types-pyyaml = "^6.0.12.12"
-black = "^22.6.0"
-flake8 = "^3.9.0"
+black = "24.4.1"
+flake8 = "^7.1.0"
 ipykernel = "^6.4.1"
-pylint = "^2.8.3"
+pylint = "^3.0.0"
 pytest = "^9.1.1"
 types-tqdm = "^4.62.4"
-pandas-stubs = "^1.0.4"
+pandas-stubs = "^2.3"
 types-regex = "^2023.10.3.0"
 lxml-stubs = "^0.4.0"
 mypy = "^1.7.1"
@@ -107,4 +107,3 @@ llm = ["bitsandbytes"]
 name = "torch"
 url = "https://download.pytorch.org/whl/cu124"
 priority = "explicit"
-

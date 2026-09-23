@@ -3,16 +3,17 @@ Adapted from: www.aclweb.org/anthology/D19-1430: Exploiting Monolingual Data at 
               by  Lijun Wu, Yiren Wang, Yingce Xia, Tao Qin, Jianhuang Lai, Tei-Yan Liu
 """
 
-import re
-import os
-import sys
 import argparse
-from string import punctuation
-import yaml
 import json
-import urllib3
+import os
+import re
+import sys
 import time
+from string import punctuation
 from typing import Dict, List
+
+import urllib3
+import yaml
 from tqdm import tqdm
 
 from ..common.utils import get_git_revision_hash, merge_dict
@@ -123,7 +124,7 @@ def specific_punct_check(src: str, trg: str, specific_punct_limit: int) -> bool:
             return True
         if sent.count("-") > specific_punct_limit:
             return True
-        if len(re.findall("[\d\-\|/]", sent)) / len(sent) > 0.5:
+        if len(re.findall(r"[\d\-\|/]", sent)) / len(sent) > 0.5:
             return True
         return False
 
