@@ -4395,11 +4395,9 @@ name = "sil-machine"
 version = "1.9.2"
 description = "A natural language processing library that is focused on providing tools for resource-poor languages."
 optional = false
-python-versions = "<3.15,>=3.10"
-files = [
-    {file = "sil_machine-1.9.2-py3-none-any.whl", hash = "sha256:165e59bc2d47a59db46a1eca5cdceac3deb6cf840311ff606b2175c6d88428ee"},
-    {file = "sil_machine-1.9.2.tar.gz", hash = "sha256:9997d6be64488e49b8897821b3b6f65a9942634bb1202f8891d92c95c9b1b8db"},
-]
+python-versions = ">=3.10,<3.15"
+files = []
+develop = false
 
 [package.dependencies]
 boto3 = ">=1.19.41,<2.0"
@@ -4413,10 +4411,16 @@ sortedcontainers = ">=2.4,<3.0"
 urllib3 = "<2.0"
 
 [package.extras]
-huggingface = ["datasets (>=4.1,<5.0)", "sacremoses (>=0.0.53,<1)", "transformers (==4.47.1)"]
+huggingface = ["datasets (==5.0.1)", "sacremoses (>=0.0.53,<1)", "transformers (==5.14.1)"]
 jobs = ["clearml[s3] (>=1.13.1,<2.0)", "dynaconf (>=3.2.5,<4.0)", "eflomal (>=2.0,<3.0)", "json-stream (>=1.3,<2.0)", "pydantic (>=2.13.4,<3.0)"]
 sentencepiece = ["sentencepiece (>=0.2,<1.0)"]
 thot = ["sil-thot (>=3.5.2,<3.6.0)"]
+
+[package.source]
+type = "git"
+url = "https://github.com/sillsdev/machine.py.git"
+reference = "transformers_5"
+resolved_reference = "29f5034e8cb0759eaf3cacfa93ae3644e7eaf2eb"
 
 [[package]]
 name = "sil-thot"
@@ -5273,4 +5277,4 @@ llm = ["bitsandbytes"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "103ccc049e3cf0f0aae63b662f9283b492d9da68d40f557b82cffb48c06ce598"
+content-hash = "e1b7c52ba347c53df1c87468353b1a321092016ac343157183e627e6366dc7c0"
