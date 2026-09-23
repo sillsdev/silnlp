@@ -20,6 +20,7 @@ from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config, NMTModel
 from .config_utils import load_config
 from .corpus_inventory import CorpusInventory
+from .experiment_settings import ScoringSettings
 from .score_files import ScoreFiles, TestSetFiles
 from .tokenizer import Tokenizer
 
@@ -113,7 +114,7 @@ def score_pair(
     book: str,
     files: TestSetFiles,
     scorers: Set[str],
-    config: Config,
+    scoring: ScoringSettings,
     ref_projects: Set[str],
     draft_index: int = 1,
     pair_confs: Optional[List[float]] = None,
@@ -125,7 +126,7 @@ def score_pair(
             pair_sys,
             pair_refs,
             lowercase=True,
-            tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+            tokenize=scoring.sacrebleu_tokenizer(),
         )
 
     other_scores: Dict[str, float] = {}
@@ -164,7 +165,7 @@ def score_pair(
                 sentence,
                 references,
                 lowercase=True,
-                tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+                tokenize=scoring.sacrebleu_tokenizer(),
             )
             sentence_bleu_scores.append(sentence_bleu_score.score)
         if len(sentence_bleu_scores) == 0:
@@ -237,7 +238,7 @@ def score_pair(
             files,
             scorers,
             other_scores,
-            config,
+            scoring,
             confidences if "confidence" in scorers else None,
             write_linear_regression,
         )
@@ -260,7 +261,7 @@ def write_pair_verse_scores(
     files: TestSetFiles,
     scorers: Set[str],
     other_scores: Dict[str, float],
-    config: Config,
+    scoring: ScoringSettings,
     confidences: Optional[List[float]],
     write_linear_regression: bool = False,
 ) -> None:
@@ -297,7 +298,7 @@ def write_pair_verse_scores(
                     pred,
                     sentences,
                     lowercase=True,
-                    tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+                    tokenize=scoring.sacrebleu_tokenizer(),
                 )
             other_verse_scores: Dict[str, float] = {}
             if "chrf3" in scorers:
@@ -372,7 +373,7 @@ def score_individual_books(
     book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]],
     files: TestSetFiles,
     scorers: Set[str],
-    config: Config,
+    scoring: ScoringSettings,
     ref_projects: Set[str],
 ):
     overall_sys: List[str] = []
@@ -390,7 +391,7 @@ def score_individual_books(
                 book,
                 files,
                 scorers,
-                config,
+                scoring,
                 ref_projects,
                 pair_confs=pair_confs,
             )
@@ -525,6 +526,7 @@ def load_test_data(
 def test_checkpoint(
     files: ScoreFiles,
     inventory: CorpusInventory,
+    scoring: ScoringSettings,
     config: Config,
     model: NMTModel,
     tokenizer: Tokenizer,
@@ -585,7 +587,7 @@ def test_checkpoint(
                 "ALL",
                 test_set,
                 scorers,
-                config,
+                scoring,
                 ref_projects,
                 test_set.draft_index(),
                 write_linear_regression=True,
@@ -594,7 +596,7 @@ def test_checkpoint(
 
         if by_book:
             if len(book_dict) != 0:
-                book_scores = score_individual_books(book_dict, test_set, scorers, config, ref_projects)
+                book_scores = score_individual_books(book_dict, test_set, scorers, scoring, ref_projects)
                 scores.extend(book_scores)
             else:
                 LOGGER.error("Error: book_dict did not load correctly. Not scoring individual books.")
@@ -628,6 +630,7 @@ def test(
     model: Optional[NMTModel] = None,
 ):
     files = ScoreFiles(config.exp_dir, config.corpus_inventory)
+    scoring = config.create_scoring_settings()
     if not files.has_test_data():
         LOGGER.info("No test dataset.")
         return
@@ -652,6 +655,7 @@ def test(
         results[step] = test_checkpoint(
             files,
             config.corpus_inventory,
+            scoring,
             config,
             model,
             tokenizer,
@@ -675,6 +679,7 @@ def test(
                 results[step] = test_checkpoint(
                     files,
                     config.corpus_inventory,
+                    scoring,
                     config,
                     model,
                     tokenizer,
@@ -695,6 +700,7 @@ def test(
             results[step] = test_checkpoint(
                 files,
                 config.corpus_inventory,
+                scoring,
                 config,
                 model,
                 tokenizer,
@@ -719,6 +725,7 @@ def test(
             results[step] = test_checkpoint(
                 files,
                 config.corpus_inventory,
+                scoring,
                 config,
                 model,
                 tokenizer,
@@ -739,6 +746,7 @@ def test(
             results[step] = test_checkpoint(
                 files,
                 config.corpus_inventory,
+                scoring,
                 config,
                 model,
                 tokenizer,
@@ -757,6 +765,7 @@ def test(
         results[0] = test_checkpoint(
             files,
             config.corpus_inventory,
+            scoring,
             config,
             model,
             tokenizer,

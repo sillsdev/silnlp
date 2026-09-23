@@ -17,7 +17,7 @@ from .corpus_inventory import CorpusInventory
 from .dictionary_writer import DictionaryWriter
 from .experiment_data_set_writer import ExperimentDataSetWriter, ScriptureDataSetWriterFactory, TermsSettings
 from .experiment_files import ExperimentFiles
-from .experiment_settings import EvaluationSettings
+from .experiment_settings import EvaluationSettings, ScoringSettings
 from .terms import GlossLanguage, TermCategories
 from .terms_data_set import TermsDataSet
 from .terms_writer import TermsWriter
@@ -150,6 +150,9 @@ class Config(ABC):
 
     def _disable_eval_if_no_val_split(self) -> None:
         EvaluationSettings(self.root["eval"]).disable_unless(self.corpus_inventory.has_validation_split())
+
+    def create_scoring_settings(self) -> ScoringSettings:
+        return ScoringSettings(self.data)
 
     def set_seed(self) -> None:
         seed = self.data["seed"]
