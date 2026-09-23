@@ -62,7 +62,7 @@ class Seq2SeqTrainingDataSets:
                 data.append({"src": source_line.strip(), "trg": target_line.strip()})
         return Dataset.from_dict({"translation": data})
 
-    def _encode(self, examples: dict) -> dict:
+    def _encode(self, examples: dict) -> BatchEncoding:
         encoder = TokenizedBatchEncoder(self._pretrained.load())
         model_inputs = encoder.encode([example["src"].split() for example in examples["translation"]])
         labels = encoder.encode([example["trg"].split() for example in examples["translation"]])

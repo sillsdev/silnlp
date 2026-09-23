@@ -1,6 +1,6 @@
 import gc
 import logging
-from typing import Any, Set
+from typing import Any, Callable, Optional, Set
 
 import torch
 from accelerate.utils.memory import should_reduce_batch_size
@@ -9,7 +9,9 @@ from tqdm.std import tqdm as std_tqdm
 LOGGER = logging.getLogger(__name__)
 
 
-def find_executable_batch_size(function: callable = None, starting_batch_size: int = 64, accelerator=None):
+def find_executable_batch_size(
+    function: Optional[Callable] = None, starting_batch_size: int = 64, accelerator=None
+):
     batch_size = starting_batch_size
 
     def decorator(*args, **kwargs):
