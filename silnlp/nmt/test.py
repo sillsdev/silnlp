@@ -8,18 +8,19 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, TextIO, Tuple
 
 import sacrebleu
-from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_id, get_chapters
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_chapters
 from sacrebleu.metrics import BLEUScore
 from scipy.stats import gmean
 
 from ..common.environment import SilNlpEnv
 from ..common.linear_regression import perform_enhanced_linear_regression
-from ..common.translator import CONFIDENCE_SUFFIX
 from ..common.utils import get_git_revision_hash
 from .checkpoints import CheckpointType
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config, NMTModel
 from .config_utils import load_config
+from .corpus_inventory import CorpusInventory
+from .score_files import ScoreFiles, TestSetFiles
 from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger((__package__ or "") + ".test")
@@ -49,10 +50,6 @@ SUPPORTED_SENTENCE_SCORERS = [
     "ter",
     "confidence",
 ]
-
-TEST_TRG_PREDICTIONS_PREFIX = "test.trg-predictions"
-VERSE_SCORES_SUFFIX = ".scores.tsv"
-LINREGRESS_PREFIX = "linregress"
 
 
 class PairScore:
@@ -114,16 +111,13 @@ def score_pair(
     pair_sys: List[str],
     pair_refs: List[List[str]],
     book: str,
-    src_iso: str,
-    trg_iso: str,
-    predictions_detok_file_name: str,
-    predictions_conf_file_name: str,
+    files: TestSetFiles,
     scorers: Set[str],
     config: Config,
     ref_projects: Set[str],
     draft_index: int = 1,
     pair_confs: Optional[List[float]] = None,
-    linregress_file_name: Optional[str] = None,
+    write_linear_regression: bool = False,
 ) -> PairScore:
     bleu_score = None
     if "bleu" in scorers:
@@ -227,7 +221,7 @@ def score_pair(
             confidences = pair_confs
         else:
             try:
-                with open(config.exp_dir / predictions_conf_file_name, "r", encoding="utf-8") as f:
+                with files.confidences().open("r", encoding="utf-8") as f:
                     confidences = [float(line.split("\t")[0]) for line in list(f)[3::2]]
             except FileNotFoundError as e:
                 raise FileNotFoundError(
@@ -240,35 +234,40 @@ def score_pair(
         write_pair_verse_scores(
             pair_sys,
             pair_refs,
-            trg_iso,
-            predictions_detok_file_name,
+            files,
             scorers,
             other_scores,
             config,
             confidences if "confidence" in scorers else None,
-            linregress_file_name,
+            write_linear_regression,
         )
 
-    return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores, draft_index)
+    return PairScore(
+        book,
+        files.source_iso(),
+        files.target_iso(),
+        bleu_score,
+        len(pair_sys),
+        ref_projects,
+        other_scores,
+        draft_index,
+    )
 
 
 def write_pair_verse_scores(
     pair_sys: List[str],
     pair_refs: List[List[str]],
-    trg_iso: str,
-    predictions_detok_file_name: str,
+    files: TestSetFiles,
     scorers: Set[str],
     other_scores: Dict[str, float],
     config: Config,
     confidences: Optional[List[float]],
-    linregress_file_name: Optional[str] = None,
+    write_linear_regression: bool = False,
 ) -> None:
     scorers = scorers.intersection(SUPPORTED_SENTENCE_SCORERS)
     other_scores = {k: v for k, v in other_scores.items() if k.lower() in scorers}
 
-    with open(
-        config.exp_dir / (predictions_detok_file_name + VERSE_SCORES_SUFFIX), "w", encoding="utf-8", newline=""
-    ) as scores_file:
+    with files.verse_scores().open("w", encoding="utf-8", newline="") as scores_file:
         writer = csv.writer(scores_file, delimiter="\t")
         header = ["Verse"]
         if "bleu" in scorers:
@@ -357,12 +356,8 @@ def write_pair_verse_scores(
                 row.append(sentence.rstrip("\n"))
             writer.writerow(row)
 
-    if compute_linregress and linregress_file_name is not None:
-        write_linregress(
-            linregress_chrf3_scores,
-            linregress_confidence_scores,
-            config.exp_dir / linregress_file_name,
-        )
+    if compute_linregress and write_linear_regression:
+        write_linregress(linregress_chrf3_scores, linregress_confidence_scores, files.linregress())
 
 
 def write_linregress(chrf3_scores: List[float], confidence_scores: List[float], output_path: Path) -> None:
@@ -373,29 +368,9 @@ def write_linregress(chrf3_scores: List[float], confidence_scores: List[float], 
         f.write(linear_regression_result.toJSON())
 
 
-def get_linregress_file_name(
-    step_token: str,
-    split_by_pair: bool,
-    src_iso: str,
-    trg_iso: str,
-    produce_multiple_translations: bool,
-    draft_index: int,
-) -> str:
-    parts = [LINREGRESS_PREFIX]
-    if split_by_pair:
-        parts.extend([src_iso, trg_iso])
-    parts.append(step_token)
-    if produce_multiple_translations:
-        parts.append(str(draft_index))
-    return ".".join(parts) + ".json"
-
-
 def score_individual_books(
     book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]],
-    src_iso: str,
-    trg_iso: str,
-    predictions_detok_file_name: str,
-    predictions_conf_file_name: str,
+    files: TestSetFiles,
     scorers: Set[str],
     config: Config,
     ref_projects: Set[str],
@@ -413,10 +388,7 @@ def score_individual_books(
                 pair_sys,
                 pair_refs,
                 book,
-                src_iso,
-                trg_iso,
-                predictions_detok_file_name,
-                predictions_conf_file_name,
+                files,
                 scorers,
                 config,
                 ref_projects,
@@ -489,40 +461,26 @@ def process_individual_books(
 
 def load_test_data(
     tokenizer: Tokenizer,
-    vref_file_name: str,
-    pred_file_name: str,
-    conf_file_name: str,
-    ref_pattern: str,
-    output_file_name: str,
+    files: TestSetFiles,
     ref_projects: Set[str],
-    config: Config,
     books: Dict[int, List[int]],
     by_book: bool,
 ) -> Tuple[List[str], List[List[str]], Dict[str, Tuple[List[str], List[List[str]], List[float]]]]:
     sys: List[str] = []
     refs: List[List[str]] = []
     book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]] = {}
-    pred_file_path = config.exp_dir / pred_file_name
-    conf_file_path = config.exp_dir / conf_file_name
+    pred_file_path = files.predictions()
+    conf_file_path = files.confidences()
     with ExitStack() as stack:
         pred_file = stack.enter_context(pred_file_path.open("r", encoding="utf-8"))
-        out_file = stack.enter_context((config.exp_dir / output_file_name).open("w", encoding="utf-8"))
+        out_file = stack.enter_context(files.predictions_detokenized().open("w", encoding="utf-8"))
 
-        ref_file_paths = list(config.exp_dir.glob(ref_pattern))
-        select_rand_ref_line = False
-        if len(ref_file_paths) > 1:
-            if len(ref_projects) == 0:
-                # no refs specified, so randomly select verses from all available train refs to build one ref
-                select_rand_ref_line = True
-                ref_file_paths = [p for p in ref_file_paths if config.corpus_inventory.is_train_reference(p)]
-            else:
-                # use specified refs only
-                ref_file_paths = [
-                    p for p in ref_file_paths if config.corpus_inventory.references_one_of(ref_projects, p)
-                ]
+        references = files.references(ref_projects)
+        ref_file_paths = references.paths
+        select_rand_ref_line = references.select_random_line
         ref_files: List[TextIO] = []
         vref_file: Optional[TextIO] = None
-        vref_file_path = config.exp_dir / vref_file_name
+        vref_file_path = files.vref()
         if len(books) > 0 and vref_file_path.is_file():
             vref_file = stack.enter_context(vref_file_path.open("r", encoding="utf-8"))
         for ref_file_path in ref_file_paths:
@@ -565,6 +523,8 @@ def load_test_data(
 
 
 def test_checkpoint(
+    files: ScoreFiles,
+    inventory: CorpusInventory,
     config: Config,
     model: NMTModel,
     tokenizer: Tokenizer,
@@ -579,52 +539,15 @@ def test_checkpoint(
     save_confidences: bool = False,
 ) -> List[PairScore]:
     config.set_seed()
-    vref_file_names: List[str] = []
-    source_file_names: List[str] = []
-    translation_file_names: List[str] = []
-    refs_patterns: List[str] = []
-    translation_detok_file_names: List[str] = []
-    translation_conf_file_names: List[str] = []
-    step_token = "avg" if step == -1 else str(step)
-    suffix_str = "_".join(map(lambda n: book_number_to_id(n), sorted(books.keys())))
-    if len(suffix_str) > 0:
-        suffix_str += "-"
-    suffix_str += step_token
-
-    features_file_name = "test.src.txt"
-    if (config.exp_dir / features_file_name).is_file():
-        # all test data is stored in a single file
-        vref_file_names.append("test.vref.txt")
-        source_file_names.append(features_file_name)
-        translation_file_names.append(f"{TEST_TRG_PREDICTIONS_PREFIX}.txt.{suffix_str}")
-        refs_patterns.append("test.trg.detok*.txt")
-        translation_detok_file_names.append(f"{TEST_TRG_PREDICTIONS_PREFIX}.detok.txt.{suffix_str}")
-        translation_conf_file_names.append(f"{TEST_TRG_PREDICTIONS_PREFIX}.txt.{suffix_str}{CONFIDENCE_SUFFIX}")
-    else:
-        # test data is split into separate files
-        for src_iso in sorted(config.corpus_inventory.test_source_isos()):
-            for trg_iso in sorted(config.corpus_inventory.test_target_isos()):
-                if src_iso == trg_iso:
-                    continue
-                prefix = f"test.{src_iso}.{trg_iso}"
-                features_file_name = f"{prefix}.src.txt"
-                if (config.exp_dir / features_file_name).is_file():
-                    vref_file_names.append(f"{prefix}.vref.txt")
-                    source_file_names.append(features_file_name)
-                    translation_file_names.append(f"{prefix}.trg-predictions.txt.{suffix_str}")
-                    refs_patterns.append(f"{prefix}.trg.detok*.txt")
-                    translation_detok_file_names.append(f"{prefix}.trg-predictions.detok.txt.{suffix_str}")
-                    translation_conf_file_names.append(f"{prefix}.trg-predictions.txt.{suffix_str}{CONFIDENCE_SUFFIX}")
-
+    test_sets = files.test_sets(step, books)
     checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
 
     source_paths: List[Path] = []
     translation_paths: List[Path] = []
-    for i in range(len(translation_file_names)):
-        predictions_path = config.exp_dir / translation_file_names[i]
-        if force_infer or not predictions_path.is_file():
-            source_paths.append(config.exp_dir / source_file_names[i])
-            translation_paths.append(predictions_path)
+    for test_set in test_sets:
+        if force_infer or not test_set.predictions().is_file():
+            source_paths.append(test_set.source())
+            translation_paths.append(test_set.predictions())
     if len(translation_paths) > 0:
         LOGGER.info(f"Inferencing {checkpoint_name}")
         model.translate_test_files(
@@ -636,73 +559,14 @@ def test_checkpoint(
         )
 
     if produce_multiple_translations:
-        num_drafts = model.get_num_drafts()
-        vref_file_names = num_drafts * vref_file_names
-        source_file_names = num_drafts * source_file_names
-        translation_file_names = [
-            str(Path(file_name).with_suffix(f".{draft_index}{Path(file_name).suffix}"))
-            for draft_index in range(1, num_drafts + 1)
-            for file_name in translation_file_names
-        ]
-        translation_conf_file_names = [
-            str(Path(file_name).with_suffix(f"{Path(file_name).suffix}{CONFIDENCE_SUFFIX}"))
-            for file_name in translation_file_names
-        ]
-        refs_patterns = num_drafts * refs_patterns
-        translation_detok_file_names = [
-            str(Path(file_name).with_suffix(f".{draft_index}{Path(file_name).suffix}"))
-            for draft_index in range(1, num_drafts + 1)
-            for file_name in translation_detok_file_names
-        ]
-        draft_indices = num_drafts * list(range(1, num_drafts + 1))
-    else:
-        draft_indices = len(source_file_names) * [1]
+        test_sets = files.test_sets(step, books, produce_multiple_translations, model.get_num_drafts())
 
     LOGGER.info(f"Scoring {checkpoint_name}")
     scores: List[PairScore] = []
     overall_sys: List[str] = []
     overall_refs: List[List[str]] = []
-    for (
-        vref_file_name,
-        features_file_name,
-        predictions_file_name,
-        refs_pattern,
-        predictions_detok_file_name,
-        predictions_conf_file_name,
-        draft_index,
-    ) in zip(
-        vref_file_names,
-        source_file_names,
-        translation_file_names,
-        refs_patterns,
-        translation_detok_file_names,
-        translation_conf_file_names,
-        draft_indices,
-    ):
-        src_iso = config.corpus_inventory.default_test_source_iso()
-        trg_iso = config.corpus_inventory.default_test_target_iso()
-        split_by_pair = features_file_name != "test.src.txt"
-        if split_by_pair:
-            parts = features_file_name.split(".")
-            src_iso = parts[1]
-            trg_iso = parts[2]
-
-        linregress_file_name = get_linregress_file_name(
-            step_token, split_by_pair, src_iso, trg_iso, produce_multiple_translations, draft_index
-        )
-
-        pair_sys, pair_refs, book_dict = load_test_data(
-            tokenizer,
-            vref_file_name,
-            predictions_file_name,
-            predictions_conf_file_name,
-            refs_pattern,
-            predictions_detok_file_name,
-            ref_projects,
-            config,
-            books,
-            by_book,
-        )
+    for test_set in test_sets:
+        pair_sys, pair_refs, book_dict = load_test_data(tokenizer, test_set, ref_projects, books, by_book)
 
         start_index = len(overall_sys)
         overall_sys.extend(pair_sys)
@@ -719,42 +583,26 @@ def test_checkpoint(
                 pair_sys,
                 pair_refs,
                 "ALL",
-                src_iso,
-                trg_iso,
-                predictions_detok_file_name,
-                predictions_conf_file_name,
+                test_set,
                 scorers,
                 config,
                 ref_projects,
-                draft_index,
-                linregress_file_name=linregress_file_name,
+                test_set.draft_index(),
+                write_linear_regression=True,
             )
         )
 
         if by_book:
             if len(book_dict) != 0:
-                book_scores = score_individual_books(
-                    book_dict,
-                    src_iso,
-                    trg_iso,
-                    predictions_detok_file_name,
-                    predictions_conf_file_name,
-                    scorers,
-                    config,
-                    ref_projects,
-                )
+                book_scores = score_individual_books(book_dict, test_set, scorers, config, ref_projects)
                 scores.extend(book_scores)
             else:
                 LOGGER.error("Error: book_dict did not load correctly. Not scoring individual books.")
-    if len(config.corpus_inventory.test_source_isos()) > 1 or len(config.corpus_inventory.test_target_isos()) > 1:
+    if len(inventory.test_source_isos()) > 1 or len(inventory.test_target_isos()) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)
         scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), ref_projects))
 
-    scores_file_root = f"scores-{suffix_str}"
-    if len(ref_projects) > 0:
-        ref_projects_suffix = "_".join(sorted(ref_projects))
-        scores_file_root += f"-{ref_projects_suffix}"
-    with (config.exp_dir / f"{scores_file_root}.csv").open("w", encoding="utf-8") as scores_file:
+    with files.scores(step, books, ref_projects).open("w", encoding="utf-8") as scores_file:
         if len(scores) > 0:
             scores[0].writeHeader(scores_file)
         for results in scores:
@@ -779,7 +627,8 @@ def test(
     clearml_queue: Optional[str] = None,
     model: Optional[NMTModel] = None,
 ):
-    if not any(config.exp_dir.glob("test*.src.txt")):
+    files = ScoreFiles(config.exp_dir, config.corpus_inventory)
+    if not files.has_test_data():
         LOGGER.info("No test dataset.")
         return
 
@@ -801,6 +650,8 @@ def test(
     if checkpoint is not None:
         step = int(checkpoint)
         results[step] = test_checkpoint(
+            files,
+            config.corpus_inventory,
             config,
             model,
             tokenizer,
@@ -822,6 +673,8 @@ def test(
         for step in all_steps:
             if step not in results:
                 results[step] = test_checkpoint(
+                    files,
+                    config.corpus_inventory,
                     config,
                     model,
                     tokenizer,
@@ -840,6 +693,8 @@ def test(
         try:
             step = -1
             results[step] = test_checkpoint(
+                files,
+                config.corpus_inventory,
                 config,
                 model,
                 tokenizer,
@@ -862,6 +717,8 @@ def test(
         step = best_step
         if step not in results:
             results[step] = test_checkpoint(
+                files,
+                config.corpus_inventory,
                 config,
                 model,
                 tokenizer,
@@ -880,6 +737,8 @@ def test(
         step = model.resolve_checkpoint(CheckpointType.LAST).step
         if step not in results:
             results[step] = test_checkpoint(
+                files,
+                config.corpus_inventory,
                 config,
                 model,
                 tokenizer,
@@ -896,6 +755,8 @@ def test(
 
     if not model.has_been_trained():
         results[0] = test_checkpoint(
+            files,
+            config.corpus_inventory,
             config,
             model,
             tokenizer,
