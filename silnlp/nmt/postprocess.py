@@ -323,7 +323,7 @@ def main() -> None:
 
     if args.clearml_queue is not None:
         clearml = SILClearML(args.experiment, args.clearml_queue, environment=environment)
-        config = clearml.config
+        config = load_config(clearml.name, environment)
     else:
         config = load_config(args.experiment.replace("\\", "/"), environment)
     config.set_seed()

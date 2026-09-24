@@ -152,7 +152,7 @@ def main() -> None:
             output_dir,
             args.clearml_queue,
             tag=args.clearml_tag,
-            skip_config=True,
+            records_config=False,
             environment=environment,
         )
         output_dir = clearml.name

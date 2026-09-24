@@ -170,7 +170,7 @@ def main() -> None:
             experiments,
             args.clearml_queue,
             tag=args.clearml_tag,
-            skip_config=True,
+            records_config=False,
             environment=environment,
         )
         experiments = clearml.name

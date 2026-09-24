@@ -12,6 +12,7 @@ from ..alignment.config import get_aligner_name
 from ..alignment.utils import add_alignment_scores
 from ..nmt.clearml_connection import TAGS_LIST, SILClearML
 from ..nmt.config import Config
+from ..nmt.config_utils import load_config
 from ..nmt.corpora import CorpusPair, get_data_file_pairs
 from .analysis_files import AnalysisFiles
 from .collect_verse_counts import DT_CANON, NT_CANON, OT_CANON, collect_verse_counts
@@ -575,7 +576,7 @@ def main() -> None:
     environment = SilNlpEnv.create_standard_environment()
     clearml = SILClearML(args.experiment, args.clearml_queue, tag=args.clearml_tag, environment=environment)
 
-    config = clearml.config
+    config = load_config(clearml.name, environment)
     config.set_seed()
     analyze(
         config=config,
