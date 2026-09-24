@@ -122,7 +122,6 @@ class SILClearML:
             self.name = self.name[: -len(self.experiment_suffix)]
 
     def _load_config(self) -> None:
-        # if the project/experiment yaml file already exists, use it to re-read the config.  If not, write it.
         exp_dir = self.environment.get_mt_exp_dir(self.name)
         if self.task is None:
             with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
@@ -147,12 +146,7 @@ class SILClearML:
         if config is None or len(config.keys()) == 0:
             raise RuntimeError("Config file has no contents.")
 
-        # connect it with ClearML
-        # - if it is run locally, it will set the config parameters in the clearml server
-        # - if it is run remotely, it will update the params with the remote values
-        self.task.connect(mutable=config, name="config")
-        # then, after connection (and a possible remote update) write it to the experiment folder
-        exp_dir.mkdir(parents=True, exist_ok=True)
-        with (exp_dir / "config.yml").open("w+", encoding="utf-8") as file:
-            yaml.safe_dump(data=config, stream=file)
+        # Record the config on the task. Overrides typed into the ClearML UI are deliberately not read
+        # back, so an experiment always runs from the config.yml in its folder.
+        self.task.connect(mutable=config, name="config", ignore_remote_overrides=True)
         self.config = create_config(exp_dir, config, self.environment)
