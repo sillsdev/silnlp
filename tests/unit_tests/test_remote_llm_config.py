@@ -633,16 +633,18 @@ def test_a_reply_with_an_aside_still_writes_one_line_per_source(tmp_path: Path):
     assert (tmp_path / "out.txt").read_text(encoding="utf-8").splitlines() == ["sea la luz", "sea la luz"]
 
 
-def test_translate_test_files_writes_one_file_per_draft(tmp_path: Path):
+def test_translate_test_files_writes_each_draft_where_scoring_reads_it(tmp_path: Path):
     (tmp_path / "test.src.txt").write_text("one\n", encoding="utf-8")
     model, _ = make_model(
         tmp_path, lambda messages: "hola", infer={"num_drafts": 2, "temperature": 0.8, "concurrency": 1}
     )
 
-    model.translate_test_files([tmp_path / "test.src.txt"], [tmp_path / "out.txt"], produce_multiple_translations=True)
+    model.translate_test_files(
+        [tmp_path / "test.src.txt"], [tmp_path / "test.trg-predictions.txt.1"], produce_multiple_translations=True
+    )
 
-    assert (tmp_path / "out.1.txt").is_file()
-    assert (tmp_path / "out.2.txt").is_file()
+    assert (tmp_path / "test.trg-predictions.1.txt.1").is_file()
+    assert (tmp_path / "test.trg-predictions.2.txt.1").is_file()
 
 
 # --- training ---------------------------------------------------------------------------

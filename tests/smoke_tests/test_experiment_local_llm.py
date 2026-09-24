@@ -1,3 +1,7 @@
+from pathlib import Path
+
+import yaml
+
 from silnlp.common.environment import SilNlpEnv
 from silnlp.nmt.config_utils import load_config
 from silnlp.nmt.experiment import SILExperiment
@@ -29,6 +33,25 @@ def test_llm_experiment_full_pipeline():
     check_translate_step(environment)
 
     delete_generated_paths(exp_dir, PIPELINE_OUTPUT_PATTERNS)
+
+
+def test_each_test_draft_is_written_where_scoring_reads_it(tmp_path: Path):
+    environment = set_up_environment()
+    exp_dir = environment.get_mt_exp_dir(EXPERIMENT_NAME)
+    settings = yaml.safe_load((exp_dir / "config.yml").read_text(encoding="utf-8"))
+    settings["infer"].update({"num_drafts": 2, "do_sample": True})
+    settings["infer"]["prompt"]["num_examples"] = 0
+    settings["train"]["prompt"]["num_examples"] = 0
+    model = LocalLLMConfig(exp_dir, settings, environment).create_model(
+        pretrained_model_provider_factory=MockCausalLMProviderFactory()
+    )
+    source = tmp_path / "test.src.txt"
+    source.write_text("In the beginning\n", encoding="utf-8")
+
+    model.translate_test_files([source], [tmp_path / "test.trg-predictions.txt.8"], produce_multiple_translations=True)
+
+    assert (tmp_path / "test.trg-predictions.1.txt.8").is_file()
+    assert (tmp_path / "test.trg-predictions.2.txt.8").is_file()
 
 
 def create_experiment_with_mock_model(environment: SilNlpEnv) -> tuple[SILExperiment, CausalModelTrainingStats]:

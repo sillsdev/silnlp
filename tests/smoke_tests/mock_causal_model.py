@@ -47,9 +47,11 @@ class GeneratingStandInCausalModel(StandInCausalModel):
 
     def generate(self, *args, **kwargs) -> GenerateDecoderOnlyOutput:
         input_ids: torch.Tensor = kwargs["input_ids"]
-        batch_size = input_ids.shape[0]
-        appended = torch.tensor([_MOCK_NEW_TOKEN_IDS], dtype=torch.long, device=input_ids.device).repeat(batch_size, 1)
-        sequences = torch.cat([input_ids, appended], dim=1)
+        prompts = input_ids.repeat_interleave(kwargs.get("num_return_sequences", 1), dim=0)
+        appended = torch.tensor([_MOCK_NEW_TOKEN_IDS], dtype=torch.long, device=input_ids.device).repeat(
+            prompts.shape[0], 1
+        )
+        sequences = torch.cat([prompts, appended], dim=1)
         return GenerateDecoderOnlyOutput(sequences=cast(torch.LongTensor, sequences))
 
 

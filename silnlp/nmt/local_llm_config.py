@@ -64,6 +64,7 @@ from .llm_config import (
     PromptMessagesFactory,
     PromptTemplateCollection,
 )
+from .prediction_files import PredictionFile
 from .seq2seq_config import batch_sentences
 from .training_arguments import TrainingArgumentsMapping
 
@@ -1108,7 +1109,7 @@ class LocalLLMModel(NMTModel):
             draft_group = DraftGroup(sentence_translation_groups)
             for draft_index, translated_draft in enumerate(draft_group.get_drafts(), 1):
                 if produce_multiple_translations:
-                    translation_draft_path = translation_path.with_suffix(f".{draft_index}{translation_path.suffix}")
+                    translation_draft_path = PredictionFile(translation_path).draft(draft_index)
                 else:
                     translation_draft_path = translation_path
                 with translation_draft_path.open("w", encoding="utf-8", newline="\n") as out_file:
