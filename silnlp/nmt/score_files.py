@@ -6,6 +6,7 @@ from machine.scripture import book_number_to_id
 
 from ..common.translator import CONFIDENCE_SUFFIX
 from .corpus_inventory import CorpusInventory
+from .prediction_files import PredictionFile
 
 LINREGRESS_PREFIX = "linregress"
 SINGLE_TEST_SET_PREFIX = "test"
@@ -137,15 +138,14 @@ class ScoreFiles:
         split_by_pair = prefix != SINGLE_TEST_SET_PREFIX
         src_iso, trg_iso = self._isos_of(prefix, split_by_pair)
         suffix = self._step_suffix(step, books)
-        draft_part = "" if draft is None else f".{draft}"
         predictions_prefix = f"{prefix}.trg-predictions"
         return TestSetFiles(
             self._exp_dir,
             TestSetNames(
                 source=f"{prefix}.src.txt",
                 vref=f"{prefix}.vref.txt",
-                predictions=f"{predictions_prefix}.txt{draft_part}.{suffix}",
-                predictions_detokenized=f"{predictions_prefix}.detok.txt{draft_part}.{suffix}",
+                predictions=self._drafted(f"{predictions_prefix}.txt.{suffix}", draft),
+                predictions_detokenized=self._drafted(f"{predictions_prefix}.detok.txt.{suffix}", draft),
                 references_pattern=f"{prefix}.trg.detok*.txt",
                 linregress=self._linregress_name(
                     step, split_by_pair, src_iso, trg_iso, draft is not None, draft_index
@@ -156,6 +156,9 @@ class ScoreFiles:
             ),
             self._inventory,
         )
+
+    def _drafted(self, name: str, draft: Optional[int]) -> str:
+        return name if draft is None else PredictionFile(Path(name)).draft(draft).name
 
     def _isos_of(self, prefix: str, split_by_pair: bool) -> Tuple[str, str]:
         if not split_by_pair:

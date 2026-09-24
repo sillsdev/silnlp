@@ -11,13 +11,7 @@ from typing import Any, Generator, Iterable, List, Optional, TypeVar, Union, cas
 
 import safetensors.torch
 import torch
-from transformers import (
-    AutoModelForSeq2SeqLM,
-    NllbTokenizer,
-    PreTrainedModel,
-    PreTrainedTokenizerBase,
-    set_seed,
-)
+from transformers import AutoModelForSeq2SeqLM, NllbTokenizer, PreTrainedModel, PreTrainedTokenizerBase, set_seed
 from transformers.modeling_utils import unwrap_model
 from transformers.tokenization_utils_base import BatchEncoding, TruncationStrategy
 from transformers.trainer import TRAINING_ARGS_NAME
@@ -32,11 +26,7 @@ from ..common.translator import generate_confidence_files
 from ..common.utils import merge_dict
 from .batch_size import indicates_out_of_memory
 from .checkpoints import CheckpointDirectory, CheckpointType
-from .config import (
-    Config,
-    InferenceModelParams,
-    NMTModel,
-)
+from .config import Config, InferenceModelParams, NMTModel
 from .config_keys import RenamedConfigKeys
 from .dictionary_writer import DictionaryWriter, TermDictionaryWriter
 from .experiment_languages import ExperimentLanguages
@@ -44,6 +34,7 @@ from .experiment_settings import EvaluationSettings, TrainerSettings, TrainingSe
 from .huggingface_tokenizer import HuggingFaceTokenizer, PunctuationNormalizingTokenizer
 from .model_name import ModelName
 from .parent_model import ParentModel
+from .prediction_files import PredictionFile
 from .pretrained_model_loader import PretrainedModelLoader
 from .pretrained_tokenizer import PretrainedTokenizer
 from .seq2seq_training_run import Seq2SeqTrainingRun
@@ -494,9 +485,7 @@ class Seq2SeqNMTModel(NMTModel):
 
                 for draft_index, translated_draft in enumerate(draft_group.get_drafts(), 1):
                     if produce_multiple_translations:
-                        translation_draft_path = translation_path.with_suffix(
-                            f".{draft_index}{translation_path.suffix}"
-                        )
+                        translation_draft_path = PredictionFile(translation_path).draft(draft_index)
                     else:
                         translation_draft_path = translation_path
                     out_file = stack.enter_context(translation_draft_path.open("w", encoding="utf-8", newline="\n"))

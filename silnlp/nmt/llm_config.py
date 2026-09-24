@@ -40,11 +40,7 @@ from ..common.utils import merge_dict
 from .causal_lm_tokenizer import CausalLMTokenizer
 from .causal_lm_training_run import CausalLMTrainingRun
 from .checkpoints import CheckpointDirectory, CheckpointType
-from .config import (
-    Config,
-    InferenceModelParams,
-    NMTModel,
-)
+from .config import Config, InferenceModelParams, NMTModel
 from .config_keys import DeprecatedAdapterKey, RenamedConfigKeys
 from .dictionary_writer import DictionaryWriter, NoDictionaryWriter
 from .experiment_files import ExperimentFiles
@@ -54,6 +50,7 @@ from .finetune_method import FinetuneMethod
 from .finetuning import Finetuning
 from .generation_settings import GenerationSettings
 from .model_name import ModelName
+from .prediction_files import PredictionFile
 from .prompt_messages import Language, PromptBuilder
 from .seq2seq_config import batch_sentences
 from .tokenizer import NullTokenizer, Tokenizer
@@ -497,7 +494,7 @@ class LLMModel(NMTModel):
             draft_group = DraftGroup(sentence_translation_groups)
             for draft_index, translated_draft in enumerate(draft_group.get_drafts(), 1):
                 if produce_multiple_translations:
-                    translation_draft_path = translation_path.with_suffix(f".{draft_index}{translation_path.suffix}")
+                    translation_draft_path = PredictionFile(translation_path).draft(draft_index)
                 else:
                     translation_draft_path = translation_path
                 with translation_draft_path.open("w", encoding="utf-8", newline="\n") as out_file:

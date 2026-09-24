@@ -159,12 +159,12 @@ def test_each_draft_of_a_test_set_gets_its_own_prediction_files(one_iso_pair, ex
     test_sets = one_iso_pair.test_sets(2, {}, produce_multiple_translations=True, num_drafts=2)
 
     assert [test_set.predictions().name for test_set in test_sets] == [
-        "test.trg-predictions.txt.1.2",
-        "test.trg-predictions.txt.2.2",
+        "test.trg-predictions.1.txt.2",
+        "test.trg-predictions.2.txt.2",
     ]
     assert [test_set.confidences().name for test_set in test_sets] == [
-        "test.trg-predictions.txt.1.2.confidences.tsv",
-        "test.trg-predictions.txt.2.2.confidences.tsv",
+        "test.trg-predictions.1.txt.2.confidences.tsv",
+        "test.trg-predictions.2.txt.2.confidences.tsv",
     ]
     assert [test_set.draft_index() for test_set in test_sets] == [1, 2]
     assert [test_set.linregress().name for test_set in test_sets] == ["linregress.2.1.json", "linregress.2.2.json"]
@@ -177,10 +177,10 @@ def test_each_test_set_reports_the_draft_it_came_from(two_iso_pairs, exp_dir):
     test_sets = two_iso_pairs.test_sets(2, {}, produce_multiple_translations=True, num_drafts=2)
 
     assert [(test_set.predictions().name, test_set.draft_index()) for test_set in test_sets] == [
-        ("test.en.es.trg-predictions.txt.1.2", 1),
-        ("test.en.fr.trg-predictions.txt.1.2", 1),
-        ("test.en.es.trg-predictions.txt.2.2", 2),
-        ("test.en.fr.trg-predictions.txt.2.2", 2),
+        ("test.en.es.trg-predictions.1.txt.2", 1),
+        ("test.en.fr.trg-predictions.1.txt.2", 1),
+        ("test.en.es.trg-predictions.2.txt.2", 2),
+        ("test.en.fr.trg-predictions.2.txt.2", 2),
     ]
 
 
@@ -207,12 +207,12 @@ def test_every_test_set_is_scored_for_every_draft(three_iso_pairs, exp_dir):
     test_sets = three_iso_pairs.test_sets(2, {}, produce_multiple_translations=True, num_drafts=2)
 
     assert [test_set.predictions().name for test_set in test_sets] == [
-        "test.en.de.trg-predictions.txt.1.2",
-        "test.en.es.trg-predictions.txt.1.2",
-        "test.en.fr.trg-predictions.txt.1.2",
-        "test.en.de.trg-predictions.txt.2.2",
-        "test.en.es.trg-predictions.txt.2.2",
-        "test.en.fr.trg-predictions.txt.2.2",
+        "test.en.de.trg-predictions.1.txt.2",
+        "test.en.es.trg-predictions.1.txt.2",
+        "test.en.fr.trg-predictions.1.txt.2",
+        "test.en.de.trg-predictions.2.txt.2",
+        "test.en.es.trg-predictions.2.txt.2",
+        "test.en.fr.trg-predictions.2.txt.2",
     ]
 
 
@@ -223,8 +223,8 @@ def test_a_single_draft_still_covers_every_test_set(two_iso_pairs, exp_dir):
     test_sets = two_iso_pairs.test_sets(2, {}, produce_multiple_translations=True, num_drafts=1)
 
     assert [test_set.predictions().name for test_set in test_sets] == [
-        "test.en.es.trg-predictions.txt.1.2",
-        "test.en.fr.trg-predictions.txt.1.2",
+        "test.en.es.trg-predictions.1.txt.2",
+        "test.en.fr.trg-predictions.1.txt.2",
     ]
 
 
