@@ -2,7 +2,7 @@ import argparse
 import logging
 import re
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 import yaml
 from attr import dataclass
@@ -20,7 +20,7 @@ from machine.scripture import book_number_to_id, get_chapters
 from transformers.trainer_utils import get_last_checkpoint
 
 from ..common.environment import SilNlpEnv
-from ..common.paratext import book_file_name_digits, get_book_path
+from ..common.paratext import get_book_path
 from ..common.postprocesser import (
     NoDetectedQuoteConventionException,
     PostprocessConfig,
@@ -34,6 +34,7 @@ from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config
 from .config_utils import load_config
 from .corpora import CorpusPair
+from .draft_files import DraftFiles
 
 LOGGER = logging.getLogger(__package__ + ".postprocess")
 
@@ -102,48 +103,62 @@ class DraftMetadata:
     source_project: str
 
 
-# Get the paths of all drafts that would be produced by an experiment's translate config and that exist
-def get_draft_paths_from_exp(config: Config, environment: SilNlpEnv) -> List[DraftMetadata]:
-    with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as translate_config_file:
-        translate_requests = yaml.safe_load(translate_config_file).get("translate", [])
+class ExperimentDrafts:
+    """The drafts an experiment's translate config asks for, as far as they have been written."""
 
-    draft_metadata_list = []
-    for translate_request in translate_requests:
-        src_project = translate_request.get("src_project", next(iter(config.corpus_inventory.source_projects())))
+    def __init__(
+        self,
+        files: DraftFiles,
+        model_dir: Path,
+        source_projects: Set[str],
+        num_drafts: int,
+        environment: SilNlpEnv,
+    ) -> None:
+        self._files = files
+        self._model_dir = model_dir
+        self._source_projects = source_projects
+        self._num_drafts = num_drafts
+        self._environment = environment
 
-        ckpt = translate_request.get("checkpoint", "last")
-        if ckpt == "best":
-            step_str = str(CheckpointDirectory(config.model_dir).best().step)
-        elif ckpt == "last":
-            step_str = Path(get_last_checkpoint(config.model_dir)).name[11:]
-        else:
-            step_str = str(ckpt)
+    def existing(self) -> List[DraftMetadata]:
+        with self._files.translate_config().open("r", encoding="utf-8") as translate_config_file:
+            translate_requests = yaml.safe_load(translate_config_file).get("translate", [])
 
-        book_nums = get_chapters(translate_request.get("books", [])).keys()
-        for book_num in book_nums:
-            book = book_number_to_id(book_num)
+        draft_metadata_list = []
+        for translate_request in translate_requests:
+            src_project = translate_request.get("src_project", next(iter(self._source_projects)))
+            step_str = self._step_of(translate_request.get("checkpoint", "last"))
 
-            src_path = get_book_path(src_project, book, environment)
-            draft_path = (
-                config.exp_dir / "infer" / step_str / src_project / f"{book_file_name_digits(book_num)}{book}.SFM"
-            )
-            if draft_path.exists():
-                draft_metadata_list.append(
-                    DraftMetadata(source_path=src_path, draft_path=draft_path, source_project=src_project)
-                )
-            elif draft_path.with_suffix(f".{1}{draft_path.suffix}").exists():  # multiple drafts
-                for i in range(1, config.infer.get("num_drafts", 1) + 1):
+            book_nums = get_chapters(translate_request.get("books", [])).keys()
+            for book_num in book_nums:
+                book = book_number_to_id(book_num)
+
+                src_path = get_book_path(src_project, book, self._environment)
+                draft_path = self._files.draft(step_str, src_project, book_num)
+                if draft_path.exists():
                     draft_metadata_list.append(
-                        DraftMetadata(
-                            source_path=src_path,
-                            draft_path=draft_path.with_suffix(f".{i}{draft_path.suffix}"),
-                            source_project=src_project,
-                        )
+                        DraftMetadata(source_path=src_path, draft_path=draft_path, source_project=src_project)
                     )
-            else:
-                LOGGER.warning(f"Draft not found: {draft_path}")
+                elif draft_path.with_suffix(f".{1}{draft_path.suffix}").exists():  # multiple drafts
+                    for i in range(1, self._num_drafts + 1):
+                        draft_metadata_list.append(
+                            DraftMetadata(
+                                source_path=src_path,
+                                draft_path=draft_path.with_suffix(f".{i}{draft_path.suffix}"),
+                                source_project=src_project,
+                            )
+                        )
+                else:
+                    LOGGER.warning(f"Draft not found: {draft_path}")
 
-    return draft_metadata_list
+        return draft_metadata_list
+
+    def _step_of(self, checkpoint: str) -> str:
+        if checkpoint == "best":
+            return str(CheckpointDirectory(self._model_dir).best().step)
+        if checkpoint == "last":
+            return Path(get_last_checkpoint(self._model_dir)).name[11:]
+        return str(checkpoint)
 
 
 def postprocess_draft(
@@ -250,9 +265,16 @@ def postprocess_experiment(
     out_dir: Optional[Path] = None,
     environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
 ) -> None:
-    draft_metadata_list = get_draft_paths_from_exp(config, environment)
+    files = DraftFiles(config.exp_dir)
+    draft_metadata_list = ExperimentDrafts(
+        files,
+        config.model_dir,
+        config.corpus_inventory.source_projects(),
+        config.infer.get("num_drafts", 1),
+        environment,
+    ).existing()
 
-    with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
+    with files.translate_config().open("r", encoding="utf-8") as file:
         translate_config = yaml.safe_load(file)
         postprocess_configs = [PostprocessConfig(pc, environment) for pc in translate_config.get("postprocess", [])]
 
