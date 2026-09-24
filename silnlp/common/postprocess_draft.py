@@ -90,7 +90,7 @@ def main() -> None:
             raise ValueError("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
         clearml = SILClearML(experiment, args.clearml_queue, tag=args.clearml_tag, environment=environment)
         experiment = clearml.name
-        config = clearml.config
+        config = load_config(experiment, environment)
     else:
         experiment = experiment.replace("\\", "/")
         config = load_config(experiment, environment)
