@@ -112,13 +112,10 @@ class ScoreFiles:
         if not produce_multiple_translations:
             return [self._test_set(prefix, step, books, draft=None, draft_index=1) for prefix in prefixes]
 
-        drafted = [(prefix, draft) for draft in range(1, num_drafts + 1) for prefix in prefixes]
-        # Reported draft indices are numbered as if there were one test set per draft, so they only
-        # line up with the drafts above when that happens to be true.
-        reported = num_drafts * list(range(1, num_drafts + 1))
         return [
-            self._test_set(prefix, step, books, draft=draft, draft_index=draft_index)
-            for (prefix, draft), draft_index in zip(drafted, reported)
+            self._test_set(prefix, step, books, draft=draft, draft_index=draft)
+            for draft in range(1, num_drafts + 1)
+            for prefix in prefixes
         ]
 
     def _test_set_prefixes(self) -> List[str]:

@@ -170,9 +170,7 @@ def test_each_draft_of_a_test_set_gets_its_own_prediction_files(one_iso_pair, ex
     assert [test_set.linregress().name for test_set in test_sets] == ["linregress.2.1.json", "linregress.2.2.json"]
 
 
-def test_drafts_of_several_test_sets_are_misnumbered(two_iso_pairs, exp_dir):
-    """Pins a defect rather than endorsing it: draft indices are numbered as though there were one
-    test set per draft, so with several test sets they label the wrong draft."""
+def test_each_test_set_reports_the_draft_it_came_from(two_iso_pairs, exp_dir):
     (exp_dir / "test.en.es.src.txt").touch()
     (exp_dir / "test.en.fr.src.txt").touch()
 
@@ -180,15 +178,29 @@ def test_drafts_of_several_test_sets_are_misnumbered(two_iso_pairs, exp_dir):
 
     assert [(test_set.predictions().name, test_set.draft_index()) for test_set in test_sets] == [
         ("test.en.es.trg-predictions.txt.1.2", 1),
-        ("test.en.fr.trg-predictions.txt.1.2", 2),
-        ("test.en.es.trg-predictions.txt.2.2", 1),
+        ("test.en.fr.trg-predictions.txt.1.2", 1),
+        ("test.en.es.trg-predictions.txt.2.2", 2),
         ("test.en.fr.trg-predictions.txt.2.2", 2),
     ]
 
 
-def test_drafts_beyond_the_draft_numbering_are_dropped(three_iso_pairs, exp_dir):
-    """Pins the other half of the same defect: three test sets over two drafts should be six, but
-    the draft numbering runs out after four and the rest are never scored."""
+def test_no_two_test_sets_share_a_linear_regression_file(two_iso_pairs, exp_dir):
+    (exp_dir / "test.en.es.src.txt").touch()
+    (exp_dir / "test.en.fr.src.txt").touch()
+
+    test_sets = two_iso_pairs.test_sets(2, {}, produce_multiple_translations=True, num_drafts=2)
+
+    names = [test_set.linregress().name for test_set in test_sets]
+    assert names == [
+        "linregress.en.es.2.1.json",
+        "linregress.en.fr.2.1.json",
+        "linregress.en.es.2.2.json",
+        "linregress.en.fr.2.2.json",
+    ]
+    assert len(set(names)) == len(names)
+
+
+def test_every_test_set_is_scored_for_every_draft(three_iso_pairs, exp_dir):
     for iso in ("de", "es", "fr"):
         (exp_dir / f"test.en.{iso}.src.txt").touch()
 
@@ -199,6 +211,20 @@ def test_drafts_beyond_the_draft_numbering_are_dropped(three_iso_pairs, exp_dir)
         "test.en.es.trg-predictions.txt.1.2",
         "test.en.fr.trg-predictions.txt.1.2",
         "test.en.de.trg-predictions.txt.2.2",
+        "test.en.es.trg-predictions.txt.2.2",
+        "test.en.fr.trg-predictions.txt.2.2",
+    ]
+
+
+def test_a_single_draft_still_covers_every_test_set(two_iso_pairs, exp_dir):
+    (exp_dir / "test.en.es.src.txt").touch()
+    (exp_dir / "test.en.fr.src.txt").touch()
+
+    test_sets = two_iso_pairs.test_sets(2, {}, produce_multiple_translations=True, num_drafts=1)
+
+    assert [test_set.predictions().name for test_set in test_sets] == [
+        "test.en.es.trg-predictions.txt.1.2",
+        "test.en.fr.trg-predictions.txt.1.2",
     ]
 
 
