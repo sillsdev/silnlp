@@ -8,9 +8,11 @@ from typing import Generator, Iterable, List, Optional, Tuple, Union
 from machine.corpora import UsfmFileTextCorpus, create_versification_ref_corpus, extract_scripture_corpus
 from machine.scripture import book_number_to_id, get_chapters
 
+from silnlp.common.corpus import load_corpus
+
 from ..common.environment import SilNlpEnv
 from ..common.paratext import book_file_name_digits
-from ..common.postprocesser import PostprocessConfig, PostprocessHandler
+from ..common.postprocessor import PostprocessConfig, PostprocessHandler
 from ..common.translation_data_structures import SentenceTranslationGroup
 from ..common.translator import CONFIDENCE_SUFFIX, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
@@ -142,9 +144,8 @@ class TranslationTask:
                 output_dir = output_dir / trg_project
             output_dir.mkdir(exist_ok=True, parents=True)
 
-            experiment_ckpt_str = f"{self.name}:{self.checkpoint}"
-            if not config.model_dir.exists():
-                experiment_ckpt_str = f"{self.name}:base"
+            src_training_rows = list(load_corpus(config.exp_dir / config.train_src_detok_filename()))
+            trg_training_rows = list(load_corpus(config.exp_dir / config.train_trg_detok_filename()))
 
             translation_failed: List[str] = []
             for book_num, chapters in book_nums.items():
@@ -157,12 +158,13 @@ class TranslationTask:
                         book,
                         output_path,
                         trg_iso,
+                        src_training_rows,
+                        trg_training_rows,
                         produce_multiple_translations,
                         save_confidences,
                         chapters if chapters else None,
                         trg_project,
                         postprocess_handler,
-                        experiment_ckpt_str,
                         config.corpus_pairs,
                         tags,
                     )
@@ -203,8 +205,8 @@ class TranslationTask:
         with translator:
             if src_iso is None:
                 src_iso = config.default_test_src_iso
-                if src_iso == "" and len(config.src_iso) > 0:
-                    src_iso = next(iter(config.src_iso))
+                if src_iso == "" and len(config.src_isos) > 0:
+                    src_iso = next(iter(config.src_isos))
             if src_iso == "":
                 LOGGER.warning("No language code was set for the source language")
             if trg_iso is None:
@@ -263,18 +265,15 @@ class TranslationTask:
                         src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations, tags
                     )
                 elif ext == ".usfm" or ext == ".sfm":
-                    experiment_ckpt_str = f"{self.name}:{self.checkpoint}"
-                    if not config.model_dir.exists():
-                        experiment_ckpt_str = f"{self.name}:base"
                     translator.translate_usfm(
                         src_file_path,
                         trg_file_path,
                         src_iso,
                         trg_iso,
+                        config,
                         produce_multiple_translations,
                         save_confidences,
                         postprocess_handler=postprocess_handler,
-                        experiment_ckpt_str=experiment_ckpt_str,
                         training_corpus_pairs=config.corpus_pairs,
                         tags=tags,
                     )

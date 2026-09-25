@@ -4,6 +4,7 @@ from tempfile import TemporaryDirectory
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from machine.corpora import (
+    AlignedWordPair,
     PlaceMarkersAlignmentInfo,
     PlaceMarkersUsfmUpdateBlockHandler,
     ScriptureRef,
@@ -31,7 +32,6 @@ from machine.punctuation_analysis import (
 from machine.tokenization import LatinWordTokenizer
 from machine.translation import WordAlignmentMatrix
 
-from ..alignment.eflomal import to_word_alignment_matrix
 from ..alignment.utils import compute_alignment_scores
 from ..nmt.corpora import CorpusPair
 from .corpus import load_corpus, write_corpus
@@ -406,21 +406,20 @@ class PostprocessHandler:
     ) -> None:
         if configs is None:
             configs = []
-
         self.configs = ([PostprocessConfig({}, environment)] if include_base else []) + configs
 
     # NOTE: Row metadata may need to be created/recreated at different times
     # For example, the marker placement metadata needs to be recreated for each new draft
     # because it uses text alignment, but other metadata may only need to be created once overall,
     # or once per source project. This may change what part of the process we want this function to be called at
-    def construct_rows(self, refs: List[ScriptureRef], source: List[str], translation: List[str]) -> None:
+    def construct_rows(self, refs: List[ScriptureRef], source: List[str], translation: List[str], train_source: List[str], train_target: List[str]) -> None:
         for config in self.configs:
             config.rows = [UpdateUsfmRow([ref], t, {}) for ref, t in zip(refs, translation)]
 
-        self._construct_place_markers_metadata(source, translation)
+        self._construct_place_markers_metadata(source, translation, train_source, train_target)
 
     def _construct_place_markers_metadata(
-        self, source: List[str], translation: List[str], aligner: str = "eflomal"
+        self, source: List[str], translation: List[str], train_source: List[str], train_target: List[str], aligner: str = "eflomal"
     ) -> None:
         pm_configs = [
             config
@@ -431,7 +430,7 @@ class PostprocessHandler:
             return
 
         tokenizer = LatinWordTokenizer()
-        alignments = self._get_alignment_matrices(source, translation, aligner)
+        alignments = self._get_alignment_matrices(source + train_source, translation + train_target, aligner, only_fetch_alignments_for_first_n=len(source))
         for i, (s, t, alignment) in enumerate(zip(source, translation, alignments)):
             source_tokens = list(tokenizer.tokenize(s))
             translation_tokens = list(tokenizer.tokenize(t))
@@ -451,8 +450,20 @@ class PostprocessHandler:
                         style_behavior=config.get_style_behavior(),
                     )
 
+    def _to_word_alignment_matrix(alignment_str: str) -> WordAlignmentMatrix:
+        word_pairs = AlignedWordPair.from_string(alignment_str)
+        row_count = 0
+        column_count = 0
+        for pair in word_pairs:
+            if pair.source_index + 1 > row_count:
+                row_count = pair.source_index + 1
+            if pair.target_index + 1 > column_count:
+                column_count = pair.target_index + 1
+        return WordAlignmentMatrix.from_word_pairs(row_count, column_count, word_pairs)
+
+
     def _get_alignment_matrices(
-        self, src_sents: List[str], trg_sents: List[str], aligner: str = "eflomal"
+        self, src_sents: List[str], trg_sents: List[str], aligner: str = "eflomal", only_fetch_alignments_for_first_n: int | None = None 
     ) -> List[WordAlignmentMatrix]:
         with TemporaryDirectory() as td:
             align_path = Path(td, "sym-align.txt")
@@ -460,4 +471,4 @@ class PostprocessHandler:
             write_corpus(Path(td, "trg_align.txt"), trg_sents)
             compute_alignment_scores(Path(td, "src_align.txt"), Path(td, "trg_align.txt"), aligner, align_path)
 
-            return [to_word_alignment_matrix(line) for line in load_corpus(align_path)]
+            return [to_word_alignment_matrix(line) for line in list(load_corpus(align_path))[:only_fetch_alignments_for_first_n]]
