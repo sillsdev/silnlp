@@ -434,6 +434,8 @@ class LocalLLMConfig(LLMConfig[LocalLLMPromptMessages]):
         ratio = float(self.train["instruction_data"]["mix_ratio"])
         if ratio < 0:
             raise ValueError(f"train.instruction_data.mix_ratio must be non-negative, got {ratio}.")
+        if ratio > 1:
+            raise ValueError(f"train.instruction_data.mix_ratio must be no greater than 1, got {ratio}.")
         return ratio
 
     def instruction_data_paths(self) -> List[Path]:
@@ -475,10 +477,15 @@ class LocalLLMConfig(LLMConfig[LocalLLMPromptMessages]):
                         f"Instruction data file {dataset_path} does not exist. Run "
                         "scripts/prepare_instruction_data.py to generate it."
                     )
-                # Datasets mix evenly regardless of their original relative sizes; a dataset
-                # smaller than its even share is used in full, without repetition (see split_corpus).
+                # A dataset smaller than its even share is used in full, without repetition (see split_corpus).
                 share = base_share + (1 if i < remainder else 0)
                 corpus_size = self._count_nonblank_lines(dataset_path)
+                if corpus_size < share:
+                    LOGGER.warning(
+                        f"Instruction dataset {dataset_path.stem} has {corpus_size} examples, fewer than its "
+                        f"even share of {share}; all of it is used, and the shortfall is not made up by the "
+                        "other datasets, so the mix will not be even."
+                    )
                 selected_indices = split_corpus(corpus_size, share)
 
                 index = 0
@@ -690,6 +697,31 @@ class DataCollatorForCausalLM:
         return [self._IGNORED_LABEL_ID] * len(prompt_ids) + completion_ids
 
 
+class OverlengthRowFilter:
+    """Drops encoded rows longer than max_seq_length to avoid potential NaN"""
+
+    def __init__(self, max_seq_length: int) -> None:
+        self._max_seq_length = max_seq_length
+
+    def apply(self, dataset: Dataset, name: str) -> Dataset:
+        # Not loaded from the cache, so a re-run still warns about every dropped row.
+        kept = dataset.filter(self._fits, with_indices=True, fn_kwargs={"name": name}, load_from_cache_file=False)
+        if len(kept) == 0:
+            raise RuntimeError(
+                f"All {len(dataset)} {name} rows are longer than params.max_seq_length ({self._max_seq_length})."
+            )
+        return kept
+
+    def _fits(self, row: dict, index: int, name: str) -> bool:
+        length = len(row["input_ids"])
+        if length <= self._max_seq_length:
+            return True
+        LOGGER.warning(
+            f"Dropping {name} row {index}: its {length} tokens exceed params.max_seq_length ({self._max_seq_length})."
+        )
+        return False
+
+
 class InterleavedTrainDataset(TorchDataset):
     """Combines two datasets of different lengths into one, reshuffling each whenever it's exhausted."""
 
@@ -878,10 +910,12 @@ class LocalLLMModel(NMTModel):
             tokenizer, pad_to_multiple_of=8 if (training_args.fp16 or training_args.bf16) else None
         )
 
+        length_filter = OverlengthRowFilter(max_seq_length)
+
         def encode_completion(prompt_ids: List[int], target: str) -> dict:
             completion_ids = tokenizer(target, add_special_tokens=False)["input_ids"] + [eos_token_id]
-            input_ids = (prompt_ids + completion_ids)[:max_seq_length]
-            labels = data_collator.mask_ignored_ids(prompt_ids, completion_ids)[:max_seq_length]
+            input_ids = prompt_ids + completion_ids
+            labels = data_collator.mask_ignored_ids(prompt_ids, completion_ids)
             return {"input_ids": input_ids, "labels": labels, "attention_mask": [1] * len(input_ids)}
 
         def encode(example: dict, idx: int) -> dict:
@@ -915,8 +949,10 @@ class LocalLLMModel(NMTModel):
         )
         if train_dataset is not None:
             train_dataset = train_dataset.map(encode, with_indices=True, remove_columns=train_dataset.column_names)
+            train_dataset = length_filter.apply(train_dataset, "train")
         if eval_dataset is not None:
             eval_dataset = eval_dataset.map(encode_eval, with_indices=True, remove_columns=eval_dataset.column_names)
+            eval_dataset = length_filter.apply(eval_dataset, "val")
 
         # Instruction data is mixed into training only
         instruction_dataset = self._load_instruction_dataset(
@@ -927,6 +963,7 @@ class LocalLLMModel(NMTModel):
             instruction_dataset = instruction_dataset.map(
                 encode_instruction, remove_columns=instruction_dataset.column_names
             )
+            instruction_dataset = length_filter.apply(instruction_dataset, "instruction")
             total_length = self._interleaved_dataset_length(training_args, len(train_dataset), mix_ratio)
             translation_count = round(total_length / (1 + mix_ratio))
             instruction_count = total_length - translation_count

@@ -352,6 +352,7 @@ class LLMConfig(Config, Generic[TPromptMessages]):
     DEFAULT_EXAMPLE_FORMAT: Union[str, dict] = "text"
 
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
+        self._check_for_deprecated_params_prompt_section(config)
         config = merge_dict(self._default_config(exp_dir), config)
         infer_prompt = self._create_infer_prompt_config(config["infer"]["prompt"])
 
@@ -364,6 +365,14 @@ class LLMConfig(Config, Generic[TPromptMessages]):
             )
         self._infer_example_pool = self._create_example_pool(infer_prompt)
         self._infer_prompt_builder = self._create_prompt_builder(infer_prompt, self._infer_example_pool)
+
+    def _check_for_deprecated_params_prompt_section(self, config: dict) -> None:
+        params = config.get("params")
+        if isinstance(params, dict) and "prompt" in params:
+            LOGGER.warning(
+                "params.prompt is no longer read and will be ignored; move its settings to infer.prompt "
+                "(and, for a locally fine-tuned model, train.prompt)."
+            )
 
     def prompt_defaults(self) -> PromptDefaults:
         return PromptDefaults(

@@ -22,6 +22,7 @@ from silnlp.nmt.local_llm_config import (
     InterleavedTrainDataset,
     LocalLLMConfig,
     LocalLLMModel,
+    OverlengthRowFilter,
     TranslateGemmaPromptMessages,
 )
 
@@ -131,6 +132,30 @@ def test_build_generation_kwargs_rejects_more_drafts_than_beams():
     config = _generation_config({"max_new_tokens": 256, "num_beams": 1, "do_sample": False, "temperature": 0.7})
     with pytest.raises(RuntimeError, match="num_beams"):
         config.build_generation_kwargs(num_return_sequences=2, pad_token_id=0)
+
+
+def _encoded_rows(*lengths: int) -> Dataset:
+    return Dataset.from_dict({"input_ids": [list(range(length)) for length in lengths]})
+
+
+def test_overlength_row_filter_drops_only_rows_longer_than_max_seq_length():
+    kept = OverlengthRowFilter(4).apply(_encoded_rows(3, 5, 4, 9), "train")
+    assert [len(ids) for ids in kept["input_ids"]] == [3, 4]
+
+
+def test_overlength_row_filter_warns_about_each_dropped_row(caplog):
+    with caplog.at_level(logging.WARNING):
+        OverlengthRowFilter(4).apply(_encoded_rows(3, 5, 4, 9), "val")
+    warnings = [record.message for record in caplog.records if "Dropping" in record.message]
+    assert warnings == [
+        "Dropping val row 1: its 5 tokens exceed params.max_seq_length (4).",
+        "Dropping val row 3: its 9 tokens exceed params.max_seq_length (4).",
+    ]
+
+
+def test_overlength_row_filter_rejects_a_dataset_with_no_row_short_enough():
+    with pytest.raises(RuntimeError, match="All 2 instruction rows"):
+        OverlengthRowFilter(4).apply(_encoded_rows(5, 9), "instruction")
 
 
 def test_data_collator_pad_to_multiple_of():
@@ -327,6 +352,23 @@ def test_llm_config_warns_when_num_examples_set_without_examples_placeholder(tmp
             tmp_path, {"num_examples": 2, "instruction_template": "Translate {src_lang} to {trg_lang}: {source}"}
         )
     assert any("{examples}" in record.message for record in caplog.records)
+
+
+def _construct_llm_config_with_params(tmp_path: Path, params: dict) -> LocalLLMConfig:
+    environment = SilNlpEnv.create_environment_with_mt_dir(tmp_path)
+    return LocalLLMConfig(tmp_path, {"data": {"corpus_pairs": []}, "params": params}, environment)
+
+
+def test_llm_config_warns_about_params_prompt(tmp_path, caplog):
+    with caplog.at_level(logging.WARNING):
+        _construct_llm_config_with_params(tmp_path, {"prompt": {"num_examples": 2}})
+    assert any("params.prompt" in record.message for record in caplog.records)
+
+
+def test_llm_config_does_not_warn_about_params_prompt_when_absent(tmp_path, caplog):
+    with caplog.at_level(logging.WARNING):
+        _construct_llm_config_with_params(tmp_path, {"finetune_method": "lora"})
+    assert not any("params.prompt" in record.message for record in caplog.records)
 
 
 def test_llm_config_rejects_unknown_example_selection_method(tmp_path):
@@ -712,6 +754,41 @@ def test_write_instruction_data_mixes_evenly_and_uses_undersized_datasets_whole(
     # inputs and outputs stay aligned within each example
     for e in examples:
         assert e["turns"][0]["content"].split("-in-")[1] == e["output"].split("-out-")[1]
+
+
+def _instruction_data_stub_with_sizes(tmp_path: Path, sizes: dict, size: int) -> _InstructionDataStub:
+    mt_dir = tmp_path / "mt"
+    instructions_dir = mt_dir / "instructions"
+    instructions_dir.mkdir(parents=True)
+    exp_dir = tmp_path / "exp"
+    exp_dir.mkdir()
+    for name, num_lines in sizes.items():
+        _write_jsonl_fixture(
+            instructions_dir / f"{name}.jsonl",
+            [([{"role": "user", "content": f"{name}-in-{i}"}], f"{name}-out-{i}") for i in range(num_lines)],
+        )
+    return _InstructionDataStub(
+        train={"instruction_data": {"datasets": list(sizes), "size": size}},
+        _environment=SilNlpEnv.create_environment_with_mt_dir(mt_dir),
+        exp_dir=exp_dir,
+    )
+
+
+def test_write_instruction_data_warns_about_a_dataset_smaller_than_its_share(tmp_path, caplog):
+    stub = _instruction_data_stub_with_sizes(tmp_path, {"a": 10, "b": 3}, size=8)
+    with caplog.at_level(logging.WARNING):
+        stub._write_instruction_data()
+    warnings = [record.message for record in caplog.records if "even share" in record.message]
+    assert len(warnings) == 1
+    assert "b has 3 examples" in warnings[0]
+    assert "share of 4" in warnings[0]
+
+
+def test_write_instruction_data_does_not_warn_when_a_dataset_exactly_fills_its_share(tmp_path, caplog):
+    stub = _instruction_data_stub_with_sizes(tmp_path, {"a": 10, "b": 4}, size=8)
+    with caplog.at_level(logging.WARNING):
+        stub._write_instruction_data()
+    assert not any("even share" in record.message for record in caplog.records)
 
 
 def test_write_instruction_data_missing_file_raises(tmp_path):
