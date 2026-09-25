@@ -22,7 +22,7 @@ from transformers.trainer_utils import get_last_checkpoint
 from ..common.corpus import load_corpus
 from ..common.environment import SilNlpEnv
 from ..common.paratext import book_file_name_digits, get_book_path
-from ..common.postprocesser import (
+from ..common.postprocessor import (
     NoDetectedQuoteConventionException,
     PostprocessConfig,
     PostprocessHandler,
@@ -279,7 +279,7 @@ def postprocess_experiment(
                 training_corpus_pairs=config.corpus_pairs,
                 environment=environment,
                 train_src_filepath=config.exp_dir / config.train_src_detok_filename(),
-                train_trg_filename=config.exp_dir / config.train_trg_detok_filename()
+                train_trg_filepath=config.exp_dir / config.train_trg_detok_filename()
             )
 
 

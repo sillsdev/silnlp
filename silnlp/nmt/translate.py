@@ -8,9 +8,11 @@ from typing import Generator, Iterable, List, Optional, Tuple, Union
 from machine.corpora import UsfmFileTextCorpus, create_versification_ref_corpus, extract_scripture_corpus
 from machine.scripture import book_number_to_id, get_chapters
 
+from silnlp.common.corpus import load_corpus
+
 from ..common.environment import SilNlpEnv
 from ..common.paratext import book_file_name_digits
-from ..common.postprocesser import PostprocessConfig, PostprocessHandler
+from ..common.postprocessor import PostprocessConfig, PostprocessHandler
 from ..common.translation_data_structures import SentenceTranslationGroup
 from ..common.translator import CONFIDENCE_SUFFIX, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
@@ -142,6 +144,9 @@ class TranslationTask:
                 output_dir = output_dir / trg_project
             output_dir.mkdir(exist_ok=True, parents=True)
 
+            src_training_rows = list(load_corpus(config.exp_dir / config.train_src_detok_filename()))
+            trg_training_rows = list(load_corpus(config.exp_dir / config.train_trg_detok_filename()))
+
             translation_failed: List[str] = []
             for book_num, chapters in book_nums.items():
                 book = book_number_to_id(book_num)
@@ -153,7 +158,8 @@ class TranslationTask:
                         book,
                         output_path,
                         trg_iso,
-                        config,
+                        src_training_rows,
+                        trg_training_rows,
                         produce_multiple_translations,
                         save_confidences,
                         chapters if chapters else None,

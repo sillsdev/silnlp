@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Set
 from attr import dataclass
 from machine.corpora import ScriptureRef, TextRow, UsfmFileText, UsfmStylesheet, UsfmTextType
 
-from .postprocesser import PostprocessHandler
+from .postprocessor import PostprocessHandler
 from .utils import NLTKSentenceTokenizer, add_tags_to_sentence
 
 

@@ -24,13 +24,12 @@ from machine.scripture import VerseRef, is_book_id_valid
 from scipy.stats import gmean
 
 from silnlp.common.utils import add_tags_to_sentence
-from silnlp.nmt.config import Config
 from silnlp.nmt.corpora import CorpusPair
 
 from .corpus import load_corpus, write_corpus
 from .environment import SilNlpEnv
 from .paratext import get_book_path, get_iso, get_parent_project_dir
-from .postprocesser import NoDetectedQuoteConventionException, PostprocessHandler, UnknownQuoteConventionException
+from .postprocessor import NoDetectedQuoteConventionException, PostprocessHandler, UnknownQuoteConventionException
 from .translation_data_structures import DraftGroup, SentenceTranslationGroup, TranslatedDraft, UsfmTextRowCollection
 from .utils import NLTKSentenceTokenizer
 
@@ -307,7 +306,6 @@ class Translator(AbstractContextManager["Translator"], ABC):
         trg_iso: str,
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
-        trg_prefix: str = "",
         tags: Optional[List[str]] = None,
     ) -> None:
 
@@ -335,7 +333,8 @@ class Translator(AbstractContextManager["Translator"], ABC):
         book: str,
         output_path: Path,
         trg_iso: str,
-        experiment_config: Config,
+        src_training_rows: List[str],
+        trg_training_rows: List[str],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
         chapters: Optional[List[int]] = None,
@@ -355,7 +354,8 @@ class Translator(AbstractContextManager["Translator"], ABC):
             output_path,
             get_iso(self._environment.get_paratext_project_dir(src_project)),
             trg_iso,
-            experiment_config,
+            src_training_rows,
+            trg_training_rows,
             produce_multiple_translations,
             save_confidences,
             chapters,
@@ -371,7 +371,8 @@ class Translator(AbstractContextManager["Translator"], ABC):
         trg_file_path: Path,
         src_iso: str,
         trg_iso: str,
-        experiment_config: Config,
+        src_training_rows: List[str],
+        trg_training_rows: List[str],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
         chapters: Optional[List[int]] = None,
@@ -435,7 +436,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
         if postprocess_handler is None:
             postprocess_handler = PostprocessHandler(environment=self._environment)
         for draft_index, translated_draft in enumerate(translated_text_rows.get_translated_drafts(), 1):
-            translated_text_rows.construct_postprocessing_rows_for_draft_index(postprocess_handler, draft_index,  list(load_corpus(experiment_config.exp_dir / experiment_config.train_src_detok_filename())),list(load_corpus(experiment_config.exp_dir / experiment_config.train_trg_detok_filename())) )
+            translated_text_rows.construct_postprocessing_rows_for_draft_index(postprocess_handler, draft_index, src_training_rows, trg_training_rows)
 
             for config in postprocess_handler.configs:
 
