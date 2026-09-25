@@ -1,288 +1,342 @@
-from dataclasses import dataclass
+import json
+import logging
 
 import pytest
-from jinja2.exceptions import UndefinedError
 
-from silnlp.nmt.config_utils import is_llm_config
+from silnlp.nmt.config import Language
+from silnlp.nmt.example_retrieval import Example, ExampleFormatterFactory
 from silnlp.nmt.llm_config import (
-    DataCollatorForCausalLM,
-    Language,
     LLMConfig,
-    LLMModel,
+    PromptBuilder,
     PromptMessages,
-    TranslateGemmaPromptMessages,
-    build_generation_kwargs,
+    PromptTemplate,
+    PlainPromptMessagesFactory,
+    PromptConfig,
+    PromptDefaults,
+    PromptTemplateCollection,
 )
 
-
-def test_is_llm_config_explicit_model_type():
-    assert is_llm_config({"model_type": "llm", "model": "anything"})
-    assert not is_llm_config({"model_type": "nmt", "model": "google/gemma-2-2b-it"})
+EN = Language("en", "English")
+FR = Language("fr", "French")
 
 
-def test_is_llm_config_prefix_fallback():
-    assert is_llm_config({"model": "google/gemma-2-2b-it"})
-    assert is_llm_config({"model": "tencent/Hunyuan-MT-7B"})
-    assert not is_llm_config({"model": "facebook/nllb-200-distilled-1.3B"})
-    assert not is_llm_config({"model": "google/madlad400-3b-mt"})
+def _template(instruction_template="{source}", system_message="", example_format="text"):
+    return PromptTemplate(system_message, instruction_template, ExampleFormatterFactory.create(example_format))
 
 
-def test_prompt_messages_to_chat_messages():
-    prompt = PromptMessages(system_message="You are a translator.", instruction="Translate: hello", target="bonjour")
+def _collection(*templates):
+    return PromptTemplateCollection(list(templates))
+
+
+def _builder(templates, num_examples=0, pool=None):
+    return PromptBuilder(templates, num_examples, pool, PlainPromptMessagesFactory())
+
+
+class _FakePool:
+    def __init__(self, examples=(), whole=False):
+        self._examples = list(examples)
+        self._whole = whole
+        self.calls = []
+
+    def __len__(self):
+        return len(self._examples)
+
+    def covers_whole_pool(self, k):
+        return self._whole
+
+    def select(self, query, k, pool_index=None):
+        self.calls.append((query, k, pool_index))
+        return self._examples
+
+
+# --- PromptMessages ----------------------------------------------------------------------
+
+
+def test_prompt_messages_include_the_system_and_assistant_turns():
+    prompt = PromptMessages("Be terse.", "Translate: hello", "bonjour")
     assert prompt.to_chat_messages() == [
-        {"role": "system", "content": "You are a translator."},
+        {"role": "system", "content": "Be terse."},
         {"role": "user", "content": "Translate: hello"},
         {"role": "assistant", "content": "bonjour"},
     ]
 
 
-def test_prompt_messages_folds_system_message_into_user_turn():
-    prompt = PromptMessages(system_message="You are a translator.", instruction="Translate: hello")
-    assert prompt.to_folded_chat_messages() == [
-        {"role": "user", "content": "You are a translator.\n\nTranslate: hello"}
+def test_prompt_messages_fold_the_system_message_into_the_user_turn():
+    prompt = PromptMessages("Be terse.", "Translate: hello")
+    assert prompt.to_folded_chat_messages() == [{"role": "user", "content": "Be terse.\n\nTranslate: hello"}]
+
+
+# --- PromptBuilder -----------------------------------------------------------------------
+
+
+def test_prompt_builder_fills_the_instruction_template():
+    builder = _builder(_collection(_template("Translate {src_lang} to {trg_lang}: {source}")), 0, None)
+    assert builder.build("hello", EN, FR).instruction == "Translate English to French: hello"
+
+
+def test_prompt_builder_formats_the_system_message_with_the_languages():
+    builder = _builder(_collection(_template(system_message="{src_lang} into {trg_lang}")), 0, None)
+    assert builder.build("hello", EN, FR).system_message == "English into French"
+
+
+def test_prompt_builder_renders_examples_into_the_placeholder():
+    pool = _FakePool([Example("cat", "chat")])
+    builder = _builder(
+        _collection(_template("{examples}{source}", example_format={"template": "{source}->{target}\n"})),
+        1,
+        pool,
+    )
+    assert builder.build("hello", EN, FR).instruction == "cat->chat\nhello"
+    assert pool.calls == [("hello", 1, None)]
+
+
+def test_prompt_builder_skips_the_pool_when_no_examples_are_asked_for():
+    pool = _FakePool([Example("cat", "chat")])
+    builder = _builder(_collection(_template("{examples}{source}")), 0, pool)
+    assert builder.build("hello", EN, FR).instruction == "hello"
+    assert pool.calls == []
+
+
+def test_prompt_builder_requires_at_least_one_template():
+    with pytest.raises(ValueError, match="No valid prompt templates"):
+        _builder(PromptTemplateCollection([]), 0, None)
+
+
+def test_prompt_builder_rotates_templates_by_pool_index():
+    builder = _builder(_collection(_template("A: {source}"), _template("B: {source}")), 0, None)
+    assert [builder.build("x", EN, FR, pool_index=i).instruction for i in range(4)] == [
+        "A: x",
+        "B: x",
+        "A: x",
+        "B: x",
     ]
 
 
-def test_prompt_messages_without_system_message():
-    prompt = PromptMessages(system_message="", instruction="Translate: hello")
-    assert prompt.to_chat_messages() == [{"role": "user", "content": "Translate: hello"}]
-    assert prompt.to_folded_chat_messages() == [{"role": "user", "content": "Translate: hello"}]
+def test_prompt_builder_uses_the_first_template_when_there_is_no_pool_index():
+    builder = _builder(_collection(_template("A: {source}"), _template("B: {source}")), 0, None)
+    assert builder.build("x", EN, FR).instruction == "A: x"
 
 
-def test_translate_gemma_prompt_messages_is_a_prompt_messages():
-    prompt = TranslateGemmaPromptMessages(
-        source_language=Language("en", "English"), target_language=Language("fr", "French"), text="hello"
+def test_prompt_builder_reports_whether_it_covers_the_whole_pool():
+    assert not _builder(_collection(_template()), 5, None).covers_whole_pool()
+    assert _builder(_collection(_template()), 5, _FakePool(whole=True)).covers_whole_pool()
+
+
+def test_prompt_template_reports_its_examples_placeholder():
+    assert _template("{examples}{source}").describe_examples_mismatch(2) is None
+    assert _template("{source}").describe_examples_mismatch(2) is not None
+
+
+# --- config parsing ----------------------------------------------------------------------
+
+
+def _prompt_config(**settings):
+    base = {
+        "num_examples": 0,
+        "example_selection": {"method": "tfidf", "model": None},
+        "system_message": "",
+        "instruction_template": "{source}",
+        "example_format": "text",
+    }
+    base.update(settings)
+    return PromptConfig(base, "train.prompt", DEFAULTS)
+
+
+def test_prompt_config_creates_the_configured_retriever():
+    retriever = _prompt_config(example_selection={"method": "bm25", "model": None}).create_retriever()
+    assert retriever.method == "bm25"
+
+
+def test_prompt_config_accepts_a_bare_string_selection():
+    # merge_dict() replaces rather than merges when a bare-string override lands on a dict default.
+    assert _prompt_config(example_selection="embedding").create_retriever().method == "embedding"
+
+
+def test_prompt_config_rejects_a_negative_example_count():
+    with pytest.raises(ValueError, match="non-negative"):
+        _prompt_config(num_examples=-1).get_num_examples()
+
+
+# --- default resolution ------------------------------------------------------------------
+
+
+DEFAULTS = PromptDefaults(
+    LLMConfig.DEFAULT_SYSTEM_MESSAGE,
+    LLMConfig.DEFAULT_INSTRUCTION_TEMPLATE,
+    LLMConfig.DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE,
+    LLMConfig.DEFAULT_EXAMPLE_FORMAT,
+)
+
+
+def _resolved(**settings):
+    prompt = {"system_message": None, "instruction_template": None, "example_format": None, **settings}
+    PromptConfig(prompt, "train.prompt", DEFAULTS)
+    return prompt
+
+
+def test_resolve_prompt_defaults_uses_the_zero_shot_template_without_examples():
+    prompt = _resolved(num_examples=0)
+    assert prompt["instruction_template"] == LLMConfig.DEFAULT_INSTRUCTION_TEMPLATE
+    assert "{examples}" not in prompt["instruction_template"]
+    assert prompt["system_message"] == LLMConfig.DEFAULT_SYSTEM_MESSAGE
+    assert prompt["example_format"] == LLMConfig.DEFAULT_EXAMPLE_FORMAT
+
+
+def test_resolve_prompt_defaults_uses_the_few_shot_template_with_examples():
+    prompt = _resolved(num_examples=3)
+    assert prompt["instruction_template"] == LLMConfig.DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE
+    assert "{examples}" in prompt["instruction_template"]
+
+
+def test_resolve_prompt_defaults_leaves_the_user_wording_alone():
+    prompt = {"system_message": "mine", "instruction_template": "{source}", "example_format": "json", "num_examples": 3}
+    PromptConfig(prompt, "train.prompt", DEFAULTS)
+    assert prompt == {
+        "system_message": "mine",
+        "instruction_template": "{source}",
+        "example_format": "json",
+        "num_examples": 3,
+    }
+
+
+def test_the_two_default_templates_agree_apart_from_the_examples_block():
+    zero_shot = LLMConfig.DEFAULT_INSTRUCTION_TEMPLATE.format(src_lang="English", trg_lang="French", source="hello")
+    few_shot = LLMConfig.DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE.format(
+        src_lang="English", trg_lang="French", source="hello", examples="EXAMPLES\n\n"
     )
-    assert isinstance(prompt, PromptMessages)
+    assert zero_shot.startswith("Translate the following text from English to French.")
+    assert "EXAMPLES" in few_shot
+    assert few_shot.endswith("hello")
 
 
-def test_translate_gemma_prompt_messages_has_no_folding_or_plain_text_fallback():
-    prompt = TranslateGemmaPromptMessages(
-        source_language=Language("en", "English"), target_language=Language("fr", "French"), text="hello"
+# --- placeholder warnings ----------------------------------------------------------------
+
+
+def test_warns_when_examples_are_requested_but_the_template_has_no_placeholder(caplog):
+    with caplog.at_level(logging.WARNING):
+        PromptTemplateCollection([_template("{source}")]).validate_for_icl(2, "train.prompt.instruction_template")
+    assert any("silently discarded" in record.message for record in caplog.records)
+
+
+def test_warns_when_the_template_has_a_placeholder_but_no_examples_are_requested(caplog):
+    with caplog.at_level(logging.WARNING):
+        collection = PromptTemplateCollection([_template("{examples}{source}")])
+        collection.validate_for_icl(0, "train.prompt.instruction_template")
+    assert any("always renders as nothing" in record.message for record in caplog.records)
+
+
+def test_does_not_warn_when_the_template_and_the_count_agree(caplog):
+    with caplog.at_level(logging.WARNING):
+        PromptTemplateCollection([_template("{examples}{source}")]).validate_for_icl(2, "x")
+        PromptTemplateCollection([_template("{source}")]).validate_for_icl(0, "x")
+    assert caplog.records == []
+
+
+def test_warning_names_the_offending_template_when_there_are_several(caplog):
+    with caplog.at_level(logging.WARNING):
+        collection = PromptTemplateCollection([_template("{examples}{source}"), _template("{source}")])
+        collection.validate_for_icl(2, "templates.jsonl")
+    assert any("templates.jsonl[1]" in record.message for record in caplog.records)
+
+
+# --- template files ----------------------------------------------------------------------
+
+
+def _entry(**overrides):
+    entry = {"system_message": "sys", "instruction_template": "{source}", "example_format": "text"}
+    entry.update(overrides)
+    return entry
+
+
+def _write_templates(path, entries):
+    path.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
+    return path
+
+
+def _templates_from(path, count):
+    collection = PromptTemplateCollection.from_file(path)
+    return [collection.template_for(i) for i in range(count)]
+
+
+def test_prompt_template_file_reads_one_template_per_line(tmp_path):
+    path = _write_templates(
+        tmp_path / "templates.jsonl",
+        [
+            _entry(system_message="one", instruction_template="A: {source}", example_format="json"),
+            _entry(system_message="two", instruction_template="B: {source}", example_format="xml"),
+        ],
     )
-    with pytest.raises(NotImplementedError):
-        prompt.to_folded_chat_messages()
-    with pytest.raises(NotImplementedError):
-        prompt.to_plain_text()
+    templates = _templates_from(path, 2)
+    assert [t.system_message for t in templates] == ["one", "two"]
+    assert [t.instruction_template for t in templates] == ["A: {source}", "B: {source}"]
 
 
-@dataclass
-class _StubTokenizer:
-    pad_token_id: int = 0
+def test_prompt_template_file_keeps_an_explicit_empty_field(tmp_path):
+    path = _write_templates(tmp_path / "templates.jsonl", [_entry(system_message="")])
+    assert PromptTemplateCollection.from_file(path).template_for(None).system_message == ""
 
 
-def test_data_collator_right_pads_inputs_and_masks_label_padding():
-    collator = DataCollatorForCausalLM(_StubTokenizer(pad_token_id=0))
-    features = [
-        {"input_ids": [5, 6, 7], "labels": [-100, 6, 7], "attention_mask": [1, 1, 1]},
-        {"input_ids": [8, 9], "labels": [-100, 9], "attention_mask": [1, 1]},
-    ]
-    batch = collator(features)
-
-    assert batch["input_ids"].tolist() == [[5, 6, 7], [8, 9, 0]]
-    assert batch["attention_mask"].tolist() == [[1, 1, 1], [1, 1, 0]]
-    # Padding positions in labels are masked with -100 so they are ignored by the loss.
-    assert batch["labels"].tolist() == [[-100, 6, 7], [-100, 9, -100]]
+def test_prompt_template_file_ignores_blank_lines(tmp_path):
+    path = tmp_path / "templates.jsonl"
+    path.write_text("\n" + json.dumps(_entry(instruction_template="A: {source}")) + "\n\n", encoding="utf-8")
+    assert _templates_from(path, 1)[0].instruction_template == "A: {source}"
 
 
-def test_build_generation_kwargs_beam_search():
-    infer = {"max_new_tokens": 256, "num_beams": 4, "do_sample": False, "temperature": 0.7}
-    gen_kwargs = build_generation_kwargs(infer, num_return_sequences=2, pad_token_id=0)
-    assert gen_kwargs["num_beams"] == 4
-    assert gen_kwargs["num_return_sequences"] == 2
-    assert "do_sample" not in gen_kwargs
-    assert "temperature" not in gen_kwargs
+def test_prompt_template_file_rejects_a_missing_file(tmp_path):
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        PromptTemplateCollection.from_file(tmp_path / "nowhere.jsonl")
 
 
-def test_build_generation_kwargs_sampling_does_not_set_num_beams():
-    infer = {"max_new_tokens": 256, "num_beams": 4, "do_sample": True, "temperature": 0.7}
-    gen_kwargs = build_generation_kwargs(infer, num_return_sequences=3, pad_token_id=0)
-    assert gen_kwargs["do_sample"] is True
-    assert gen_kwargs["temperature"] == 0.7
-    assert gen_kwargs["num_return_sequences"] == 3
-    assert "num_beams" not in gen_kwargs
+def test_prompt_template_file_rejects_an_empty_file(tmp_path):
+    path = tmp_path / "templates.jsonl"
+    path.write_text("\n\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="no templates"):
+        PromptTemplateCollection.from_file(path)
 
 
-def test_build_generation_kwargs_rejects_more_drafts_than_beams():
-    infer = {"max_new_tokens": 256, "num_beams": 1, "do_sample": False, "temperature": 0.7}
-    with pytest.raises(RuntimeError, match="num_beams"):
-        build_generation_kwargs(infer, num_return_sequences=2, pad_token_id=0)
+@pytest.mark.parametrize(
+    "bad_line, message",
+    [
+        ("not json", "not valid JSON"),
+        ('["not", "an", "object"]', "must be a JSON object"),
+        ('{"num_examples": 3}', "unknown field"),
+        (json.dumps({"system_message": "s", "instruction_template": "t"}), "missing required field"),
+        (json.dumps({"system_message": "s", "example_format": "text"}), "missing required field"),
+        (json.dumps(_entry(example_format="bogus")), "invalid example_format"),
+    ],
+)
+def test_prompt_template_file_skips_a_bad_line_and_says_why(tmp_path, caplog, bad_line, message):
+    path = tmp_path / "templates.jsonl"
+    path.write_text(bad_line + "\n" + json.dumps(_entry(instruction_template="ok")) + "\n", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        collection = PromptTemplateCollection.from_file(path)
+
+    assert collection.template_for(None).instruction_template == "ok"
+    assert any(message in record.message for record in caplog.records)
 
 
-def test_data_collator_pad_to_multiple_of():
-    collator = DataCollatorForCausalLM(_StubTokenizer(pad_token_id=0), pad_to_multiple_of=4)
-    features = [{"input_ids": [5, 6, 7], "labels": [-100, 6, 7], "attention_mask": [1, 1, 1]}]
-    batch = collator(features)
-    assert batch["input_ids"].shape[1] == 4
-    assert batch["labels"].tolist() == [[-100, 6, 7, -100]]
+def test_prompt_template_file_names_every_missing_field(tmp_path, caplog):
+    path = _write_templates(tmp_path / "templates.jsonl", [{"system_message": "s"}, _entry()])
+    with caplog.at_level(logging.WARNING):
+        PromptTemplateCollection.from_file(path)
+    warning = next(r.message for r in caplog.records if "missing required field" in r.message)
+    assert "instruction_template" in warning and "example_format" in warning
 
 
-@dataclass
-class _StubLLMConfig:
-    model: str
-    params: dict
-    data: dict
-
-    lang_name = LLMConfig.lang_name
-    language = LLMConfig.language
-    build_prompt_messages = LLMConfig.build_prompt_messages
+def test_prompt_builder_rotation_index_overrides_the_pool_index():
+    pool = _FakePool([Example("cat", "chat")])
+    builder = _builder(_collection(_template("A: {source}"), _template("B: {source}")), 1, pool)
+    # The pool entry is still excluded from its own examples even though another template is used.
+    assert builder.build("x", EN, FR, pool_index=0, rotation_index=1).instruction == "B: x"
+    assert pool.calls == [("x", 1, 0)]
 
 
-def test_language_resolves_configured_name_and_falls_back_to_iso():
-    config = _StubLLMConfig(model="google/gemma-2-2b-it", params={}, data={"lang_codes": {"en": "English"}})
-    assert config.language("en") == Language("en", "English")
-    assert config.language("fr") == Language("fr", "fr")
+def test_prompt_builder_rotates_rows_outside_the_pool():
+    builder = _builder(_collection(_template("A: {source}"), _template("B: {source}")), 0, None)
+    assert [builder.build("x", EN, FR, rotation_index=i).instruction for i in range(3)] == ["A: x", "B: x", "A: x"]
 
 
-def test_build_prompt_messages_translate_gemma_uses_structured_content():
-    config = _StubLLMConfig(
-        model="google/translategemma-4b-it",
-        params={"prompt": {"instruction_template": "Translate from {src_lang} to {trg_lang}.\n\n{source}"}},
-        data={"lang_codes": {}},
-    )
-    prompt = config.build_prompt_messages("hello", config.language("en"), config.language("fr"), target="bonjour")
-    assert prompt == TranslateGemmaPromptMessages(
-        source_language=Language("en", "en"), target_language=Language("fr", "fr"), text="hello", target="bonjour"
-    )
-    assert isinstance(prompt, TranslateGemmaPromptMessages)
-    assert prompt.to_chat_messages() == [
-        {
-            "role": "user",
-            "content": [{"type": "text", "source_lang_code": "en", "target_lang_code": "fr", "text": "hello"}],
-        },
-        {"role": "assistant", "content": "bonjour"},
-    ]
-
-
-def test_build_prompt_messages_generic_model_uses_instruction_template():
-    config = _StubLLMConfig(
-        model="google/gemma-2-2b-it",
-        params={
-            "prompt": {
-                "instruction_template": "Translate from {src_lang} to {trg_lang}.\n\n{source}",
-                "system_message": "",
-            }
-        },
-        data={"lang_codes": {"en": "English", "fr": "French"}},
-    )
-    prompt = config.build_prompt_messages("hello", config.language("en"), config.language("fr"))
-    assert prompt == PromptMessages(
-        system_message="", instruction="Translate from English to French.\n\nhello", target=None
-    )
-
-
-class _StubTranslateGemmaTokenizer:
-    chat_template = "{# a real chat template would render this #}"
-    bos_token = "<bos>"
-
-    def apply_chat_template(self, messages, add_generation_prompt, tokenize, return_dict):
-        # Mimics the real template's behavior for a language code outside its fixed lookup table.
-        raise UndefinedError("'dict object' has no attribute 'tst'")
-
-    def __call__(self, text, add_special_tokens):
-        assert not add_special_tokens
-        return {"input_ids": [ord(c) for c in text]}
-
-
-def test_apply_prompt_template_translate_gemma_falls_back_for_unrecognized_language_code():
-    config = _StubLLMConfig(
-        model="google/translategemma-4b-it",
-        params={"prompt": {"instruction_template": "unused"}},
-        data={"lang_codes": {"en": "English", "tst": "Test Language"}},
-    )
-    tokenizer = _StubTranslateGemmaTokenizer()
-    prompt = config.build_prompt_messages("hello", config.language("en"), config.language("tst"))
-
-    text = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=False)
-    assert text == (
-        "<bos><start_of_turn>user\n"
-        "You are a professional English (en) to Test Language (tst) translator. Your goal is to accurately convey "
-        "the meaning and nuances of the original English text while adhering to Test Language grammar, vocabulary, "
-        "and cultural sensitivities.\n"
-        "Produce only the Test Language translation, without any additional explanations or commentary. Please "
-        "translate the following English text into Test Language:\n\n\nhello<end_of_turn>\n"
-        "<start_of_turn>model\n"
-    )
-
-    token_ids = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=True)
-    assert token_ids == [ord(c) for c in text]
-
-
-def test_build_adapter_config_plain_lora():
-    peft_config = LLMModel._build_adapter_config(
-        {"rank": 16, "alpha": 32, "dropout": 0.05, "target_modules": "all-linear"}, use_dora=False
-    )
-    assert peft_config.r == 16
-    assert peft_config.lora_alpha == 32
-    assert peft_config.modules_to_save is None
-    assert peft_config.use_dora is False
-
-
-def test_build_adapter_config_passes_through_modules_to_save():
-    peft_config = LLMModel._build_adapter_config(
-        {
-            "rank": 64,
-            "alpha": 256,
-            "dropout": 0.05,
-            "target_modules": "all-linear",
-            "modules_to_save": ["embed_tokens", "lm_head"],
-        },
-        use_dora=False,
-    )
-    assert peft_config.r == 64
-    assert peft_config.lora_alpha == 256
-    assert peft_config.modules_to_save == ["embed_tokens", "lm_head"]
-
-
-def test_build_adapter_config_dora():
-    adapter = {"rank": 64, "alpha": 256, "dropout": 0.05, "target_modules": "all-linear"}
-    peft_config = LLMModel._build_adapter_config(adapter, use_dora=True)
-    assert peft_config.use_dora is True
-
-
-@dataclass
-class _MethodStub:
-    params: dict
-
-    finetune_method = LLMConfig.finetune_method
-    uses_quantization = LLMConfig.uses_quantization
-    uses_dora = LLMConfig.uses_dora
-
-
-def test_finetune_method_axes():
-    # (method, quantized, dora)
-    cases = [
-        ("full", False, False),
-        ("lora", False, False),
-        ("qlora", True, False),
-        ("dora", False, True),
-        ("qdora", True, True),
-    ]
-    for method, quantized, dora in cases:
-        stub = _MethodStub(params={"finetune_method": method})
-        assert stub.finetune_method == method
-        assert stub.uses_quantization is quantized
-        assert stub.uses_dora is dora
-
-
-def test_finetune_method_is_case_insensitive():
-    assert _MethodStub(params={"finetune_method": "QDoRA"}).uses_dora is True
-
-
-def test_finetune_method_invalid_raises():
-    with pytest.raises(ValueError, match="Unknown finetune_method"):
-        _ = _MethodStub(params={"finetune_method": "bogus"}).finetune_method
-
-
-def test_normalize_deprecated_keys_renames_lora_to_adapter():
-    config = {"params": {"finetune_method": "lora", "lora": {"rank": 8}}}
-    LLMConfig._normalize_deprecated_keys(config)
-    assert "lora" not in config["params"]
-    assert config["params"]["adapter"] == {"rank": 8}
-
-
-def test_normalize_deprecated_keys_prefers_explicit_adapter():
-    config = {"params": {"lora": {"rank": 8}, "adapter": {"rank": 64}}}
-    LLMConfig._normalize_deprecated_keys(config)
-    # An explicit adapter wins; the deprecated lora key is left untouched rather than clobbering it.
-    assert config["params"]["adapter"] == {"rank": 64}
+def test_prompt_builder_rotation_index_zero_is_not_treated_as_unset():
+    builder = _builder(_collection(_template("A: {source}"), _template("B: {source}")), 0, None)
+    assert builder.build("x", EN, FR, pool_index=1, rotation_index=0).instruction == "A: x"

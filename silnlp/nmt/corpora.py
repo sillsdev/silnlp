@@ -3,6 +3,7 @@ from enum import Enum, Flag, auto
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
+from machine.corpora import TextFileTextCorpus
 from machine.scripture import get_chapters
 
 from ..common.corpus import get_terms_glosses_path, get_terms_list, get_terms_renderings_path
@@ -255,6 +256,20 @@ def get_parallel_corpus_size(src_file_path: Path, trg_file_path: Path) -> int:
             if len(src_line) > 0 and len(trg_line) > 0:
                 count += 1
     return count
+
+
+def read_parallel_text_pairs(src_path: Path, trg_path: Path) -> Optional[Tuple[List[str], List[str]]]:
+    if not src_path.is_file() or not trg_path.is_file():
+        return None
+    corpus = TextFileTextCorpus(src_path).align_rows(TextFileTextCorpus(trg_path))
+    sources: List[str] = []
+    targets: List[str] = []
+    for row in corpus:
+        sources.append(row.source_text)
+        targets.append(row.target_text)
+    if len(sources) == 0:
+        return None
+    return sources, targets
 
 
 def get_data_file_pairs(corpus_pair: CorpusPair) -> Iterable[Tuple[DataFile, DataFile]]:
