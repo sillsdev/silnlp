@@ -450,18 +450,6 @@ class PostprocessHandler:
                         style_behavior=config.get_style_behavior(),
                     )
 
-    def _to_word_alignment_matrix(alignment_str: str) -> WordAlignmentMatrix:
-        word_pairs = AlignedWordPair.from_string(alignment_str)
-        row_count = 0
-        column_count = 0
-        for pair in word_pairs:
-            if pair.source_index + 1 > row_count:
-                row_count = pair.source_index + 1
-            if pair.target_index + 1 > column_count:
-                column_count = pair.target_index + 1
-        return WordAlignmentMatrix.from_word_pairs(row_count, column_count, word_pairs)
-
-
     def _get_alignment_matrices(
         self, src_sents: List[str], trg_sents: List[str], aligner: str = "eflomal", only_fetch_alignments_for_first_n: int | None = None 
     ) -> List[WordAlignmentMatrix]:
@@ -471,4 +459,15 @@ class PostprocessHandler:
             write_corpus(Path(td, "trg_align.txt"), trg_sents)
             compute_alignment_scores(Path(td, "src_align.txt"), Path(td, "trg_align.txt"), aligner, align_path)
 
-            return [to_word_alignment_matrix(line) for line in list(load_corpus(align_path))[:only_fetch_alignments_for_first_n]]
+            return [_to_word_alignment_matrix(line) for line in list(load_corpus(align_path))[:only_fetch_alignments_for_first_n]]
+
+def _to_word_alignment_matrix(alignment_str: str) -> WordAlignmentMatrix:
+    word_pairs = AlignedWordPair.from_string(alignment_str)
+    row_count = 0
+    column_count = 0
+    for pair in word_pairs:
+        if pair.source_index + 1 > row_count:
+            row_count = pair.source_index + 1
+        if pair.target_index + 1 > column_count:
+            column_count = pair.target_index + 1
+    return WordAlignmentMatrix.from_word_pairs(row_count, column_count, word_pairs)
