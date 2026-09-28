@@ -9,7 +9,6 @@ from typing import Dict, List, Optional, Set, TextIO, Tuple
 
 import sacrebleu
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_id, get_chapters
-from sacrebleu.metrics import BLEUScore
 from scipy.stats import gmean
 
 from ..common.environment import SilNlpEnv
@@ -19,94 +18,26 @@ from ..common.utils import get_git_revision_hash
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import CheckpointType, Config, NMTModel, find_all_checkpoints
 from .config_utils import load_config
+from .scoring_metrics import (
+    CORPUS_SCORERS,
+    SENTENCE_SCORERS,
+    PairScore,
+    Scores,
+    compute_corpus_scores,
+    iter_verse_scores,
+)
 from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger((__package__ or "") + ".test")
 
 logging.getLogger("sacrebleu").setLevel(logging.ERROR)
 
-SUPPORTED_SCORERS = [
-    "bleu",
-    "chrf3",
-    "chrf3+",
-    "chrf3++",
-    "spbleu",
-    "m-bleu",
-    "m-chrf3",
-    "m-chrf3+",
-    "m-chrf3++",
-    "ter",
-    "confidence",
-]
-
-SUPPORTED_SENTENCE_SCORERS = [
-    "bleu",
-    "chrf3",
-    "chrf3+",
-    "chrf3++",
-    "spbleu",
-    "ter",
-    "confidence",
-]
+SUPPORTED_SCORERS = CORPUS_SCORERS + ["confidence"]
+SUPPORTED_SENTENCE_SCORERS = SENTENCE_SCORERS + ["confidence"]
 
 TEST_TRG_PREDICTIONS_PREFIX = "test.trg-predictions"
 VERSE_SCORES_SUFFIX = ".scores.tsv"
 LINREGRESS_PREFIX = "linregress"
-
-
-class PairScore:
-    def __init__(
-        self,
-        book: str,
-        src_iso: str,
-        trg_iso: str,
-        bleu: Optional[BLEUScore],
-        sent_len: int,
-        projects: Set[str],
-        other_scores: Dict[str, float] = {},
-        draft_index: int = 1,
-    ) -> None:
-        self.src_iso = src_iso
-        self.trg_iso = trg_iso
-        self.bleu = bleu
-        self.sent_len = sent_len
-        self.num_refs = len(projects)
-        self.refs = "_".join(sorted(projects))
-        self.other_scores = other_scores
-        self.book = book
-        self.draft_index = draft_index
-
-    def writeHeader(self, file: TextIO) -> None:
-        header = (
-            "book,draft_index,src_iso,trg_iso,num_refs,references,sent_len"
-            + (
-                ",BLEU,BLEU_1gram_prec,BLEU_2gram_prec,BLEU_3gram_prec,BLEU_4gram_prec,BLEU_brevity_penalty,BLEU_total_sys_len,BLEU_total_ref_len"
-                if self.bleu is not None
-                else ""
-            )
-            + ("," if len(self.other_scores) > 0 else "")
-            + ",".join(self.other_scores.keys())
-            + "\n"
-        )
-        file.write(header)
-
-    def write(self, file: TextIO) -> None:
-        file.write(
-            f"{self.book},{self.draft_index},{self.src_iso},{self.trg_iso},"
-            f"{self.num_refs},{self.refs},{self.sent_len:d}"
-        )
-        if self.bleu is not None:
-            file.write(
-                f",{self.bleu.score:.2f},{self.bleu.precisions[0]:.2f},{self.bleu.precisions[1]:.2f}"
-                f",{self.bleu.precisions[2]:.2f},{self.bleu.precisions[3]:.2f},{self.bleu.bp:.3f}"
-                f",{self.bleu.sys_len:d},{self.bleu.ref_len:d}"
-            )
-        for scorer, val in self.other_scores.items():
-            if scorer.lower() == "confidence":
-                file.write(f",{val:.8f}")
-            else:
-                file.write(f",{val:.2f}")
-        file.write("\n")
 
 
 def score_pair(
@@ -124,102 +55,7 @@ def score_pair(
     pair_confs: Optional[List[float]] = None,
     linregress_file_name: Optional[str] = None,
 ) -> PairScore:
-    bleu_score = None
-    if "bleu" in scorers:
-        bleu_score = sacrebleu.corpus_bleu(
-            pair_sys,
-            pair_refs,
-            lowercase=True,
-            tokenize=config.data.get("sacrebleu_tokenize", "13a"),
-        )
-
-    other_scores: Dict[str, float] = {}
-    if "chrf3" in scorers:
-        chrf3_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, remove_whitespace=True)
-        other_scores["chrF3"] = chrf3_score.score
-
-    if "chrf3+" in scorers:
-        chrfp_score = sacrebleu.corpus_chrf(
-            pair_sys, pair_refs, char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
-        )
-        other_scores["chrF3+"] = chrfp_score.score
-
-    if "chrf3++" in scorers:
-        chrfpp_score = sacrebleu.corpus_chrf(
-            pair_sys, pair_refs, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
-        )
-        other_scores["chrF3++"] = chrfpp_score.score
-
-    if "spbleu" in scorers:
-        spbleu_score = sacrebleu.corpus_bleu(
-            pair_sys,
-            pair_refs,
-            lowercase=True,
-            tokenize="flores200",
-        )
-        other_scores["spBLEU"] = spbleu_score.score
-
-    # m-bleu, m-chrf3, m-chrf3+, and m-chrf3++ are from the paper https://arxiv.org/pdf/2407.12832
-    # These metrics are implemented at the verse-level, rather than the sentence-level
-    if "m-bleu" in scorers:
-        sentence_bleu_scores: List[float] = []
-        for sentence_i, sentence in enumerate(pair_sys):
-            references = [reference[sentence_i] for reference in pair_refs]
-            sentence_bleu_score = sacrebleu.sentence_bleu(
-                sentence,
-                references,
-                lowercase=True,
-                tokenize=config.data.get("sacrebleu_tokenize", "13a"),
-            )
-            sentence_bleu_scores.append(sentence_bleu_score.score)
-        if len(sentence_bleu_scores) == 0:
-            other_scores["m-BLEU"] = 0
-        else:
-            other_scores["m-BLEU"] = sum(sentence_bleu_scores) / len(sentence_bleu_scores)
-
-    if "m-chrf3" in scorers:
-        sentence_chrf3_scores: List[float] = []
-        for sentence_i, sentence in enumerate(pair_sys):
-            references = [reference[sentence_i] for reference in pair_refs]
-            sentence_chrf3_score = sacrebleu.sentence_chrf(
-                sentence, references, char_order=6, beta=3, remove_whitespace=True
-            )
-            sentence_chrf3_scores.append(sentence_chrf3_score.score)
-        if len(sentence_chrf3_scores) == 0:
-            other_scores["m-chrf3"] = 0
-        else:
-            other_scores["m-chrf3"] = sum(sentence_chrf3_scores) / len(sentence_chrf3_scores)
-
-    if "m-chrf3+" in scorers:
-        sentence_chrfp_scores: List[float] = []
-        for sentence_i, sentence in enumerate(pair_sys):
-            references = [reference[sentence_i] for reference in pair_refs]
-            sentence_chrfp_score = sacrebleu.sentence_chrf(
-                sentence, references, char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
-            )
-            sentence_chrfp_scores.append(sentence_chrfp_score.score)
-        if len(sentence_chrfp_scores) == 0:
-            other_scores["m-chrf3+"] = 0
-        else:
-            other_scores["m-chrf3+"] = sum(sentence_chrfp_scores) / len(sentence_chrfp_scores)
-
-    if "m-chrf3++" in scorers:
-        sentence_chrfpp_scores: List[float] = []
-        for sentence_i, sentence in enumerate(pair_sys):
-            references = [reference[sentence_i] for reference in pair_refs]
-            sentence_chrfpp_score = sacrebleu.sentence_chrf(
-                sentence, references, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
-            )
-            sentence_chrfpp_scores.append(sentence_chrfpp_score.score)
-        if len(sentence_chrfpp_scores) == 0:
-            other_scores["m-chrf3++"] = 0
-        else:
-            other_scores["m-chrf3++"] = sum(sentence_chrfpp_scores) / len(sentence_chrfpp_scores)
-
-    if "ter" in scorers:
-        ter_score = sacrebleu.corpus_ter(pair_sys, pair_refs)
-        if ter_score.score >= 0:
-            other_scores["TER"] = ter_score.score
+    scores = compute_corpus_scores(pair_sys, pair_refs, scorers, config.data.get("sacrebleu_tokenize"))
 
     if "confidence" in scorers:
         if pair_confs is not None:
@@ -233,7 +69,7 @@ def score_pair(
                     "Cannot use confidence as a scorer because the confidences file is missing. "
                     "Include the --save-confidences option to generate the file and enable confidence scoring."
                 ) from e
-        other_scores["Confidence"] = gmean(confidences)
+        scores.other_scores["Confidence"] = gmean(confidences)
 
     if book == "ALL":
         write_pair_verse_scores(
@@ -242,13 +78,13 @@ def score_pair(
             trg_iso,
             predictions_detok_file_name,
             scorers,
-            other_scores,
+            scores.other_scores,
             config,
             confidences if "confidence" in scorers else None,
             linregress_file_name,
         )
 
-    return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores, draft_index)
+    return PairScore(book, src_iso, trg_iso, scores, len(pair_sys), ref_projects, draft_index)
 
 
 def write_pair_verse_scores(
@@ -284,59 +120,23 @@ def write_pair_verse_scores(
         for _ in pair_refs:
             header.append("Reference")
         writer.writerow(header)
-        spbleu_metric = sacrebleu.metrics.BLEU(tokenize="flores200", lowercase=True) if "spbleu" in scorers else None
         compute_linregress = "chrf3" in scorers and "confidence" in scorers and confidences is not None
         linregress_chrf3_scores: List[float] = []
         linregress_confidence_scores: List[float] = []
-        for index, pred in enumerate(pair_sys):
-            sentences: List[str] = []
-            for ref in pair_refs:
-                sentences.append(ref[index])
-            if "bleu" in scorers:
-                bleu_verse_score = sacrebleu.sentence_bleu(
-                    pred,
-                    sentences,
-                    lowercase=True,
-                    tokenize=config.data.get("sacrebleu_tokenize", "13a"),
-                )
-            other_verse_scores: Dict[str, float] = {}
-            if "chrf3" in scorers:
-                chrf3_verse_score = sacrebleu.sentence_chrf(
-                    pred, sentences, char_order=6, beta=3, remove_whitespace=True
-                )
-                other_verse_scores["chrF3"] = chrf3_verse_score.score
-
-            if "chrf3+" in scorers:
-                chrfp_verse_score = sacrebleu.sentence_chrf(
-                    pred, sentences, char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
-                )
-                other_verse_scores["chrF3+"] = chrfp_verse_score.score
-
-            if "chrf3++" in scorers:
-                chrfpp_verse_score = sacrebleu.sentence_chrf(
-                    pred, sentences, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
-                )
-                other_verse_scores["chrF3++"] = chrfpp_verse_score.score
-
-            if "spbleu" in scorers and spbleu_metric is not None:
-                spbleu_verse_score = spbleu_metric.sentence_score(pred, sentences)
-                other_verse_scores["spBLEU"] = spbleu_verse_score.score
-
-            if "ter" in scorers:
-                ter_verse_score = sacrebleu.sentence_ter(pred, sentences)
-                if ter_verse_score.score >= 0:
-                    other_verse_scores["TER"] = ter_verse_score.score
-
+        for verse_score in iter_verse_scores(pair_sys, pair_refs, scorers, config.data.get("sacrebleu_tokenize")):
+            other_verse_scores = verse_score.scores.other_scores
             if "confidence" in scorers and confidences is not None:
-                other_verse_scores["Confidence"] = confidences[index]
+                other_verse_scores["Confidence"] = confidences[verse_score.index]
 
             if compute_linregress:
                 linregress_chrf3_scores.append(other_verse_scores["chrF3"])
                 linregress_confidence_scores.append(other_verse_scores["Confidence"])
 
-            row: List[str] = [f"{index + 1}"]
+            row: List[str] = [f"{verse_score.index + 1}"]
 
+            bleu_verse_score = verse_score.scores.bleu
             if "bleu" in scorers:
+                assert bleu_verse_score is not None
                 row += [
                     f"{bleu_verse_score.score:.2f}",
                     f"{bleu_verse_score.precisions[0]:.2f}",
@@ -351,8 +151,8 @@ def write_pair_verse_scores(
                 else:
                     row.append(f"{val:.2f}")
 
-            row.append(pred.rstrip("\n"))
-            for sentence in sentences:
+            row.append(verse_score.pred.rstrip("\n"))
+            for sentence in verse_score.sentences:
                 row.append(sentence.rstrip("\n"))
             writer.writerow(row)
 
@@ -745,7 +545,7 @@ def test_checkpoint(
                 LOGGER.error("Error: book_dict did not load correctly. Not scoring individual books.")
     if len(config.test_src_isos) > 1 or len(config.test_trg_isos) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)
-        scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), ref_projects))
+        scores.append(PairScore("ALL", "ALL", "ALL", Scores(bleu, {}), len(overall_sys), ref_projects))
 
     scores_file_root = f"scores-{suffix_str}"
     if len(ref_projects) > 0:
@@ -920,19 +720,8 @@ def test(
             checkpoint_name = f"checkpoint {step}"
         books_str = "ALL" if len(books_nums) == 0 else ", ".join(sorted(str(num) for num in books_nums.keys()))
         LOGGER.info(f"Test results for {checkpoint_name} ({num_refs} reference(s), books: {books_str})")
-        header = "book,draft_index,src_iso,trg_iso,num_refs,references,sent_len"
         if len(results[step]) > 0:
-            pair_score = results[step][0]
-            header += (
-                (
-                    ",BLEU,BLEU_1gram_prec,BLEU_2gram_prec,BLEU_3gram_prec,BLEU_4gram_prec,BLEU_brevity_penalty,BLEU_total_sys_len,BLEU_total_ref_len"
-                    if pair_score.bleu is not None
-                    else ""
-                )
-                + ("," if len(pair_score.other_scores) > 0 else "")
-                + ",".join(pair_score.other_scores.keys())
-            )
-        LOGGER.info(header)
+            LOGGER.info(",".join(results[step][0].header_fields()))
         for score in results[step]:
             output = StringIO()
             score.write(output)
