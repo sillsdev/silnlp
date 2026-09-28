@@ -101,7 +101,7 @@ class SILExperiment:
 
         postprocess_configs = translate_configs.get("postprocess", [])
         postprocess_handler = PostprocessHandler(
-            [PostprocessConfig(pc, self.environment) for pc in postprocess_configs], environment=self.environment
+            [PostprocessConfig(pc) for pc in postprocess_configs], environment=self.environment
         )
 
         quality_estimation = translate_configs.get("quality_estimation", False)

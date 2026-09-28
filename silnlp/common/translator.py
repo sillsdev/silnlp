@@ -29,7 +29,12 @@ from silnlp.nmt.corpora import CorpusPair
 from .corpus import load_corpus, write_corpus
 from .environment import SilNlpEnv
 from .paratext import get_book_path, get_iso, get_parent_project_dir
-from .postprocesser import NoDetectedQuoteConventionException, PostprocessHandler, UnknownQuoteConventionException
+from .postprocesser import (
+    NoDetectedQuoteConventionException,
+    PostprocessHandler,
+    QuoteConventionSource,
+    UnknownQuoteConventionException,
+)
 from .translation_data_structures import DraftGroup, SentenceTranslationGroup, TranslatedDraft, UsfmTextRowCollection
 from .utils import NLTKSentenceTokenizer
 
@@ -521,9 +526,11 @@ class Translator(AbstractContextManager["Translator"], ABC):
 
                 if config.is_quotation_mark_denormalization_required():
                     try:
-                        quotation_denormalization_postprocessor = (
-                            config.create_denormalize_quotation_marks_postprocessor(training_corpus_pairs)
-                        )
+                        quotation_denormalization_postprocessor = QuoteConventionSource(
+                            config.target_quote_convention(),
+                            config.is_quote_convention_detection_required(),
+                            self._environment,
+                        ).create_postprocessor(training_corpus_pairs)
                         usfm_out = quotation_denormalization_postprocessor.postprocess_usfm(
                             usfm_out, stylesheet=stylesheet
                         )

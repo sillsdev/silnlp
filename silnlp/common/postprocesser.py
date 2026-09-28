@@ -264,10 +264,59 @@ class DenormalizeQuotationMarksPostprocessor:
         return tokenizer.detokenize(out_tokens)
 
 
-class PostprocessConfig:
-    def __init__(self, config: dict = {}, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> None:
-        self._config = {}
+class TrainingTargetProjects:
+    """The target projects an experiment trained on. A quote convention is detected from them, which
+    only makes sense for an experiment that trained on exactly one."""
+
+    def __init__(self, corpus_pairs: List[CorpusPair]) -> None:
+        self._corpus_pairs = corpus_pairs
+
+    def candidates(self) -> List[Tuple[Optional[str], Optional[Dict[int, List[int]]]]]:
+        self._warn_if_ambiguous()
+        if len(self._corpus_pairs) > 0 and len(self._corpus_pairs[0].trg_files) > 0:
+            return [(pair.trg_files[0].project, pair.corpus_books) for pair in self._corpus_pairs]
+        return [(None, None)]
+
+    def _warn_if_ambiguous(self) -> None:
+        for description, count in (
+            ("corpus pairs", len(self._corpus_pairs)),
+            ("source projects", len(self._corpus_pairs[0].src_files) if self._corpus_pairs else 0),
+            ("target projects", len(self._corpus_pairs[0].trg_files) if self._corpus_pairs else 0),
+        ):
+            if count > 1:
+                LOGGER.warning(
+                    f"The experiment has multiple {description}. "
+                    "Quotation mark denormalization is unlikely to work correctly in this scenario."
+                )
+
+
+class QuoteConventionSource:
+    """Where the quote convention a draft is denormalized to comes from: the one the experiment
+    configured, or one detected in the projects it trained on."""
+
+    def __init__(
+        self, configured_convention: Optional[str], detects_from_training: bool, environment: SilNlpEnv
+    ) -> None:
+        self._configured_convention = configured_convention
+        self._detects_from_training = detects_from_training
         self._environment = environment
+
+    def create_postprocessor(self, corpus_pairs: List[CorpusPair]) -> DenormalizeQuotationMarksPostprocessor:
+        candidates = TrainingTargetProjects(corpus_pairs).candidates() if self._detects_from_training else [(None, None)]
+        for project_name, include_chapters in candidates:
+            try:
+                return DenormalizeQuotationMarksPostprocessor(
+                    self._configured_convention, project_name, include_chapters, self._environment
+                )
+            except NoDetectedQuoteConventionException:
+                LOGGER.warning("No quote convention was detected for project %s" % project_name)
+
+        raise NoDetectedQuoteConventionException([name for name, _ in candidates if name is not None])
+
+
+class PostprocessConfig:
+    def __init__(self, config: dict = {}) -> None:
+        self._config = {}
         for option, default in POSTPROCESS_DEFAULTS.items():
             self._config[option] = config.get(option, default)
 
@@ -278,8 +327,6 @@ class PostprocessConfig:
             self._config["include_style_markers"] = True
         if config.get("include_inline_elements"):
             self._config["include_embeds"] = True
-
-        self.update_block_handlers: List[UsfmUpdateBlockHandler] = []
 
     def _get_usfm_marker_behavior(self, preserve: bool) -> UpdateUsfmMarkerBehavior:
         return UpdateUsfmMarkerBehavior.PRESERVE if preserve else UpdateUsfmMarkerBehavior.STRIP
@@ -321,6 +368,12 @@ class PostprocessConfig:
             or self._config["include_embeds"]
         )
 
+    def places_paragraphs(self) -> bool:
+        return self._config["paragraph_behavior"] == "place"
+
+    def target_quote_convention(self) -> Optional[str]:
+        return self._config["target_quote_convention"]
+
     def is_quotation_mark_denormalization_required(self) -> bool:
         return self._config["denormalize_quotation_marks"]
 
@@ -335,61 +388,6 @@ class PostprocessConfig:
             embed_behavior=self.get_embed_behavior(),
             style_behavior=self.get_style_behavior(),
         )
-
-    def create_denormalize_quotation_marks_postprocessor(
-        self, training_corpus_pairs: List[CorpusPair]
-    ) -> DenormalizeQuotationMarksPostprocessor:
-        training_project_info = self._get_training_project_info(
-            training_corpus_pairs,
-        )
-        for training_target_project_name, include_chapters in training_project_info:
-
-            try:
-                return DenormalizeQuotationMarksPostprocessor(
-                    self._config["target_quote_convention"],
-                    training_target_project_name,
-                    include_chapters,
-                    self._environment,
-                )
-            except NoDetectedQuoteConventionException:
-                LOGGER.warning("No quote convention was detected for project %s" % training_target_project_name)
-
-        raise NoDetectedQuoteConventionException(
-            [project_name for project_name, _ in training_project_info if project_name is not None]
-        )
-
-    def _get_training_project_info(
-        self,
-        training_corpus_pairs: List[CorpusPair],
-    ) -> List[Tuple[Optional[str], Optional[Dict[int, List[int]]]]]:
-        # Target project info is only needed for quote convention detection
-        if self.is_quote_convention_detection_required():
-            if len(training_corpus_pairs) > 1:
-                LOGGER.warning(
-                    "The experiment has multiple corpus pairs. "
-                    "Quotation mark denormalization is unlikely to work correctly in this scenario."
-                )
-            if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].src_files) > 1:
-                LOGGER.warning(
-                    "The experiment has multiple source projects. "
-                    "Quotation mark denormalization is unlikely to work correctly in this scenario."
-                )
-            if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].trg_files) > 1:
-                LOGGER.warning(
-                    "The experiment has multiple target projects. "
-                    "Quotation mark denormalization is unlikely to work correctly in this scenario."
-                )
-
-            if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].trg_files) > 0:
-                return [
-                    (corpus_pair.trg_files[0].project, corpus_pair.corpus_books)
-                    for corpus_pair in training_corpus_pairs
-                ]
-
-        return [(None, None)]
-
-    def __getitem__(self, key):
-        return self._config[key]
 
 
 @dataclass(frozen=True)
@@ -411,7 +409,7 @@ class PostprocessHandler:
         if configs is None:
             configs = []
 
-        self.configs = ([PostprocessConfig({}, environment)] if include_base else []) + configs
+        self.configs = ([PostprocessConfig({})] if include_base else []) + configs
         self._aligner = aligner if aligner is not None else ToolSentenceAligner()
 
     # NOTE: Row metadata may need to be created/recreated at different times
@@ -434,7 +432,7 @@ class PostprocessHandler:
         pm_updates = [
             update
             for update in updates
-            if update.config["paragraph_behavior"] == "place" or update.config["include_style_markers"]
+            if update.config.is_marker_placement_required()
         ]
         if len(pm_updates) == 0:
             return
@@ -456,7 +454,7 @@ class PostprocessHandler:
                         alignment=alignment,
                         paragraph_behavior=(
                             UpdateUsfmMarkerBehavior.PRESERVE
-                            if update.config["paragraph_behavior"] == "place"
+                            if update.config.places_paragraphs()
                             else UpdateUsfmMarkerBehavior.STRIP
                         ),
                         style_behavior=update.config.get_style_behavior(),

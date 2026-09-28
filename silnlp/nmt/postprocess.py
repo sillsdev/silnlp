@@ -25,6 +25,7 @@ from ..common.postprocesser import (
     NoDetectedQuoteConventionException,
     PostprocessConfig,
     PostprocessHandler,
+    QuoteConventionSource,
     UnknownQuoteConventionException,
 )
 from ..common.translated_segment import TranslatedSegment
@@ -240,9 +241,11 @@ def postprocess_draft(
 
         if config.is_quotation_mark_denormalization_required():
             try:
-                quotation_denormalization_postprocessor = config.create_denormalize_quotation_marks_postprocessor(
-                    training_corpus_pairs,
-                )
+                quotation_denormalization_postprocessor = QuoteConventionSource(
+                    config.target_quote_convention(),
+                    config.is_quote_convention_detection_required(),
+                    environment,
+                ).create_postprocessor(training_corpus_pairs)
                 target_usfm = quotation_denormalization_postprocessor.postprocess_usfm(
                     target_usfm, stylesheet=stylesheet
                 )
@@ -279,7 +282,7 @@ def postprocess_experiment(
 
     with files.translate_config().open("r", encoding="utf-8") as file:
         translate_config = yaml.safe_load(file)
-        postprocess_configs = [PostprocessConfig(pc, environment) for pc in translate_config.get("postprocess", [])]
+        postprocess_configs = [PostprocessConfig(pc) for pc in translate_config.get("postprocess", [])]
 
     if postprocess_handler is None:
         postprocess_handler = PostprocessHandler(postprocess_configs, include_base=False, environment=environment)
