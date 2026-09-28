@@ -207,23 +207,23 @@ def postprocess_draft(
             )
             return
 
+    train_src_sentences = []
+    train_trg_sentences = []
+    if train_src_filepath is not None and train_trg_filepath is not None:
+        train_src_sentences = list(load_corpus(train_src_filepath))
+        train_trg_sentences = list(load_corpus(train_trg_filepath))
+
+    updates = postprocess_handler.construct_rows(
+        [
+            TranslatedSegment(source.ref, source.text, draft.text)
+            for source, draft in zip(src_sentences.sentences, draft_sentences.sentences)
+        ],
+        train_src_sentences,
+        train_trg_sentences,
+    )
+
     source_usfm = None
-    if any(config.is_marker_processing_required() for config in postprocess_handler.configs):
-        train_src_sentences = []
-        train_trg_sentences = []
-        if train_src_filepath is not None and train_trg_filepath is not None:
-            train_src_sentences = list(load_corpus(train_src_filepath))
-            train_trg_sentences = list(load_corpus(train_trg_filepath))
-
-        postprocess_handler.construct_rows(
-            [
-                TranslatedSegment(source.ref, source.text, draft.text)
-                for source, draft in zip(src_sentences.sentences, draft_sentences.sentences)
-            ],
-            train_src_sentences,
-            train_trg_sentences,
-        )
-
+    if any(update.config.is_marker_processing_required() for update in updates):
         with draft_metadata.source_path.open(encoding=encoding) as f:
             source_usfm = f.read()
         if draft_chapters:
@@ -232,7 +232,8 @@ def postprocess_draft(
                 filter_tokens_by_chapter(tokenizer.tokenize(source_usfm), draft_chapters)
             )
 
-    for config in postprocess_handler.configs:
+    for update in updates:
+        config = update.config
         if config.is_marker_processing_required():
             place_markers_postprocessor = config.create_place_markers_postprocessor()
             source_remark_texts = {text.strip() for _, text in src_sentences.remarks}
@@ -242,7 +243,7 @@ def postprocess_draft(
                 if text.strip() not in source_remark_texts
             ]
             target_usfm = place_markers_postprocessor.postprocess_usfm(
-                source_usfm, config.rows, remarks, stylesheet=stylesheet
+                source_usfm, update.rows, remarks, stylesheet=stylesheet
             )
         else:
             with draft_metadata.draft_path.open(encoding=encoding) as f:

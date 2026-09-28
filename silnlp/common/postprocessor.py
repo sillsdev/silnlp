@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from machine.corpora import (
@@ -280,7 +281,6 @@ class PostprocessConfig:
             self._config["include_embeds"] = True
 
         self.update_block_handlers: List[UsfmUpdateBlockHandler] = []
-        self.rows: List[UpdateUsfmRow] = []
 
     def _get_usfm_marker_behavior(self, preserve: bool) -> UpdateUsfmMarkerBehavior:
         return UpdateUsfmMarkerBehavior.PRESERVE if preserve else UpdateUsfmMarkerBehavior.STRIP
@@ -392,6 +392,14 @@ class PostprocessConfig:
         return self._config[key]
 
 
+@dataclass(frozen=True)
+class DocumentUpdate:
+    """The rows a document is updated with under one postprocessing configuration."""
+
+    config: PostprocessConfig
+    rows: List[UpdateUsfmRow]
+
+
 class PostprocessHandler:
     def __init__(
         self,
@@ -411,21 +419,29 @@ class PostprocessHandler:
     # or once per source project. This may change what part of the process we want this function to be called at
     def construct_rows(
         self, segments: Sequence[TranslatedSegment], train_source: List[str], train_target: List[str]
-    ) -> None:
-        for config in self.configs:
-            config.rows = [UpdateUsfmRow([segment.ref], segment.translation, {}) for segment in segments]
-
-        self._construct_place_markers_metadata(segments, train_source, train_target)
+    ) -> List[DocumentUpdate]:
+        updates = [
+            DocumentUpdate(
+                config, [UpdateUsfmRow([segment.ref], segment.translation, {}) for segment in segments]
+            )
+            for config in self.configs
+        ]
+        self._construct_place_markers_metadata(updates, segments, train_source, train_target)
+        return updates
 
     def _construct_place_markers_metadata(
-        self, segments: Sequence[TranslatedSegment], train_source: List[str], train_target: List[str]
+        self,
+        updates: Sequence["DocumentUpdate"],
+        segments: Sequence[TranslatedSegment],
+        train_source: List[str],
+        train_target: List[str],
     ) -> None:
-        pm_configs = [
-            config
-            for config in self.configs
-            if config["paragraph_behavior"] == "place" or config["include_style_markers"]
+        pm_updates = [
+            update
+            for update in updates
+            if update.config["paragraph_behavior"] == "place" or update.config["include_style_markers"]
         ]
-        if len(pm_configs) == 0:
+        if len(pm_updates) == 0:
             return
 
         tokenizer = LatinWordTokenizer()
@@ -438,8 +454,8 @@ class PostprocessHandler:
             source_tokens = list(tokenizer.tokenize(segment.source))
             translation_tokens = list(tokenizer.tokenize(segment.translation))
 
-            for config in pm_configs:
-                row_metadata = config.rows[i].metadata
+            for update in pm_updates:
+                row_metadata = update.rows[i].metadata
                 if row_metadata is not None:
                     row_metadata["alignment_info"] = PlaceMarkersAlignmentInfo(
                         source_tokens=source_tokens,
@@ -447,8 +463,8 @@ class PostprocessHandler:
                         alignment=alignment,
                         paragraph_behavior=(
                             UpdateUsfmMarkerBehavior.PRESERVE
-                            if config["paragraph_behavior"] == "place"
+                            if update.config["paragraph_behavior"] == "place"
                             else UpdateUsfmMarkerBehavior.STRIP
                         ),
-                        style_behavior=config.get_style_behavior(),
+                        style_behavior=update.config.get_style_behavior(),
                     )

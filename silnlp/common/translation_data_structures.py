@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Set
 from attr import dataclass
 from machine.corpora import ScriptureRef, TextRow, UsfmFileText, UsfmStylesheet, UsfmTextType
 
-from .postprocessor import PostprocessHandler
+from .postprocessor import DocumentUpdate, PostprocessHandler
 from .translated_segment import TranslatedSegment
 from .utils import NLTKSentenceTokenizer, add_tags_to_sentence
 
@@ -303,10 +303,14 @@ class TranslatedTextRowCollection:
         return self._draft_group.get_drafts()
 
     def construct_postprocessing_rows_for_draft_index(
-        self, postprocess_handler: PostprocessHandler, draft_index: int, source_train_rows: List[str], target_train_rows: List[str]
-    ) -> None:
+        self,
+        postprocess_handler: PostprocessHandler,
+        draft_index: int,
+        source_train_rows: List[str],
+        target_train_rows: List[str],
+    ) -> List[DocumentUpdate]:
         translations = self._draft_group.get_drafts()[draft_index - 1].get_all_translations()
-        postprocess_handler.construct_rows(
+        return postprocess_handler.construct_rows(
             [TranslatedSegment(row.ref, row.text, translation) for row, translation in zip(self._rows, translations)],
             source_train_rows,
             target_train_rows,

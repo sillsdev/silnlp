@@ -440,11 +440,12 @@ class Translator(AbstractContextManager["Translator"], ABC):
         if postprocess_handler is None:
             postprocess_handler = PostprocessHandler(environment=self._environment)
         for draft_index, translated_draft in enumerate(translated_text_rows.get_translated_drafts(), 1):
-            translated_text_rows.construct_postprocessing_rows_for_draft_index(
+            updates = translated_text_rows.construct_postprocessing_rows_for_draft_index(
                 postprocess_handler, draft_index, src_training_rows, trg_training_rows
             )
 
-            for config in postprocess_handler.configs:
+            for update in updates:
+                config = update.config
 
                 # Compile draft remarks
                 remarks: List[Tuple[int, str]] = []
@@ -485,7 +486,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                     dest_updater = FileParatextProjectTextUpdater(project_dir, parent_settings)
                     usfm_out = dest_updater.update_usfm(
                         book_id=src_file_text.id,
-                        rows=config.rows,
+                        rows=update.rows,
                         chapters=chapters,
                         text_behavior=text_behavior,
                         paragraph_behavior=config.get_paragraph_behavior(),
@@ -508,7 +509,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                     with open(src_file_path, encoding="utf-8-sig") as f:
                         usfm = f.read()
                     handler = UpdateUsfmParserHandler(
-                        rows=config.rows,
+                        rows=update.rows,
                         id_text=sentences.get_book(),
                         text_behavior=text_behavior,
                         paragraph_behavior=config.get_paragraph_behavior(),
