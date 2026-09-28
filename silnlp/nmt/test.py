@@ -54,6 +54,22 @@ VERSE_SCORES_SUFFIX = ".scores.tsv"
 LINREGRESS_PREFIX = "linregress"
 
 
+def read_sequence_confidences(conf_file: TextIO) -> List[float]:
+    confidences: List[float] = []
+    for line in conf_file:
+        columns = line.strip().split("\t")
+        if not columns:
+            continue
+        try:
+            confidence = float(columns[0])
+            for column in columns[1:]:
+                float(column)
+        except ValueError:
+            continue
+        confidences.append(confidence)
+    return confidences
+
+
 class PairScore:
     def __init__(
         self,
@@ -227,7 +243,7 @@ def score_pair(
         else:
             try:
                 with open(config.exp_dir / predictions_conf_file_name, "r", encoding="utf-8") as f:
-                    confidences = [float(line.split("\t")[0]) for line in list(f)[3::2]]
+                    confidences = read_sequence_confidences(f)
             except FileNotFoundError as e:
                 raise FileNotFoundError(
                     "Cannot use confidence as a scorer because the confidences file is missing. "
@@ -445,7 +461,7 @@ def process_individual_books(
         vref_file = stack.enter_context(vref_file_path.open("r", encoding="utf-8"))
         pred_file = stack.enter_context(pred_file_path.open("r", encoding="utf-8"))
         conf_file = stack.enter_context(conf_file_path.open("r", encoding="utf-8"))
-        conf_list = [float(line.strip().split("\t")[0]) for line in list(conf_file)[3::2]]
+        conf_list = read_sequence_confidences(conf_file)
 
         for lines in zip(pred_file, vref_file, conf_list, *ref_files):
             # Get file lines
