@@ -1,0 +1,209 @@
+import logging
+import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+from machine.corpora import (
+    FileParatextProjectSettingsParser,
+    FileParatextProjectTextUpdater,
+    ParatextProjectSettings,
+    UpdateUsfmParserHandler,
+    UpdateUsfmTextBehavior,
+    UsfmFileText,
+    UsfmStylesheet,
+    parse_usfm,
+)
+
+from silnlp.nmt.corpora import CorpusPair
+
+from .confidence_files import generate_confidence_files
+from .environment import SilNlpEnv
+from .paratext import get_parent_project_dir
+from .postprocesser import (
+    DocumentUpdate,
+    NoDetectedQuoteConventionException,
+    PostprocessHandler,
+    QuoteConventionSource,
+    UnknownQuoteConventionException,
+)
+from .translation_data_structures import TranslatedTextRowCollection
+
+LOGGER = logging.getLogger((__package__ or "") + ".translate")
+
+
+@dataclass(frozen=True)
+class UsfmSource:
+    """The USFM document a draft was translated from."""
+
+    path: Path
+    file_text: UsfmFileText
+    settings: Optional[ParatextProjectSettings]
+    stylesheet: UsfmStylesheet
+    from_project: bool
+    book: str
+
+
+@dataclass(frozen=True)
+class TranslatedUsfm:
+    """What translating one USFM document produced: the document it came from, the chapters that
+    were translated, and the drafts of them."""
+
+    source: UsfmSource
+    chapters: Optional[List[int]]
+    rows: TranslatedTextRowCollection
+
+
+class UsfmDraftWriter:
+    """Assembles a translated document into USFM, writing one file per postprocessing
+    configuration."""
+
+    def __init__(
+        self,
+        translated: TranslatedUsfm,
+        environment: SilNlpEnv,
+        trg_project: Optional[str] = None,
+        training_corpus_pairs: List[CorpusPair] = [],
+    ) -> None:
+        self._translated = translated
+        self._source = translated.source
+        self._chapters = translated.chapters
+        self._environment = environment
+        self._trg_project = trg_project
+        self._training_corpus_pairs = training_corpus_pairs
+
+    def write(
+        self,
+        postprocess_handler: Optional[PostprocessHandler],
+        trg_file_path: Path,
+        save_confidences: bool = False,
+    ) -> None:
+        if postprocess_handler is None:
+            postprocess_handler = PostprocessHandler(environment=self._environment)
+        translated_text_rows = self._translated.rows
+        drafts = translated_text_rows.get_translated_drafts()
+        for draft_index, translated_draft in enumerate(drafts, 1):
+            updates = translated_text_rows.construct_postprocessing_rows_for_draft_index(
+                postprocess_handler, draft_index
+            )
+
+            for update in updates:
+                config = update.config
+                usfm_out = self._update_usfm(update, self._remarks(config, translated_text_rows))
+                if config.is_quotation_mark_denormalization_required():
+                    try:
+                        usfm_out = self._denormalize_quotation_marks(config, usfm_out)
+                    except (UnknownQuoteConventionException, NoDetectedQuoteConventionException) as e:
+                        LOGGER.warning(str(e) + " Skipping quotation mark denormalization.")
+                        continue
+
+                trg_draft_file_path = trg_file_path.with_stem(trg_file_path.stem + config.get_postprocess_suffix())
+                if len(drafts) > 1:
+                    trg_draft_file_path = trg_draft_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
+
+                with trg_draft_file_path.open("w", encoding=self._encoding()) as f:
+                    f.write(usfm_out)
+
+                if save_confidences and config.get_postprocess_suffix() == "":
+                    generate_confidence_files(
+                        translated_draft, trg_draft_file_path, scripture_refs=translated_text_rows.get_scripture_refs()
+                    )
+
+    def _remarks(self, config, translated_text_rows: "TranslatedTextRowCollection") -> List[Tuple[int, str]]:
+        remarks: List[Tuple[int, str]] = []
+        paragraph_remark = config.get_paragraph_marker_remark()
+        generated_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+
+        if self._source.from_project:
+            draft_src_str = re.sub(r"_\d{4}_\d{2}_\d{2}$", "", self._source.path.parent.name)
+            draft_src_str = f"project {draft_src_str}"
+        else:
+            draft_src_str = f"file {self._source.path.name}"
+
+        chapters_for_remarks = (
+            self._chapters
+            if self._chapters
+            else sorted({sr.verse_ref.chapter_num for sr in translated_text_rows.get_scripture_refs()})
+        )
+        for chapter_num in chapters_for_remarks:
+            draft_remark = (
+                f"This draft of {self._source.book} {chapter_num} was generated by AI from {draft_src_str} "
+                f"on {generated_timestamp}. It should be reviewed carefully for errors before use."
+            )
+            if paragraph_remark:
+                draft_remark += " " + paragraph_remark
+            remarks.append((chapter_num, draft_remark))
+        return remarks
+
+    def _update_usfm(self, update: DocumentUpdate, remarks: List[Tuple[int, str]]) -> str:
+        config = update.config
+        text_behavior = (
+            UpdateUsfmTextBehavior.PREFER_NEW
+            if self._trg_project is not None
+            else UpdateUsfmTextBehavior.STRIP_EXISTING
+        )
+        update_block_handlers = (
+            config.create_place_markers_postprocessor().get_update_block_handlers()
+            if config.is_marker_placement_required()
+            else None
+        )
+
+        # Insert translation into the USFM structure of an existing project
+        # If the target project is not the same as the translated file's original project,
+        # no verses outside of the ones translated will be overwritten
+        if self._trg_project is not None or self._source.from_project:
+            project_dir = self._environment.get_paratext_project_dir(
+                self._trg_project if self._trg_project is not None else self._source.path.parent.name
+            )
+            parent_settings = None
+            parent_project_dir = get_parent_project_dir(project_dir, environment=self._environment)
+            if parent_project_dir is not None:
+                parent_settings = FileParatextProjectSettingsParser(parent_project_dir).parse()
+            usfm_out = FileParatextProjectTextUpdater(project_dir, parent_settings).update_usfm(
+                book_id=self._source.file_text.id,
+                rows=update.rows,
+                chapters=self._chapters,
+                text_behavior=text_behavior,
+                paragraph_behavior=config.get_paragraph_behavior(),
+                embed_behavior=config.get_embed_behavior(),
+                style_behavior=config.get_style_behavior(),
+                update_block_handlers=update_block_handlers,
+                remarks=remarks,
+                compare_segments=True,
+            )
+            if usfm_out is None:
+                raise FileNotFoundError(
+                    f"Book {self._source.file_text.id} does not exist in target project {self._trg_project}"
+                )
+            return usfm_out
+
+        # Slightly more manual version for updating an individual file
+        with open(self._source.path, encoding="utf-8-sig") as f:
+            usfm = f.read()
+        handler = UpdateUsfmParserHandler(
+            rows=update.rows,
+            id_text=self._source.book,
+            text_behavior=text_behavior,
+            paragraph_behavior=config.get_paragraph_behavior(),
+            embed_behavior=config.get_embed_behavior(),
+            style_behavior=config.get_style_behavior(),
+            update_block_handlers=update_block_handlers,
+            remarks=remarks,
+        )
+        parse_usfm(usfm, handler)
+        return handler.get_usfm()
+
+    def _denormalize_quotation_marks(self, config, usfm: str) -> str:
+        postprocessor = QuoteConventionSource(
+            config.target_quote_convention(),
+            config.is_quote_convention_detection_required(),
+            self._environment,
+        ).create_postprocessor(self._training_corpus_pairs)
+        return postprocessor.postprocess_usfm(usfm, stylesheet=self._source.stylesheet)
+
+    def _encoding(self) -> str:
+        settings = self._source.settings
+        if settings is None or settings.encoding in ("utf-8-sig", "utf_8_sig"):
+            return "utf-8"
+        return settings.encoding

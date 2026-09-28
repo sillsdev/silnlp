@@ -43,9 +43,9 @@ from transformers import (
     set_seed,
 )
 
+from ..common.confidence_files import generate_confidence_files
 from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
-from ..common.translator import generate_confidence_files
 from ..common.utils import merge_dict
 from .batch_size import find_executable_batch_size
 from .checkpoints import CheckpointDirectory, CheckpointType

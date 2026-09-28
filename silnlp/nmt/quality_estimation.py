@@ -8,9 +8,9 @@ from typing import Dict, List, Optional, Set, TextIO, Tuple
 from machine.quality_estimation import is_book_confidence_unusually_low
 from machine.scripture import ALL_BOOK_IDS, VerseRef
 
+from ..common.confidence_files import CONFIDENCE_SUFFIX, ConfidenceFile, TxtConfidenceFile, UsfmConfidenceFile
 from ..common.environment import SilNlpEnv
 from ..common.linear_regression import LinearRegressionResult
-from ..common.translator import CONFIDENCE_SUFFIX, ConfidenceFile, TxtConfidenceFile, UsfmConfidenceFile
 from .score_files import LINREGRESS_PREFIX
 
 LOGGER = logging.getLogger((__package__ or "") + ".quality_estimation")
