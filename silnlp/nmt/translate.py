@@ -8,11 +8,13 @@ from typing import Generator, Iterable, List, Optional, Tuple, Union
 from machine.corpora import UsfmFileTextCorpus, create_versification_ref_corpus, extract_scripture_corpus
 from machine.scripture import book_number_to_id, get_chapters
 
+from ..common.confidence_files import CONFIDENCE_SUFFIX
 from ..common.environment import SilNlpEnv
 from ..common.paratext import book_file_name_digits
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.translation_data_structures import SentenceTranslationGroup
-from ..common.translator import CONFIDENCE_SUFFIX, Translator, UsfmDraftWriter
+from ..common.translator import Translator
+from ..common.usfm_draft_writer import UsfmDraftWriter
 from ..common.utils import get_git_revision_hash, show_attrs
 from .checkpoints import CheckpointType
 from .clearml_connection import TAGS_LIST, SILClearML
