@@ -341,13 +341,13 @@ class UsfmDraftWriter:
         self,
         postprocess_handler: Optional[PostprocessHandler],
         trg_file_path: Path,
-        produce_multiple_translations: bool = False,
         save_confidences: bool = False,
     ) -> None:
         if postprocess_handler is None:
             postprocess_handler = PostprocessHandler(environment=self._environment)
         translated_text_rows = self._translated.rows
-        for draft_index, translated_draft in enumerate(translated_text_rows.get_translated_drafts(), 1):
+        drafts = translated_text_rows.get_translated_drafts()
+        for draft_index, translated_draft in enumerate(drafts, 1):
             updates = translated_text_rows.construct_postprocessing_rows_for_draft_index(
                 postprocess_handler, draft_index
             )
@@ -363,7 +363,7 @@ class UsfmDraftWriter:
                         continue
 
                 trg_draft_file_path = trg_file_path.with_stem(trg_file_path.stem + config.get_postprocess_suffix())
-                if produce_multiple_translations:
+                if len(drafts) > 1:
                     trg_draft_file_path = trg_draft_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
 
                 with trg_draft_file_path.open("w", encoding=self._encoding()) as f:

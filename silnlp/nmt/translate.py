@@ -24,7 +24,9 @@ LOGGER = logging.getLogger((__package__ or "") + ".translate")
 
 
 def export_vref_for_output(output_path: Path, produce_multiple_translations: bool, num_drafts: int = 1) -> None:
-    if produce_multiple_translations:
+    # Drafts are only numbered when there is more than one, so a run that fell back to a single
+    # translation writes its draft under the plain name.
+    if produce_multiple_translations and num_drafts > 1:
         for i in range(1, num_drafts + 1):
             draft_path = output_path.with_suffix(f".{i}{output_path.suffix}")
             if draft_path.exists():
@@ -161,9 +163,7 @@ class TranslationTask:
                     if translated is not None:
                         UsfmDraftWriter(
                             translated, self.environment, trg_project, config.corpus_pairs
-                        ).write(
-                            postprocess_handler, output_path, produce_multiple_translations, save_confidences
-                        )
+                        ).write(postprocess_handler, output_path, save_confidences)
                     if vref:
                         num_drafts = config.infer.get("num_drafts", 1)
                         export_vref_for_output(output_path, produce_multiple_translations, num_drafts)
@@ -271,9 +271,7 @@ class TranslationTask:
                     if translated is not None:
                         UsfmDraftWriter(
                             translated, self.environment, training_corpus_pairs=config.corpus_pairs
-                        ).write(
-                            postprocess_handler, trg_file_path, produce_multiple_translations, save_confidences
-                        )
+                        ).write(postprocess_handler, trg_file_path, save_confidences)
                     if vref:
                         num_drafts = config.infer.get("num_drafts", 1)
                         export_vref_for_output(trg_file_path, produce_multiple_translations, num_drafts)
