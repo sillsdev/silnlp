@@ -26,13 +26,56 @@ line_length = 120
 module = "nltk.*"
 ignore_missing_imports = true
 
-[tool.poetry]
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
 name = "silnlp"
 version = "1.0.0"
 description = ""
-authors = ["SIL International"]
+authors = [{ name = "SIL International" }]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "pandas>=2.2,<3.0",
+  "sentencepiece>=0.2.0,<0.3.0",
+  "nltk>=3.5,<4.0",
+  "python-dotenv==0.20.0",
+  "seaborn==0.11.2",
+  "morfessor>=2.0.6,<3.0.0",
+  "morfessor-flatcat>=1.0.8,<2.0.0",
+  "psutil>=5.7.3,<6.0.0",
+  "scikit-learn>=1.1.2,<2.0.0",
+  "numpy>=2.2.6,<3.0.0",
+  "scipy>=1.11.2,<2.0.0",
+  "clearml>=2.1.12,<3.0.0",
+  "xlsxwriter>=3.2.0,<4.0.0",
+  "python-Levenshtein>=0.27.1,<0.28.0",
+  "lxml>=4.6.3,<5.0.0",
+  "tqdm==4.67.3",
+  "sacrebleu>=2.6.0,<3.0.0",
+  "sil-machine[thot]==1.9.2",
+  "datasets>=5.0.1,<6.0.0",
+  "torch>=2.6,<3.0",
+  "sacremoses>=0.0.53,<0.1.0",
+  "evaluate>=0.3.0,<0.4.0",
+  "python-docx>=0.8.11,<0.9.0",
+  "iso639-lang>=2.1.0,<3.0.0",
+  "accelerate>=1.14.0,<2.0.0",
+  "transformers>=5.14.1,<6.0.0",
+  "jinja2>=3.1.2,<4.0.0",
+  "peft>=0.20.0,<0.21.0",
+  "attrs>=24.3.0,<25.0.0",
+  "jsonschema>=4.18.0,<5.0.0",
+  "requests>=2.31,<3.0",
+  "openpyxl>=3.1.2,<4.0.0",
+  "packaging>=24.0,<25.0",
+  "hanzidentifier>=1.2.0,<2.0.0",
+  "jarowinkler>=2.0.1,<3.0.0",
+  "wildebeest-nlp>=0.9.0",
+]
 
-[tool.poetry.scripts]
+[project.scripts]
 silnlp-extract-corpora = "silnlp.common.extract_corpora:main"
 
 silnlp-nmt-preprocess = "silnlp.nmt.preprocess:main"
@@ -45,65 +88,26 @@ silnlp-alignment-align = "silnlp.alignment.align:main"
 silnlp-alignment-test = "silnlp.alignment.test:main"
 silnlp-alignment-aggregate-results = "silnlp.alignment.aggregate_results:main"
 
-[tool.poetry.dependencies]
-python = ">=3.12,<3.13"
-pandas = "^2.2"
-sentencepiece = "^0.2.0"
-nltk = "^3.5"
-python-dotenv = "0.20.0"
-seaborn = "0.11.2"
-morfessor = "^2.0.6"
-Morfessor-FlatCat = "^1.0.8"
-psutil = "^5.7.3"
-scikit-learn = "^1.1.2"
-numpy = ">=2.2.6,<3.0.0"
-scipy = "^1.11.2"
-clearml = "^2.1.12"
-XlsxWriter = "^3.2.0"
-python-Levenshtein = "^0.27.1"
-lxml = "^4.6.3"
-tqdm = "4.67.3"
-sacrebleu = "^2.6.0"
-sil-machine = {extras = ["thot"], version = "1.9.2"}
-datasets = "^5.0.1"
-torch = {version = "^2.6", source = "torch"}
-sacremoses = "^0.0.53"
-evaluate = "^0.3.0"
-python-docx = "^0.8.11"
-iso639-lang = "^2.1.0"
-eflomal = { version = "^2.0.0", optional = true }
-accelerate = "^1.14.0"
-transformers = "^5.14.1"
-bitsandbytes = { version = "^0.50", optional = true }
-jinja2 = "^3.1.2"
-peft = "^0.20.0"
-attrs = "^24.3.0"
-jsonschema = "^4.18.0"
-requests = "^2.31"
-openpyxl = "^3.1.2"
-packaging = "^24.0"
-hanzidentifier = "^1.2.0"
-jarowinkler = "^2.0.1"
-wildebeest-nlp = ">=0.9.0"
+[project.optional-dependencies]
+eflomal = ["eflomal>=2.0.0,<3.0.0"]
+llm = ["bitsandbytes>=0.50,<0.51.0"]
 
-[tool.poetry.group.dev.dependencies]
-types-pyyaml = "^6.0.12.12"
-black = "24.4.1"
-flake8 = "^7.1.0"
-ipykernel = "^6.4.1"
-pylint = "^3.0.0"
-pytest = "^9.1.1"
-types-tqdm = "^4.62.4"
-pandas-stubs = "^2.3"
-types-regex = "^2023.10.3.0"
-lxml-stubs = "^0.4.0"
-mypy = "^1.7.1"
+[dependency-groups]
+dev = [
+  "types-pyyaml>=6.0.12.12,<7.0.0",
+  "black==24.4.1",
+  "flake8>=7.1.0,<8.0.0",
+  "ipykernel>=6.4.1,<7.0.0",
+  "pylint>=3.0.0,<4.0.0",
+  "pytest>=9.1.1,<10.0.0",
+  "types-tqdm>=4.62.4,<5.0.0",
+  "pandas-stubs>=2.3,<3.0.0",
+  "types-regex>=2023.10.3.0,<2024.0.0",
+  "lxml-stubs>=0.4.0,<0.5.0",
+  "mypy>=1.7.1,<2.0.0",
+]
 
-[tool.poetry.extras]
-eflomal = ["eflomal"]
-llm = ["bitsandbytes"]
-
-[[tool.poetry.source]]
+[[tool.uv.index]]
 name = "torch"
 url = "https://download.pytorch.org/whl/cu124"
-priority = "explicit"
+explicit = true

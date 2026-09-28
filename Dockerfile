@@ -1,27 +1,7 @@
 ARG PYTHON_VERSION=3.12
-ARG POETRY_VERSION=2.4.1
+ARG UV_VERSION=0.12.17
 
-FROM python:$PYTHON_VERSION-slim AS builder
-ARG POETRY_VERSION
-
-ENV POETRY_HOME=/opt/poetry
-ENV POETRY_VENV=/opt/poetry-venv
-ENV POETRY_CACHE_DIR=/opt/.cache
-
-# Install poetry separated from system interpreter
-RUN python3 -m venv $POETRY_VENV \
-    && $POETRY_VENV/bin/pip install -U pip setuptools \
-    && $POETRY_VENV/bin/pip install poetry==${POETRY_VERSION}
-
-# Add `poetry` to PATH
-ENV PATH="${PATH}:${POETRY_VENV}/bin"
-
-WORKDIR /src
-COPY poetry.lock pyproject.toml /src/
-RUN poetry self add poetry-plugin-export
-RUN poetry export -E eflomal --without-hashes -f requirements.txt > requirements.txt
-COPY . /src
-RUN poetry build
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 
 FROM ubuntu:24.04
 
@@ -34,13 +14,12 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 WORKDIR /root
 
 # Install apt packages
-RUN apt-get update
-RUN apt-get upgrade -y
-RUN apt-get install --no-install-recommends -y \
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install --no-install-recommends -y \
+    ca-certificates \
     git \
     python$PYTHON_VERSION \
-    python3-pip \
-    python3-dev \
     wget \
     build-essential \
     gdb \
@@ -52,18 +31,23 @@ RUN apt-get install --no-install-recommends -y \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
+COPY --from=uv /uv /uvx /bin/
+
 # Make some useful symlinks that are expected to exist
 RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
     ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python
 
-# Install dependencies from poetry
-COPY --from=builder /src/requirements.txt .
-RUN sed -i '/^wheel==/d' requirements.txt \
-    && pip install --break-system-packages -r requirements.txt \
-    && rm requirements.txt
+# Install locked runtime dependencies with uv
+WORKDIR /tmp/silnlp-deps
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev --no-install-project \
+    && rm pyproject.toml uv.lock
+WORKDIR /root
 
 # Set eflomal path
-ENV EFLOMAL_PATH=/usr/local/lib/python3.12/dist-packages/eflomal/bin
+ENV EFLOMAL_PATH=/opt/venv/lib/python3.12/site-packages/eflomal/bin
 
 # Install fast_align
 RUN apt-get update && \

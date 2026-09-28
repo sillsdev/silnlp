@@ -1,13 +1,8 @@
 ARG PYTHON_VERSION=3.12
-ARG POETRY_VERSION=2.4.1
+ARG UV_VERSION=0.12.17
 FROM ubuntu:24.04
 ARG PYTHON_VERSION
-ARG POETRY_VERSION
 WORKDIR /app
-ENV POETRY_HOME=/opt/poetry
-ENV POETRY_VENV=/opt/poetry-venv
-ENV POETRY_CACHE_DIR=/opt/.cache
-ENV PIP_DISABLE_PIP_VERSION_CHECK=on
 ENV TZ=America/New_York
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 # Install apt packages
@@ -26,17 +21,10 @@ RUN apt-get install --no-install-recommends -y \
 RUN apt-get update && apt-get install --no-install-recommends -y \
     fuse3 \
     rclone
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 # Make some useful symlinks that are expected to exist
 RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
     ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python
-# Install poetry separated from system interpreter
-RUN python3 -m venv $POETRY_VENV \
-    && $POETRY_VENV/bin/pip install -U pip setuptools \
-    && $POETRY_VENV/bin/pip install poetry==${POETRY_VERSION}
-# Add `poetry` to PATH and configure
-ENV PATH="${PATH}:${POETRY_VENV}/bin"
-RUN poetry config virtualenvs.create true && \
-    poetry config virtualenvs.in-project true
 # Clean up
 RUN rm -rf /var/lib/apt/lists/*
 # Set environment variables
