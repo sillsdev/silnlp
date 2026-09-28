@@ -1,6 +1,4 @@
 import logging
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from machine.corpora import (
@@ -29,12 +27,9 @@ from machine.punctuation_analysis import (
     QuoteConventionDetector,
 )
 from machine.tokenization import LatinWordTokenizer
-from machine.translation import WordAlignmentMatrix
 
-from ..alignment.eflomal import to_word_alignment_matrix
-from ..alignment.utils import compute_alignment_scores
+from ..alignment.sentence_aligner import SentenceAligner, ToolSentenceAligner
 from ..nmt.corpora import CorpusPair
-from .corpus import load_corpus, write_corpus
 from .environment import SilNlpEnv
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
@@ -403,11 +398,13 @@ class PostprocessHandler:
         configs: Optional[List[PostprocessConfig]] = None,
         include_base: bool = True,
         environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+        aligner: Optional[SentenceAligner] = None,
     ) -> None:
         if configs is None:
             configs = []
 
         self.configs = ([PostprocessConfig({}, environment)] if include_base else []) + configs
+        self._aligner = aligner if aligner is not None else ToolSentenceAligner()
 
     # NOTE: Row metadata may need to be created/recreated at different times
     # For example, the marker placement metadata needs to be recreated for each new draft
@@ -419,9 +416,7 @@ class PostprocessHandler:
 
         self._construct_place_markers_metadata(source, translation)
 
-    def _construct_place_markers_metadata(
-        self, source: List[str], translation: List[str], aligner: str = "eflomal"
-    ) -> None:
+    def _construct_place_markers_metadata(self, source: List[str], translation: List[str]) -> None:
         pm_configs = [
             config
             for config in self.configs
@@ -431,7 +426,7 @@ class PostprocessHandler:
             return
 
         tokenizer = LatinWordTokenizer()
-        alignments = self._get_alignment_matrices(source, translation, aligner)
+        alignments = self._aligner.align(source, translation)
         for i, (s, t, alignment) in enumerate(zip(source, translation, alignments)):
             source_tokens = list(tokenizer.tokenize(s))
             translation_tokens = list(tokenizer.tokenize(t))
@@ -450,14 +445,3 @@ class PostprocessHandler:
                         ),
                         style_behavior=config.get_style_behavior(),
                     )
-
-    def _get_alignment_matrices(
-        self, src_sents: List[str], trg_sents: List[str], aligner: str = "eflomal"
-    ) -> List[WordAlignmentMatrix]:
-        with TemporaryDirectory() as td:
-            align_path = Path(td, "sym-align.txt")
-            write_corpus(Path(td, "src_align.txt"), src_sents)
-            write_corpus(Path(td, "trg_align.txt"), trg_sents)
-            compute_alignment_scores(Path(td, "src_align.txt"), Path(td, "trg_align.txt"), aligner, align_path)
-
-            return [to_word_alignment_matrix(line) for line in load_corpus(align_path)]
