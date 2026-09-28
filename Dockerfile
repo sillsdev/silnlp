@@ -18,7 +18,7 @@ ENV PATH="${PATH}:${POETRY_VENV}/bin"
 
 WORKDIR /src
 COPY poetry.lock pyproject.toml /src/
-RUN poetry export -E eflomal --without-hashes -f requirements.txt > requirements.txt
+RUN poetry export --without-hashes -f requirements.txt > requirements.txt
 COPY . /src
 RUN poetry build
 
@@ -58,9 +58,6 @@ RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
 # Install dependencies from poetry
 COPY --from=builder /src/requirements.txt .
 RUN pip install -r requirements.txt && rm requirements.txt
-
-# Set eflomal path
-ENV EFLOMAL_PATH=/usr/local/lib/python3.10/dist-packages/eflomal/bin
 
 # Install fast_align
 RUN apt-get update && \

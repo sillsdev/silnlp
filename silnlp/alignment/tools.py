@@ -1,71 +1,8 @@
 import platform
 import subprocess
 from pathlib import Path
-from typing import Tuple
 
 from ..common.environment import get_env_path, wsl_path
-
-EFLOMAL_PATH = Path(get_env_path("EFLOMAL_PATH"), "eflomal")
-
-
-def is_eflomal_available() -> bool:
-    return EFLOMAL_PATH.is_file()
-
-
-def execute_eflomal(
-    source_path: Path,
-    target_path: Path,
-    forward_links_path: Path,
-    reverse_links_path: Path,
-    n_iterations: Tuple[int, int, int],
-) -> None:
-    if not is_eflomal_available():
-        raise RuntimeError("eflomal is not installed.")
-
-    if platform.system() == "Windows":
-        args = [
-            "wsl",
-            wsl_path(EFLOMAL_PATH),
-            "-s",
-            wsl_path(source_path),
-            "-t",
-            wsl_path(target_path),
-            "-f",
-            wsl_path(forward_links_path),
-            "-r",
-            wsl_path(reverse_links_path),
-        ]
-    else:
-        args = [
-            str(EFLOMAL_PATH),
-            "-s",
-            str(source_path),
-            "-t",
-            str(target_path),
-            "-f",
-            str(forward_links_path),
-            "-r",
-            str(reverse_links_path),
-        ]
-    args.extend(
-        [
-            "-q",
-            "-m",
-            "3",
-            "-n",
-            "3",
-            "-N",
-            "0.2",
-            "-1",
-            str(n_iterations[0]),
-            "-2",
-            str(n_iterations[1]),
-            "-3",
-            str(n_iterations[2]),
-        ]
-    )
-    subprocess.run(args, stderr=subprocess.DEVNULL)
-
 
 ATOOLS_PATH = Path(get_env_path("FAST_ALIGN_PATH"), "atools")
 
