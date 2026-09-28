@@ -5,7 +5,6 @@ from machine.corpora import (
     AlignedWordPair,
     PlaceMarkersAlignmentInfo,
     PlaceMarkersUsfmUpdateBlockHandler,
-    ScriptureRef,
     UpdateUsfmMarkerBehavior,
     UpdateUsfmParserHandler,
     UpdateUsfmRow,
@@ -32,6 +31,7 @@ from machine.tokenization import LatinWordTokenizer
 from ..alignment.sentence_aligner import SentenceAligner, ToolSentenceAligner
 from ..nmt.corpora import CorpusPair
 from .environment import SilNlpEnv
+from .translated_segment import TranslatedSegment
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
 
@@ -409,14 +409,16 @@ class PostprocessHandler:
     # For example, the marker placement metadata needs to be recreated for each new draft
     # because it uses text alignment, but other metadata may only need to be created once overall,
     # or once per source project. This may change what part of the process we want this function to be called at
-    def construct_rows(self, refs: List[ScriptureRef], source: List[str], translation: List[str], train_source: List[str], train_target: List[str]) -> None:
+    def construct_rows(
+        self, segments: Sequence[TranslatedSegment], train_source: List[str], train_target: List[str]
+    ) -> None:
         for config in self.configs:
-            config.rows = [UpdateUsfmRow([ref], t, {}) for ref, t in zip(refs, translation)]
+            config.rows = [UpdateUsfmRow([segment.ref], segment.translation, {}) for segment in segments]
 
-        self._construct_place_markers_metadata(source, translation, train_source, train_target)
+        self._construct_place_markers_metadata(segments, train_source, train_target)
 
     def _construct_place_markers_metadata(
-        self, source: List[str], translation: List[str], train_source: List[str], train_target: List[str]
+        self, segments: Sequence[TranslatedSegment], train_source: List[str], train_target: List[str]
     ) -> None:
         pm_configs = [
             config
@@ -428,10 +430,13 @@ class PostprocessHandler:
 
         tokenizer = LatinWordTokenizer()
         # The training corpus is aligned alongside the draft to give the aligner more to learn from.
-        alignments = self._aligner.align(source + train_source, translation + train_target)[: len(source)]
-        for i, (s, t, alignment) in enumerate(zip(source, translation, alignments)):
-            source_tokens = list(tokenizer.tokenize(s))
-            translation_tokens = list(tokenizer.tokenize(t))
+        alignments = self._aligner.align(
+            [segment.source for segment in segments] + list(train_source),
+            [segment.translation for segment in segments] + list(train_target),
+        )[: len(segments)]
+        for i, (segment, alignment) in enumerate(zip(segments, alignments)):
+            source_tokens = list(tokenizer.tokenize(segment.source))
+            translation_tokens = list(tokenizer.tokenize(segment.translation))
 
             for config in pm_configs:
                 row_metadata = config.rows[i].metadata
