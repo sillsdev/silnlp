@@ -27,6 +27,7 @@ from ..common.postprocesser import (
     PostprocessHandler,
     UnknownQuoteConventionException,
 )
+from ..common.translated_segment import TranslatedSegment
 from ..common.usfm_utils import PARAGRAPH_TYPE_EMBEDS
 from ..common.utils import get_git_revision_hash
 from .checkpoints import CheckpointDirectory
@@ -206,9 +207,10 @@ def postprocess_draft(
     source_usfm = None
     if any(config.is_marker_processing_required() for config in postprocess_handler.configs):
         postprocess_handler.construct_rows(
-            [s.ref for s in src_sentences.sentences],
-            [s.text for s in src_sentences.sentences],
-            [s.text for s in draft_sentences.sentences],
+            [
+                TranslatedSegment(source.ref, source.text, draft.text)
+                for source, draft in zip(src_sentences.sentences, draft_sentences.sentences)
+            ]
         )
 
         with draft_metadata.source_path.open(encoding=encoding) as f:

@@ -8,6 +8,7 @@ from attr import dataclass
 from machine.corpora import ScriptureRef, TextRow, UsfmFileText, UsfmStylesheet, UsfmTextType
 
 from .postprocesser import PostprocessHandler
+from .translated_segment import TranslatedSegment
 from .utils import NLTKSentenceTokenizer, add_tags_to_sentence
 
 
@@ -304,10 +305,9 @@ class TranslatedTextRowCollection:
     def construct_postprocessing_rows_for_draft_index(
         self, postprocess_handler: PostprocessHandler, draft_index: int
     ) -> None:
+        translations = self._draft_group.get_drafts()[draft_index - 1].get_all_translations()
         postprocess_handler.construct_rows(
-            [r.ref for r in self._rows],
-            [r.text for r in self._rows],
-            self._draft_group.get_drafts()[draft_index - 1].get_all_translations(),
+            [TranslatedSegment(row.ref, row.text, translation) for row, translation in zip(self._rows, translations)]
         )
 
     def get_scripture_refs(self) -> List[ScriptureRef]:
