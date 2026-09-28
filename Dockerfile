@@ -20,6 +20,7 @@ RUN apt-get update \
     ca-certificates \
     git \
     python$PYTHON_VERSION \
+    python$PYTHON_VERSION-venv \
     wget \
     build-essential \
     gdb \
