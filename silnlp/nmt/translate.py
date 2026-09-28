@@ -14,7 +14,7 @@ from ..common.environment import SilNlpEnv
 from ..common.paratext import book_file_name_digits
 from ..common.postprocessor import PostprocessConfig, PostprocessHandler
 from ..common.translation_data_structures import SentenceTranslationGroup
-from ..common.translator import CONFIDENCE_SUFFIX, Translator
+from ..common.translator import CONFIDENCE_SUFFIX, Translator, UsfmDraftWriter
 from ..common.utils import get_git_revision_hash, show_attrs
 from .checkpoints import CheckpointType
 from .clearml_connection import TAGS_LIST, SILClearML
@@ -146,30 +146,26 @@ class TranslationTask:
                 output_dir = output_dir / trg_project
             output_dir.mkdir(exist_ok=True, parents=True)
 
-            src_training_rows = list(load_corpus(config.files.train_source_detokenized()))
-            trg_training_rows = list(load_corpus(config.files.train_target_detokenized()))
-
             translation_failed: List[str] = []
             for book_num, chapters in book_nums.items():
                 book = book_number_to_id(book_num)
                 try:
                     LOGGER.info(f"Translating {book} ...")
                     output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
-                    translator.translate_book(
+                    translated = translator.translate_book(
                         src_project,
                         book,
-                        output_path,
                         trg_iso,
                         src_training_rows,
                         trg_training_rows,
                         produce_multiple_translations,
-                        save_confidences,
                         chapters if chapters else None,
-                        trg_project,
-                        postprocess_handler,
-                        config.corpus_pairs,
                         tags,
                     )
+                    if translated is not None:
+                        UsfmDraftWriter(translated, self.environment, trg_project, config.corpus_pairs).write(
+                            postprocess_handler, output_path, produce_multiple_translations, save_confidences
+                        )
                     if vref:
                         num_drafts = config.infer.get("num_drafts", 1)
                         export_vref_for_output(output_path, produce_multiple_translations, num_drafts)
@@ -269,22 +265,17 @@ class TranslationTask:
                         src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations, tags
                     )
                 elif ext == ".usfm" or ext == ".sfm":
-                    if src_training_rows is None or trg_training_rows is None:
-                        src_training_rows = list(load_corpus(config.files.train_source_detokenized()))
-                        trg_training_rows = list(load_corpus(config.files.train_target_detokenized()))
-                    translator.translate_usfm(
+                    translated = translator.translate_usfm(
                         src_file_path,
-                        trg_file_path,
                         src_iso,
                         trg_iso,
-                        src_training_rows=src_training_rows,
-                        trg_training_rows=trg_training_rows,
-                        produce_multiple_translations=produce_multiple_translations,
-                        save_confidences=save_confidences,
-                        postprocess_handler=postprocess_handler,
-                        training_corpus_pairs=config.corpus_pairs,
+                        produce_multiple_translations,
                         tags=tags,
                     )
+                    if translated is not None:
+                        UsfmDraftWriter(translated, self.environment, training_corpus_pairs=config.corpus_pairs).write(
+                            postprocess_handler, trg_file_path, produce_multiple_translations, save_confidences
+                        )
                     if vref:
                         num_drafts = config.infer.get("num_drafts", 1)
                         export_vref_for_output(trg_file_path, produce_multiple_translations, num_drafts)
