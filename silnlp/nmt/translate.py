@@ -490,7 +490,7 @@ def main() -> None:
         environment=environment,
     )
 
-    postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args), environment)], environment=environment)
+    postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args))], environment=environment)
 
     if len(args.books) > 0:
         if args.debug:
