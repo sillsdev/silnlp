@@ -4,7 +4,7 @@ from unittest.mock import Mock, create_autospec
 
 import torch
 from transformers import AutoModelForSeq2SeqLM, PretrainedConfig, PreTrainedModel
-from transformers.generation.utils import GenerateBeamEncoderDecoderOutput
+from transformers.generation.utils import GenerateBeamEncoderDecoderOutput, GenerateEncoderDecoderOutput
 from transformers.modeling_outputs import Seq2SeqLMOutput
 
 from silnlp.nmt.seq2seq_config import PreTrainedModelProvider, PreTrainedModelProviderFactory, Seq2SeqConfig
@@ -13,7 +13,7 @@ _TINY_MODEL_NAME = "hf-internal-testing/tiny-random-nllb"
 
 # The function that stands in for PreTrainedModel.generate. It receives the arguments that the
 # translation pipeline passes to the model, which includes the batch's "input_ids".
-MockGenerate = Callable[..., GenerateBeamEncoderDecoderOutput]
+MockGenerate = Callable[..., GenerateBeamEncoderDecoderOutput | GenerateEncoderDecoderOutput]
 
 
 @dataclass
@@ -61,7 +61,7 @@ def create_mock_pretrained_model(
             **kwargs,
         )
 
-    def mock_generate(*args, **kwargs) -> GenerateBeamEncoderDecoderOutput:
+    def mock_generate(*args, **kwargs) -> GenerateBeamEncoderDecoderOutput | GenerateEncoderDecoderOutput:
         nonlocal last_transition_scores
         output = generate(*args, **kwargs)
 
@@ -155,23 +155,35 @@ def mock_sequence_log_prob(sentence_index: int) -> float:
 def create_fixed_translation_mock_pretrained_model(
     get_translation_token_ids: Callable[[], List[int]], model_stats: ModelTrainingStats
 ) -> PreTrainedModel:
-    """Create a mock model that generates the same translation for every sentence in every batch."""
+    """Create a mock model that generates the same translation for every sentence in every batch.
+
+    Like a real model, it reports sequence scores for beam search but not for sampling.
+    """
     num_translated_sentences = 0
 
-    def generate(*args, **kwargs) -> GenerateBeamEncoderDecoderOutput:
+    def generate(*args, **kwargs) -> GenerateBeamEncoderDecoderOutput | GenerateEncoderDecoderOutput:
         nonlocal num_translated_sentences
         input_ids: Optional[torch.Tensor] = kwargs.get("input_ids", args[0] if len(args) > 0 else None)
         assert input_ids is not None
         batch_size = input_ids.shape[0]
+        num_return_sequences: int = kwargs.get("num_return_sequences") or 1
         device = input_ids.device
 
-        sequences = torch.tensor(get_translation_token_ids(), dtype=torch.long, device=device).repeat(batch_size, 1)
+        sequences = torch.tensor(get_translation_token_ids(), dtype=torch.long, device=device).repeat(
+            batch_size * num_return_sequences, 1
+        )
         scores = torch.full(tuple(sequences.shape), MOCK_TOKEN_LOG_PROB, dtype=torch.float32, device=device)
+        if kwargs.get("do_sample"):
+            return GenerateEncoderDecoderOutput(
+                sequences=cast(torch.LongTensor, sequences),
+                scores=(cast(torch.FloatTensor, scores),),
+            )
+
         sequences_scores = torch.tensor(
             [mock_sequence_log_prob(num_translated_sentences + i) for i in range(batch_size)],
             dtype=torch.float32,
             device=device,
-        )
+        ).repeat_interleave(num_return_sequences)
         num_translated_sentences += batch_size
         return GenerateBeamEncoderDecoderOutput(
             sequences=cast(torch.LongTensor, sequences),

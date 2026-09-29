@@ -14,7 +14,7 @@ from scipy.stats import gmean
 
 from ..common.environment import SilNlpEnv
 from ..common.linear_regression import perform_enhanced_linear_regression
-from ..common.translator import CONFIDENCE_SUFFIX
+from ..common.translator import CONFIDENCE_SUFFIX, TestConfidenceFile
 from ..common.utils import get_git_revision_hash
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import CheckpointType, Config, NMTModel, find_all_checkpoints
@@ -63,7 +63,7 @@ class PairScore:
         bleu: Optional[BLEUScore],
         sent_len: int,
         projects: Set[str],
-        other_scores: Dict[str, float] = {},
+        other_scores: Dict[str, Optional[float]] = {},
         draft_index: int = 1,
     ) -> None:
         self.src_iso = src_iso
@@ -102,7 +102,9 @@ class PairScore:
                 f",{self.bleu.sys_len:d},{self.bleu.ref_len:d}"
             )
         for scorer, val in self.other_scores.items():
-            if scorer.lower() == "confidence":
+            if val is None:
+                file.write(",")
+            elif scorer.lower() == "confidence":
                 file.write(f",{val:.8f}")
             else:
                 file.write(f",{val:.2f}")
@@ -116,12 +118,11 @@ def score_pair(
     src_iso: str,
     trg_iso: str,
     predictions_detok_file_name: str,
-    predictions_conf_file_name: str,
+    pair_confs: Optional[List[float]],
     scorers: Set[str],
     config: Config,
     ref_projects: Set[str],
     draft_index: int = 1,
-    pair_confs: Optional[List[float]] = None,
     linregress_file_name: Optional[str] = None,
 ) -> PairScore:
     bleu_score = None
@@ -133,7 +134,7 @@ def score_pair(
             tokenize=config.data.get("sacrebleu_tokenize", "13a"),
         )
 
-    other_scores: Dict[str, float] = {}
+    other_scores: Dict[str, Optional[float]] = {}
     if "chrf3" in scorers:
         chrf3_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, remove_whitespace=True)
         other_scores["chrF3"] = chrf3_score.score
@@ -222,18 +223,7 @@ def score_pair(
             other_scores["TER"] = ter_score.score
 
     if "confidence" in scorers:
-        if pair_confs is not None:
-            confidences = pair_confs
-        else:
-            try:
-                with open(config.exp_dir / predictions_conf_file_name, "r", encoding="utf-8") as f:
-                    confidences = [float(line.split("\t")[0]) for line in list(f)[3::2]]
-            except FileNotFoundError as e:
-                raise FileNotFoundError(
-                    "Cannot use confidence as a scorer because the confidences file is missing. "
-                    "Include the --save-confidences option to generate the file and enable confidence scoring."
-                ) from e
-        other_scores["Confidence"] = gmean(confidences)
+        other_scores["Confidence"] = None if pair_confs is None else gmean(pair_confs)
 
     if book == "ALL":
         write_pair_verse_scores(
@@ -244,7 +234,7 @@ def score_pair(
             scorers,
             other_scores,
             config,
-            confidences if "confidence" in scorers else None,
+            pair_confs if "confidence" in scorers else None,
             linregress_file_name,
         )
 
@@ -257,13 +247,13 @@ def write_pair_verse_scores(
     trg_iso: str,
     predictions_detok_file_name: str,
     scorers: Set[str],
-    other_scores: Dict[str, float],
+    other_scores: Dict[str, Optional[float]],
     config: Config,
     confidences: Optional[List[float]],
     linregress_file_name: Optional[str] = None,
 ) -> None:
     scorers = scorers.intersection(SUPPORTED_SENTENCE_SCORERS)
-    other_scores = {k: v for k, v in other_scores.items() if k.lower() in scorers}
+    other_scores = {k: v for k, v in other_scores.items() if k.lower() in scorers and v is not None}
 
     with open(
         config.exp_dir / (predictions_detok_file_name + VERSE_SCORES_SUFFIX), "w", encoding="utf-8", newline=""
@@ -390,14 +380,14 @@ def get_linregress_file_name(
 
 
 def score_individual_books(
-    book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]],
+    book_dict: Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]]]],
     src_iso: str,
     trg_iso: str,
     predictions_detok_file_name: str,
-    predictions_conf_file_name: str,
     scorers: Set[str],
     config: Config,
     ref_projects: Set[str],
+    draft_index: int,
 ):
     overall_sys: List[str] = []
     book_scores: List[PairScore] = []
@@ -415,11 +405,11 @@ def score_individual_books(
                 src_iso,
                 trg_iso,
                 predictions_detok_file_name,
-                predictions_conf_file_name,
+                pair_confs,
                 scorers,
                 config,
                 ref_projects,
-                pair_confs=pair_confs,
+                draft_index,
             )
         )
     return book_scores
@@ -430,12 +420,12 @@ def process_individual_books(
     pred_file_path: Path,
     ref_file_paths: List[Path],
     vref_file_path: Path,
-    conf_file_path: Path,
+    confidences: Optional[List[float]],
     select_rand_ref_line: bool,
     books: Dict[int, List[int]],
-) -> Dict[str, Tuple[List[str], List[List[str]], List[float]]]:
+) -> Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]]]]:
     # Output data structure
-    book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]] = {}
+    book_dict: Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]]]] = {}
     with ExitStack() as stack:
         # Get all references
         ref_files: List[TextIO] = []
@@ -444,15 +434,12 @@ def process_individual_books(
 
         vref_file = stack.enter_context(vref_file_path.open("r", encoding="utf-8"))
         pred_file = stack.enter_context(pred_file_path.open("r", encoding="utf-8"))
-        conf_file = stack.enter_context(conf_file_path.open("r", encoding="utf-8"))
-        conf_list = [float(line.strip().split("\t")[0]) for line in list(conf_file)[3::2]]
 
-        for lines in zip(pred_file, vref_file, conf_list, *ref_files):
+        for line_index, lines in enumerate(zip(pred_file, vref_file, *ref_files)):
             # Get file lines
             pred_line = lines[0].strip()
             detok_pred = tokenizer.detokenize(pred_line)
             vref = lines[1].strip()
-            confidence = lines[2]
             # Get book
             if vref == "":
                 continue
@@ -462,24 +449,25 @@ def process_individual_books(
                 continue
             # If book not in dictionary add the book
             if vref.book not in book_dict:
-                book_dict[vref.book] = ([], [], [])
+                book_dict[vref.book] = ([], [], None if confidences is None else [])
             book_pred, book_refs, book_conf = book_dict[vref.book]
 
             # Add detokenized prediction and confidence to nested dictionary
             book_pred.append(detok_pred)
-            book_conf.append(confidence)
+            if confidences is not None and book_conf is not None:
+                book_conf.append(confidences[line_index])
             # Check if random ref line selected or not
             if select_rand_ref_line:
-                ref_lines: List[str] = [line.strip() for line in lines[3:] if len(line.strip()) > 0]
+                ref_lines: List[str] = [line.strip() for line in lines[2:] if len(line.strip()) > 0]
                 ref_index = random.randint(0, len(ref_lines) - 1)
-                ref_line = ref_lines[ref_index + 3].strip()
+                ref_line = ref_lines[ref_index]
                 if len(book_refs) == 0:
                     book_refs.append([])
                 book_refs[0].append(ref_line)
             else:
                 # For each reference text, add to book_refs
                 for ref_index in range(len(ref_files)):
-                    ref_line = lines[ref_index + 3].strip()
+                    ref_line = lines[ref_index + 2].strip()
                     if len(book_refs) == ref_index:
                         book_refs.append([])
                     book_refs[ref_index].append(ref_line)
@@ -490,19 +478,24 @@ def load_test_data(
     tokenizer: Tokenizer,
     vref_file_name: str,
     pred_file_name: str,
-    conf_file_name: str,
+    confidence_file: Optional[TestConfidenceFile],
     ref_pattern: str,
     output_file_name: str,
     ref_projects: Set[str],
     config: Config,
     books: Dict[int, List[int]],
     by_book: bool,
-) -> Tuple[List[str], List[List[str]], Dict[str, Tuple[List[str], List[List[str]], List[float]]]]:
+) -> Tuple[
+    List[str],
+    List[List[str]],
+    Optional[List[float]],
+    Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]]]],
+]:
     sys: List[str] = []
     refs: List[List[str]] = []
-    book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]] = {}
+    book_dict: Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]]]] = {}
     pred_file_path = config.exp_dir / pred_file_name
-    conf_file_path = config.exp_dir / conf_file_name
+    kept_line_indices: List[int] = []
     with ExitStack() as stack:
         pred_file = stack.enter_context(pred_file_path.open("r", encoding="utf-8"))
         out_file = stack.enter_context((config.exp_dir / output_file_name).open("w", encoding="utf-8"))
@@ -524,7 +517,7 @@ def load_test_data(
             vref_file = stack.enter_context(vref_file_path.open("r", encoding="utf-8"))
         for ref_file_path in ref_file_paths:
             ref_files.append(stack.enter_context(ref_file_path.open("r", encoding="utf-8")))
-        for lines in zip(pred_file, *ref_files):
+        for line_index, lines in enumerate(zip(pred_file, *ref_files)):
             if vref_file is not None:
                 vref_line = vref_file.readline().strip()
                 if vref_line != "":
@@ -534,6 +527,7 @@ def load_test_data(
             pred_line = lines[0].strip()
             detok_pred_line = tokenizer.detokenize(pred_line)
             sys.append(detok_pred_line)
+            kept_line_indices.append(line_index)
             if select_rand_ref_line:
                 ref_lines: List[str] = [line.strip() for line in lines[1:] if len(line.strip()) > 0]
                 ref_index = random.randint(0, len(ref_lines) - 1)
@@ -548,17 +542,19 @@ def load_test_data(
                         refs.append([])
                     refs[ref_index].append(ref_line)
             out_file.write(detok_pred_line + "\n")
+        all_confidences = None if confidence_file is None else confidence_file.get_sequence_confidences()
         if by_book:
             book_dict = process_individual_books(
                 tokenizer,
                 pred_file_path,
                 ref_file_paths,
                 vref_file_path,
-                conf_file_path,
+                all_confidences,
                 select_rand_ref_line,
                 books,
             )
-    return sys, refs, book_dict
+    confidences = None if all_confidences is None else [all_confidences[i] for i in kept_line_indices]
+    return sys, refs, confidences, book_dict
 
 
 def test_checkpoint(
@@ -655,6 +651,23 @@ def test_checkpoint(
     else:
         draft_indices = len(source_file_names) * [1]
 
+    confidence_files: List[Optional[TestConfidenceFile]] = [None] * len(translation_conf_file_names)
+    if "confidence" in scorers:
+        confidence_files = [TestConfidenceFile(config.exp_dir / name) for name in translation_conf_file_names]
+        if not any(confidence_file.exists() for confidence_file in confidence_files):
+            raise FileNotFoundError(
+                f"Cannot use confidence as a scorer because no confidences files were found for {checkpoint_name}. "
+                "Include the --save-confidences option, and --force-infer if the predictions already exist. "
+                "Confidences are only calculated for drafts that are translated with beam search."
+            )
+        for i, confidence_file in enumerate(confidence_files):
+            if not confidence_file.exists():
+                LOGGER.warning(
+                    f"Not scoring confidence for {translation_file_names[i]}, because it has no confidences file. "
+                    "This is expected for drafts that were not translated with beam search."
+                )
+                confidence_files[i] = None
+
     LOGGER.info(f"Scoring {checkpoint_name}")
     scores: List[PairScore] = []
     overall_sys: List[str] = []
@@ -665,7 +678,7 @@ def test_checkpoint(
         predictions_file_name,
         refs_pattern,
         predictions_detok_file_name,
-        predictions_conf_file_name,
+        confidence_file,
         draft_index,
     ) in zip(
         vref_file_names,
@@ -673,7 +686,7 @@ def test_checkpoint(
         translation_file_names,
         refs_patterns,
         translation_detok_file_names,
-        translation_conf_file_names,
+        confidence_files,
         draft_indices,
     ):
         src_iso = config.default_test_src_iso
@@ -688,11 +701,11 @@ def test_checkpoint(
             step_token, split_by_pair, src_iso, trg_iso, produce_multiple_translations, draft_index
         )
 
-        pair_sys, pair_refs, book_dict = load_test_data(
+        pair_sys, pair_refs, pair_confs, book_dict = load_test_data(
             tokenizer,
             vref_file_name,
             predictions_file_name,
-            predictions_conf_file_name,
+            confidence_file,
             refs_pattern,
             predictions_detok_file_name,
             ref_projects,
@@ -719,7 +732,7 @@ def test_checkpoint(
                 src_iso,
                 trg_iso,
                 predictions_detok_file_name,
-                predictions_conf_file_name,
+                pair_confs,
                 scorers,
                 config,
                 ref_projects,
@@ -735,10 +748,10 @@ def test_checkpoint(
                     src_iso,
                     trg_iso,
                     predictions_detok_file_name,
-                    predictions_conf_file_name,
                     scorers,
                     config,
                     ref_projects,
+                    draft_index,
                 )
                 scores.extend(book_scores)
             else:
