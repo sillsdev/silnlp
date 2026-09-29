@@ -13,7 +13,6 @@ from ..common.stemmer import Stemmer
 from ..common.utils import merge_dict
 from ..common.wordnet_stemmer import WordNetStemmer
 from .aligner import Aligner
-from .clear_aligner import ClearAligner
 from .dotnet_machine_aligner import (
     FastAlignDotnetMachineAligner,
     HmmDotnetMachineAligner,
@@ -23,7 +22,6 @@ from .dotnet_machine_aligner import (
     Ibm4DotnetMachineAligner,
     ParatextDotnetMachineAligner,
 )
-from .eflomal import EflomalAligner
 from .fast_align import FastAlign
 from .giza_aligner import HmmGizaAligner, Ibm1GizaAligner, Ibm2GizaAligner, Ibm3GizaAligner, Ibm4GizaAligner
 from .machine_aligner import (
@@ -33,6 +31,7 @@ from .machine_aligner import (
     Ibm2MachineAligner,
     Ibm3MachineAligner,
     Ibm4MachineAligner,
+    EflomalAligner
 )
 
 ALIGNERS: Dict[str, Tuple[Type[Aligner], str]] = {

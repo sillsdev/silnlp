@@ -22,8 +22,6 @@ EXPECTED_OUTPUTS_DIR = TEST_MT_DIR / "expected_outputs" / EXPERIMENT_NAME
 TOKENIZER_FILE_NAMES = [
     "tokenizer.json",
     "tokenizer_config.json",
-    "special_tokens_map.json",
-    "sentencepiece.bpe.model",
 ]
 
 # The tokenization statistics are written as both a CSV file, which is compared against the

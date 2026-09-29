@@ -134,6 +134,12 @@ def resolve_checkpoint_path(model_dir: Path, ckpt: Union[CheckpointType, str, in
     return ckpt_path, step
 
 
+@dataclass(frozen=True)
+class Language:
+    iso: str
+    name: str
+
+
 @dataclass
 class InferenceModelParams:
     checkpoint: Union[CheckpointType, str, int]
@@ -462,10 +468,7 @@ class Config(ABC):
         return parts[2], parts[5]
 
     def _build_corpora(self, tokenizer: Tokenizer, stats: bool, force_align: bool) -> int:
-        self._delete_files("train.*.txt")
-        self._delete_files("val.*.txt")
-        self._delete_files("test.*.txt")
-        self._delete_files("dict.*.txt")
+        self._delete_previous_data_files()
 
         train_count = 0
         terms_config = self.data["terms"]
@@ -605,6 +608,12 @@ class Config(ABC):
 
         existing_stats.to_csv(stats_path, index=False)
         existing_stats.to_excel(stats_path.with_suffix(".xlsx"))
+
+    def _delete_previous_data_files(self) -> None:
+        self._delete_files("train.*.txt")
+        self._delete_files("val.*.txt")
+        self._delete_files("test.*.txt")
+        self._delete_files("dict.*.txt")
 
     def _delete_files(self, pattern: str) -> None:
         for old_file_path in self.exp_dir.glob(pattern):

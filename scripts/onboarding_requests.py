@@ -229,7 +229,7 @@ def get_onboarding_requests() -> List[dict]:
         .get("result", [])
     )
     return (
-        [get_request_by_id(request["id"]) for request in all_requests if request["status"] == "new"]
+        [get_request_by_id(request["id"]) for request in all_requests if request["status"] in ["new", "in_progress"]]
         if all_requests
         else []
     )
@@ -256,8 +256,6 @@ def rename_project(project_name: str, datestamp: bool) -> str:
 def process_request(request_dict: dict):
     try:
         display_message("Processing this onboarding request...", MessageType.INFO, request_dict["id"])
-        with open(OnboardingEnvironment.ONBOARDING_LOG_PATH, "a") as f:
-            f.write(f"{request_dict['id']}\n")
 
         request = OnboardingRequest(request_dict)
         request.download_projects()
@@ -296,8 +294,6 @@ def process_request(request_dict: dict):
         task: Task = Task.get_task(project_name="Onboarding", task_name=task_name, tags=["silnlp-auto-onboarding"])
         with open(OnboardingEnvironment.ONBOARDING_LOG_PATH, "a") as f:
             f.write(f"{request.id}\n")
-        with open(OnboardingEnvironment.ONBOARDING_CLEANUP_PATH, "a") as f:
-            f.write(f"{OnboardingEnvironment.ONBOARDING_PATH}/{request.main_project.short_name}_Request\n")
 
         display_message(
             f"This request is being automatically onboarded.\nClearML task: {task_name}.\nLink: {task.get_output_log_web_page()}",
@@ -323,6 +319,9 @@ def process_request(request_dict: dict):
         display_message(
             f"Automatic onboarding failed. See ClearML task for details.\n {e}", MessageType.ERROR, request.id
         )
+    finally:
+        with open(OnboardingEnvironment.ONBOARDING_CLEANUP_PATH, "a") as f:
+            f.write(f"{OnboardingEnvironment.ONBOARDING_PATH}/{request.main_project.short_name}_Request\n")
 
 
 class MessageType(Enum):
@@ -354,7 +353,7 @@ def main():
     else:
         OnboardingEnvironment.create_production_environment()
     onboarding_requests = get_onboarding_requests()
-    if not onboarding_requests:
+    if not onboarding_requests or len(onboarding_requests) == 0:
         display_message("No new onboarding requests found.", MessageType.INFO)
         return
     onboarded_projects = []

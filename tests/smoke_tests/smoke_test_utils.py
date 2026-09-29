@@ -2,7 +2,7 @@
 
 The step tests, i.e. test_preprocess, test_train, test_test and test_translate, make the same
 calls that the main function of the corresponding command makes. The experiment tests, i.e.
-test_experiment and test_experiment_llm, run all of the steps as one experiment.
+test_experiment and test_experiment_local_llm, run all of the steps as one experiment.
 
 The tests assume that there is an active connection to the MinIO bucket, because the experiment
 configs use corpora from the "Scripture" and "Paratext" directories. The experiments themselves
