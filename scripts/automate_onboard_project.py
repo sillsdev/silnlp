@@ -3,8 +3,6 @@ import argparse
 from clearml import Task
 from clearml.backend_api.session.session import LoginError
 
-from silnlp.scripts.docker_utils import get_docker_setup_bash_script, get_docker_args
-
 parser = argparse.ArgumentParser()
 parser.add_argument("project", type=str, help="The name of the Main Paratext project to onboard.")
 parser.add_argument(
@@ -38,13 +36,29 @@ try:
         task_name=args.task_name,
         tags=["silnlp-auto-onboarding"],
     )
-    docker_args = get_docker_args()
-    docker_args.extend([f"-v {args.dir}:/root/OnboardingProjects/{args.dir}"])
-    
+
     task.set_base_docker(
         docker_image="ghcr.io/sillsdev/silnlp:latest",
-        docker_arguments=docker_args,
-        docker_setup_bash_script=get_docker_setup_bash_script(),
+        docker_arguments=[
+            "--env TOKENIZERS_PARALLELISM='false'",
+            "--cap-add SYS_ADMIN",
+            "--device /dev/fuse",
+            "--security-opt apparmor=docker-apparmor",
+            "--env CHECK_TRANSFERS=1",
+            f"-v {args.dir}:/root/OnboardingProjects/{args.dir}",
+        ],
+        docker_setup_bash_script=[
+            "uv sync --project /root/silnlp --locked --no-dev --no-install-project",
+            "apt-get install --no-install-recommends -y fuse3 rclone",
+            "mkdir -p /root/M",
+            "mkdir -p /root/.config/rclone",
+            "cp scripts/rclone/rclone.conf /root/.config/rclone/",
+            'sed -i -e "s#access_key_id = x*#access_key_id = $MINIO_ACCESS_KEY#" ~/.config/rclone/rclone.conf',
+            'sed -i -e "s#secret_access_key = x*#secret_access_key = $MINIO_SECRET_KEY#" ~/.config/rclone/rclone.conf',
+            'sed -i -e "s#endpoint = .*#endpoint = $MINIO_ENDPOINT_URL#" ~/.config/rclone/rclone.conf',
+            "rclone mount --daemon --no-check-certificate --log-file=/root/rclone_log.txt --log-level=DEBUG "
+            "--vfs-cache-mode full --vfs-cache-max-size 15G --use-server-modtime miniosilnlp:nlp-research /root/M",
+        ],
     )
 
     task.execute_remotely(queue_name="jobs_backlog.cpu_only")
