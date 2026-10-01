@@ -370,25 +370,42 @@ class ExampleRetrieverFactory:
 
 
 class ExampleFormatter(ABC):
-    """Renders retrieved examples into the text that fills {examples} in instruction_template."""
+    """Renders retrieved examples and the source into the text that fills instruction_template."""
 
     @abstractmethod
     def format(self, examples: Sequence[Example], src_lang_name: str, trg_lang_name: str) -> str: ...
 
+    def format_source(self, source: str) -> str:
+        return source
+
 
 class TextExampleFormatter(ExampleFormatter):
-    """Unlike JsonExampleFormatter/XmlExampleFormatter, does not escape the template output."""
+    """Unlike JsonExampleFormatter/XmlExampleFormatter, escapes nothing unless asked to."""
 
     DEFAULT_TEMPLATE = "Source ({src_lang}): {source}\nTranslation ({trg_lang}): {target}\n\n"
 
-    def __init__(self, template: str = DEFAULT_TEMPLATE) -> None:
+    def __init__(self, template: str = DEFAULT_TEMPLATE, separator: str = "", escape: bool = False) -> None:
         self._template = template
+        self._separator = separator
+        self._escape = escape
 
     def format(self, examples: Sequence[Example], src_lang_name: str, trg_lang_name: str) -> str:
-        return "".join(
-            self._template.format(src_lang=src_lang_name, trg_lang=trg_lang_name, source=ex.source, target=ex.target)
+        return self._separator.join(
+            self._template.format(
+                src_lang=src_lang_name,
+                trg_lang=trg_lang_name,
+                source=self._escaped(ex.source),
+                target=self._escaped(ex.target),
+            )
             for ex in examples
         )
+
+    def format_source(self, source: str) -> str:
+        return self._escaped(source)
+
+    def _escaped(self, text: str) -> str:
+        # Quotes are left alone because an apostrophe is a letter in some target orthographies.
+        return xml_escape(text) if self._escape else text
 
 
 class JsonExampleFormatter(ExampleFormatter):
@@ -416,7 +433,11 @@ class ExampleFormatterFactory:
             format_params = {"type": format_params}
         format_type = str(format_params.get("type", "text")).lower()
         if format_type == "text":
-            return TextExampleFormatter(format_params.get("template", TextExampleFormatter.DEFAULT_TEMPLATE))
+            return TextExampleFormatter(
+                format_params.get("template", TextExampleFormatter.DEFAULT_TEMPLATE),
+                format_params.get("separator", ""),
+                bool(format_params.get("escape", False)),
+            )
         if format_type == "json":
             return JsonExampleFormatter()
         if format_type == "xml":

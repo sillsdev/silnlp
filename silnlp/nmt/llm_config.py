@@ -124,7 +124,7 @@ class PromptTemplate:
         formatted_instruction = self.instruction_template.format(
             src_lang=src_lang.name,
             trg_lang=trg_lang.name,
-            source=source_text,
+            source=self.formatter.format_source(source_text),
             examples=examples_str,
             num_segments=num_segments,
         )

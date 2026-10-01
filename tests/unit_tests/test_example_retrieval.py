@@ -636,3 +636,30 @@ def test_example_pool_puts_the_closest_coverage_choice_last(tmp_path):
         tmp_path, _SHEPHERD_SOURCES, [str(i) for i in range(len(_SHEPHERD_SOURCES))], CoverageExampleRetriever()
     )
     assert [ex.target for ex in pool.select(_SHEPHERD_QUERY, k=2)] == ["3", "0"]
+
+
+def test_text_formatter_separates_examples_without_a_trailing_separator():
+    formatter = TextExampleFormatter("{source} = {target}", separator="\n\n")
+    assert formatter.format(_examples(("a", "b"), ("c", "d")), "English", "French") == "a = b\n\nc = d"
+
+
+def test_text_formatter_escapes_markup_in_the_examples_and_the_source_when_asked():
+    formatter = TextExampleFormatter("{source} = {target}", escape=True)
+
+    assert formatter.format(_examples(("a & <b>", "c > d")), "English", "French") == "a &amp; &lt;b&gt; = c &gt; d"
+    assert formatter.format_source("x < y & z") == "x &lt; y &amp; z"
+
+
+def test_text_formatter_leaves_quotes_and_apostrophes_alone_when_escaping():
+    assert TextExampleFormatter("{source}", escape=True).format_source("ŋa'a \"x\"") == "ŋa'a \"x\""
+
+
+def test_text_formatter_escapes_nothing_by_default():
+    assert TextExampleFormatter().format_source("a & <b>") == "a & <b>"
+
+
+def test_create_example_formatter_passes_the_separator_and_escaping_through():
+    formatter = ExampleFormatterFactory.create(
+        {"type": "text", "template": "{source}", "separator": " | ", "escape": True}
+    )
+    assert formatter.format(_examples(("a&b", "x"), ("c", "y")), "English", "French") == "a&amp;b | c"
