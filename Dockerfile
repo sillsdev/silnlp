@@ -1,5 +1,5 @@
-ARG PYTHON_VERSION=3.12
-ARG POETRY_VERSION=2.4.1
+ARG PYTHON_VERSION=3.10
+ARG POETRY_VERSION=1.7.1
 
 FROM python:$PYTHON_VERSION-slim AS builder
 ARG POETRY_VERSION
@@ -11,7 +11,7 @@ ENV POETRY_CACHE_DIR=/opt/.cache
 # Install poetry separated from system interpreter
 RUN python3 -m venv $POETRY_VENV \
     && $POETRY_VENV/bin/pip install -U pip setuptools \
-    && $POETRY_VENV/bin/pip install poetry==${POETRY_VERSION} poetry-plugin-export
+    && $POETRY_VENV/bin/pip install poetry==${POETRY_VERSION}
 
 # Add `poetry` to PATH
 ENV PATH="${PATH}:${POETRY_VENV}/bin"
@@ -22,9 +22,9 @@ RUN poetry export --without-hashes -f requirements.txt > requirements.txt
 COPY . /src
 RUN poetry build
 
-FROM ubuntu:24.04
+FROM ubuntu:22.04
 
-ARG PYTHON_VERSION=3.12
+ARG PYTHON_VERSION=3.10
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=on
 ENV TZ=America/New_York
@@ -57,9 +57,7 @@ RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
 
 # Install dependencies from poetry
 COPY --from=builder /src/requirements.txt .
-RUN sed -i '/^wheel==/d' requirements.txt \
-    && pip install --break-system-packages -r requirements.txt \
-    && rm requirements.txt
+RUN pip install -r requirements.txt && rm requirements.txt
 
 # Install fast_align
 RUN apt-get update && \

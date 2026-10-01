@@ -1,11 +1,7 @@
 import logging
-import warnings
 from typing import Any, Iterable, List, Sequence, Tuple
 
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore", SyntaxWarning)
-    import flatcat
-
+import flatcat
 import morfessor
 
 from ..common.stemmer import Stemmer
