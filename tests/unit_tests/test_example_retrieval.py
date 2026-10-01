@@ -10,6 +10,7 @@ from silnlp.nmt.example_retrieval import (
     BM25ExampleRetriever,
     CorpusPair,
     CorpusPairProvider,
+    CoverageExampleRetriever,
     EmbeddingExampleRetriever,
     Example,
     ExampleFormatterFactory,
@@ -31,7 +32,7 @@ def _examples(*pairs):
 
 
 def _fitted(retriever, sources):
-    retriever.fit(sources)
+    retriever.fit([Example(source, "") for source in sources])
     return retriever
 
 
@@ -110,7 +111,7 @@ def test_embedding_retriever_does_not_touch_its_model_until_it_is_fitted():
     retriever = EmbeddingExampleRetriever(model=stub)
     assert stub.encode_calls == 0
 
-    retriever.fit(["cat"])
+    _fitted(retriever, ["cat"])
     assert stub.encode_calls == 1
 
 
@@ -190,7 +191,7 @@ def test_create_example_formatter_bare_text_string_matches_explicit_default():
 class _NeverFitRetriever(ExampleRetriever):
     method = "never-fit"
 
-    def _fit_index(self, sources):
+    def _fit_index(self, examples):
         raise AssertionError("the pool built an index it did not need")
 
     def _top_indices_for_query(self, query, k):
@@ -315,11 +316,11 @@ class _CountingFitRetriever(ExampleRetriever):
         self._sources = []
         self._counter = threading.Lock()
 
-    def _fit_index(self, sources):
+    def _fit_index(self, examples):
         with self._counter:
             self.fit_calls += 1
         time.sleep(_LAZY_WORK_SECONDS)
-        self._sources = sources
+        self._sources = [example.source for example in examples]
 
     def _top_indices_for_query(self, query, k):
         return list(range(len(self._sources)))[:k]
@@ -421,8 +422,8 @@ class _RankedStubRetriever(ExampleRetriever):
 
     method = "stub"
 
-    def _fit_index(self, sources):
-        self._sources = sources
+    def _fit_index(self, examples):
+        self._sources = [example.source for example in examples]
 
     def _top_indices_for_query(self, query, k):
         return list(range(len(self._sources)))[:k]
@@ -567,3 +568,71 @@ def test_tfidf_and_bm25_agree_on_what_counts_as_a_word():
     tfidf = _fitted(TfidfExampleRetriever(), sources).rank("don't", k=3)
     bm25 = _fitted(BM25ExampleRetriever(), sources).rank("don't", k=3)
     assert tfidf[0] == bm25[0] == 1
+
+
+_SHEPHERD_SOURCES = [
+    "the shepherd counted his sheep in the green field",
+    "the shepherd counted his sheep in the green field again",
+    "the shepherd counted all his sheep in the green field",
+    "fishermen mended nets",
+    "a woman drew water from the well",
+]
+_SHEPHERD_QUERY = "the shepherd counted his sheep in the green field while fishermen mended nets"
+
+
+def test_coverage_retriever_prefers_an_uncovered_clause_to_a_near_duplicate():
+    retriever = _fitted(CoverageExampleRetriever(), _SHEPHERD_SOURCES)
+    # Ranked by similarity, the second shepherd sentence (2) is closer to the query than the fishermen one (3).
+    assert retriever.rank(_SHEPHERD_QUERY, k=3) == [0, 2, 3]
+    # Asked for two, it takes the fishermen sentence, which shows a part of the query that the first does not.
+    assert retriever.rank(_SHEPHERD_QUERY, k=2) == [0, 3]
+
+
+def test_coverage_retriever_keeps_the_closest_example():
+    assert _fitted(CoverageExampleRetriever(), _SHEPHERD_SOURCES).rank(_SHEPHERD_QUERY, k=1) == [0]
+
+
+def test_coverage_retriever_chooses_a_repeated_pair_only_once():
+    retriever = CoverageExampleRetriever()
+    retriever.fit(_examples(("apple pie", "tarte"), ("apple pie", "tarte"), ("banana split", "banane")))
+
+    ranked = retriever.rank("apple pie", k=2)
+    assert 2 in ranked
+    assert len({0, 1} & set(ranked)) == 1
+
+
+def test_coverage_retriever_keeps_a_repeated_source_with_a_different_target():
+    retriever = CoverageExampleRetriever()
+    retriever.fit(_examples(("apple pie", "tarte"), ("apple pie", "tourte"), ("banana split", "banane")))
+    assert sorted(retriever.rank("apple pie", k=2)) == [0, 1]
+
+
+def test_coverage_retriever_rank_excluding_leaves_out_its_own_position():
+    ranked = _fitted(CoverageExampleRetriever(), _SHEPHERD_SOURCES).rank_excluding(_SHEPHERD_SOURCES[0], 0, k=2)
+    assert len(ranked) == 2
+    assert 0 not in ranked
+
+
+def test_coverage_retriever_matches_a_script_written_without_spaces():
+    retriever = _fitted(CoverageExampleRetriever(), ["他们在家里吃饭", "我们去学校", "明天下雨"])
+    assert retriever.rank("我们明天去学校吗", k=1) == [1]
+
+
+def test_coverage_retriever_still_fills_k_for_a_query_with_no_known_ngrams():
+    retriever = _fitted(CoverageExampleRetriever(), ["apple pie", "banana split", "cherry tart"])
+    assert len(set(retriever.rank("zzzz", k=2))) == 2
+
+
+def test_coverage_retriever_handles_a_corpus_with_no_text():
+    assert _fitted(CoverageExampleRetriever(), ["", "  "]).rank("anything", k=1) == []
+
+
+def test_create_example_retriever_knows_coverage():
+    assert isinstance(ExampleRetrieverFactory.create("coverage"), CoverageExampleRetriever)
+
+
+def test_example_pool_puts_the_closest_coverage_choice_last(tmp_path):
+    pool = _write_pool(
+        tmp_path, _SHEPHERD_SOURCES, [str(i) for i in range(len(_SHEPHERD_SOURCES))], CoverageExampleRetriever()
+    )
+    assert [ex.target for ex in pool.select(_SHEPHERD_QUERY, k=2)] == ["3", "0"]

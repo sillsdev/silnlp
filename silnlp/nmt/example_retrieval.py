@@ -13,6 +13,7 @@ from xml.sax.saxutils import escape as xml_escape
 import numpy as np
 from machine.tokenization import LatinWordTokenizer
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import linear_kernel
 
 from .corpora import read_parallel_text_pairs
 
@@ -55,12 +56,12 @@ class ExampleRetriever(ABC):
         top = np.argpartition(-scores, k - 1)[:k] if k < n else np.arange(n)
         return top[np.argsort(-scores[top])].tolist()
 
-    def fit(self, sources: Sequence[str]) -> None:
-        self._source_count = len(sources)
-        self._fit_index(list(sources))
+    def fit(self, examples: Sequence[Example]) -> None:
+        self._source_count = len(examples)
+        self._fit_index(list(examples))
 
     def rank(self, query: str, k: int) -> List[int]:
-        """Positions of the k best-matching sources, most relevant first."""
+        """Positions of the k best-matching examples, most relevant first."""
         if k <= 0 or self._source_count == 0:
             return []
         return self._top_indices_for_query(query, k)
@@ -72,7 +73,7 @@ class ExampleRetriever(ABC):
         return self._top_indices_excluding(source, index, k)
 
     @abstractmethod
-    def _fit_index(self, sources: List[str]) -> None: ...
+    def _fit_index(self, examples: List[Example]) -> None: ...
 
     @abstractmethod
     def _top_indices_for_query(self, query: str, k: int) -> List[int]: ...
@@ -118,7 +119,8 @@ class TfidfExampleRetriever(LexicalExampleRetriever):
         self._vectorizer: Optional[Any] = None
         self._matrix: Optional[Any] = None
 
-    def _fit_index(self, sources: List[str]) -> None:
+    def _fit_index(self, examples: List[Example]) -> None:
+        sources = [example.source for example in examples]
         # TfidfVectorizer rejects a corpus with nothing to put in its vocabulary.
         if not any(self._tokenizer.tokenize(source) for source in sources):
             self._vectorizer = None
@@ -148,10 +150,10 @@ class BM25ExampleRetriever(LexicalExampleRetriever):
         super().__init__()
         self._index: Optional[Any] = None
 
-    def _fit_index(self, sources: List[str]) -> None:
+    def _fit_index(self, examples: List[Example]) -> None:
         from rank_bm25 import BM25Okapi
 
-        tokenized = [self._tokenizer.tokenize(source) for source in sources]
+        tokenized = [self._tokenizer.tokenize(example.source) for example in examples]
         # BM25Okapi rejects an empty corpus and divides by zero on all-empty documents.
         if sum(len(tokens) for tokens in tokenized) == 0:
             self._index = None
@@ -197,7 +199,8 @@ class EmbeddingExampleRetriever(ExampleRetriever):
             texts, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False
         )
 
-    def _fit_index(self, sources: List[str]) -> None:
+    def _fit_index(self, examples: List[Example]) -> None:
+        sources = [example.source for example in examples]
         self._embeddings = self._encode(sources) if sources else np.zeros((0, 0), dtype=np.float32)
 
     def _top_indices_for_query(self, query: str, k: int) -> List[int]:
@@ -247,6 +250,94 @@ class EmbeddingExampleRetriever(ExampleRetriever):
         return None
 
 
+class CoverageExampleRetriever(ExampleRetriever):
+    """Chooses examples that between them demonstrate each part of the query, not only the closest few."""
+
+    method = "coverage"
+
+    # Benchmarked as a set; the measured gain says nothing about other values.
+    _ANCHORS = 20
+    _CANDIDATE_MULTIPLE = 4
+    _MIN_CANDIDATES = 100
+    _RELEVANCE_WEIGHT = 0.7
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._examples: List[Example] = []
+        self._vectorizer: Optional[Any] = None
+        self._matrix: Optional[Any] = None
+
+    def _fit_index(self, examples: List[Example]) -> None:
+        self._examples = examples
+        # TfidfVectorizer rejects a corpus with nothing to put in its vocabulary.
+        if not any(example.source.strip() for example in examples):
+            self._vectorizer = None
+            self._matrix = None
+            return
+        # Character n-grams need no tokenizer, so they work for scripts written without spaces.
+        self._vectorizer = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 5))
+        self._matrix = self._vectorizer.fit_transform([example.source for example in examples])
+
+    def _top_indices_for_query(self, query: str, k: int) -> List[int]:
+        return self._select(query, k, exclude=None)
+
+    def _top_indices_excluding(self, source: str, index: int, k: int) -> List[int]:
+        return self._select(source, k, exclude=index)
+
+    def _select(self, query: str, k: int, exclude: Optional[int]) -> List[int]:
+        if self._vectorizer is None or self._matrix is None:
+            return []
+        vector = self._vectorizer.transform([query])
+        similarities = linear_kernel(vector, self._matrix).ravel()
+        ranked = similarities.argsort()[::-1]
+        if exclude is not None:
+            ranked = ranked[ranked != exclude]
+        k = min(k, len(ranked))
+        if k == 0:
+            return []
+        if vector.nnz == 0:
+            return ranked[:k].tolist()
+        candidates = self._distinct_candidates(ranked, k)
+        chosen = self._choose_for_coverage(vector, self._matrix[candidates], similarities[candidates], k)
+        # Ties are broken by position so that the same corpus always yields the same prompt.
+        return sorted((int(candidates[i]) for i in chosen), key=lambda i: (similarities[i], i), reverse=True)
+
+    def _distinct_candidates(self, ranked: np.ndarray, k: int) -> np.ndarray:
+        limit = max(self._CANDIDATE_MULTIPLE * k, self._MIN_CANDIDATES)
+        candidates: List[int] = []
+        seen = set()
+        for index in ranked:
+            example = self._examples[index]
+            if example not in seen:
+                candidates.append(int(index))
+                seen.add(example)
+            if len(candidates) >= limit:
+                break
+        return np.asarray(candidates)
+
+    def _choose_for_coverage(self, vector, candidate_matrix, similarities: np.ndarray, k: int) -> List[int]:
+        features = candidate_matrix[:, vector.indices].toarray() > 0
+        weights = vector.data / vector.data.sum()
+        relevance = similarities / max(float(similarities.max()), 1e-12)
+        # The closest few are kept outright, so that strong whole-sentence analogues survive the balancing.
+        anchor_count = min(self._ANCHORS, max(1, k // 2), len(features))
+        chosen = list(range(anchor_count))
+        available = np.ones(len(features), dtype=bool)
+        available[chosen] = False
+        counts = features[chosen].sum(axis=0).astype(float)
+        while len(chosen) < min(k, len(features)):
+            # Each n-gram counts for less the more of the chosen examples already demonstrate it.
+            gain = features @ (weights / (1.0 + counts))
+            gain /= max(float(gain[available].max()), 1e-12)
+            utility = self._RELEVANCE_WEIGHT * relevance + (1 - self._RELEVANCE_WEIGHT) * gain
+            utility[~available] = -np.inf
+            best = int(np.argmax(utility))
+            chosen.append(best)
+            available[best] = False
+            counts += features[best]
+        return chosen
+
+
 class ExampleRetrieverFactory:
     """Creates the retriever named by a config's example_selection.method."""
 
@@ -254,7 +345,7 @@ class ExampleRetrieverFactory:
 
     @classmethod
     def create(cls, method: str, model_name: Optional[str] = None) -> ExampleRetriever:
-        """Creates it unfitted; ExamplePool fits it with its own sources."""
+        """Creates it unfitted; ExamplePool fits it with its own examples."""
         normalized = method.lower()
         if normalized == TfidfExampleRetriever.method:
             return TfidfExampleRetriever()
@@ -262,11 +353,20 @@ class ExampleRetrieverFactory:
             return BM25ExampleRetriever()
         if normalized == EmbeddingExampleRetriever.method:
             return EmbeddingExampleRetriever(model_name)
+        if normalized == CoverageExampleRetriever.method:
+            return CoverageExampleRetriever()
         raise ValueError(f"Unknown example_selection.method '{method}'. Valid options: {cls._method_names()}.")
 
     @classmethod
     def _method_names(cls) -> str:
-        return ", ".join((TfidfExampleRetriever.method, BM25ExampleRetriever.method, EmbeddingExampleRetriever.method))
+        return ", ".join(
+            (
+                TfidfExampleRetriever.method,
+                BM25ExampleRetriever.method,
+                EmbeddingExampleRetriever.method,
+                CoverageExampleRetriever.method,
+            )
+        )
 
 
 class ExampleFormatter(ABC):
@@ -429,7 +529,7 @@ class ExamplePool:
     def get_retriever(self) -> ExampleRetriever:
         with self._lock:
             if not self._fitted:
-                self._retriever.fit([example.source for example in self.all_examples()])
+                self._retriever.fit(self.all_examples())
                 self._fitted = True
             return self._retriever
 
