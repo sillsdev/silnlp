@@ -317,9 +317,11 @@ class PromptConfig:
             selection = {"method": selection}
         return ExampleRetrieverFactory.create(str(selection["method"]), selection.get("model"))
 
-    def create_template(self, instruction_template: Optional[str] = None) -> PromptTemplate:
+    def create_template(
+        self, instruction_template: Optional[str] = None, system_message: Optional[str] = None
+    ) -> PromptTemplate:
         return PromptTemplate(
-            system_message=self._settings["system_message"],
+            system_message=self._settings["system_message"] if system_message is None else system_message,
             instruction_template=instruction_template or self._settings["instruction_template"],
             formatter=ExampleFormatterFactory.create(self._settings["example_format"]),
         )

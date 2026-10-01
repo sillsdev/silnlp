@@ -22,8 +22,8 @@ from .config import CheckpointType, Language, NMTModel
 from .example_retrieval import (
     CorpusPair,
     CorpusPairProvider,
+    CoverageExampleRetriever,
     Example,
-    ExampleRetrieverFactory,
     PreferredCorpusPairProvider,
 )
 from .llm_config import (
@@ -34,6 +34,7 @@ from .llm_config import (
     PromptDefaults,
     PromptMessages,
     PromptMessagesFactory,
+    PromptTemplate,
     PromptTemplateCollection,
 )
 
@@ -304,30 +305,44 @@ class BatchPromptBuilder(PromptBuilder[PromptMessages]):
         return self._build(numbered, src_lang, trg_lang, len(sources), examples=examples)
 
 
-class RemotePromptConfig(PromptConfig):
-    """The infer.prompt section of a hosted-model experiment, which also has a batch instruction template."""
+@dataclass(frozen=True)
+class RemotePromptDefaults(PromptDefaults):
+    batch_system_message: str
+    batch_instruction_template: str
+    few_shot_batch_instruction_template: str
 
-    def __init__(
-        self,
-        settings: dict,
-        defaults: PromptDefaults,
-        single_default: str,
-        batch_default: str,
-        few_shot_batch_default: str,
-    ) -> None:
-        self._batch_default = batch_default
-        self._few_shot_batch_default = few_shot_batch_default
+    def batch_instruction_template_for(self, num_examples: int) -> str:
+        return self.few_shot_batch_instruction_template if num_examples > 0 else self.batch_instruction_template
+
+
+class RemotePromptConfig(PromptConfig):
+    """The infer.prompt section of a hosted-model experiment, which also has a batch system message and template."""
+
+    def __init__(self, settings: dict, defaults: RemotePromptDefaults) -> None:
+        self._remote_defaults = defaults
         # Captured before the defaults land, since a whole-corpus prompt needs the plain default, not few-shot.
-        self._corpus_instruction_template = settings["instruction_template"] or single_default
-        self._corpus_batch_instruction_template = settings["batch_instruction_template"] or batch_default
+        self._corpus_instruction_template = settings["instruction_template"] or defaults.instruction_template
+        self._corpus_batch_instruction_template = (
+            settings["batch_instruction_template"] or defaults.batch_instruction_template
+        )
         super().__init__(settings, "infer.prompt", defaults)
 
     def _apply_defaults(self, defaults: PromptDefaults) -> None:
+        if self._is_unset("batch_system_message"):
+            # Decided before the base class fills in system_message, so that a custom one governs batches too.
+            self._settings["batch_system_message"] = (
+                self._remote_defaults.batch_system_message
+                if self._is_unset("system_message")
+                else self._settings["system_message"]
+            )
         super()._apply_defaults(defaults)
         if self._is_unset("batch_instruction_template"):
-            self._settings["batch_instruction_template"] = (
-                self._few_shot_batch_default if self.get_num_examples() > 0 else self._batch_default
+            self._settings["batch_instruction_template"] = self._remote_defaults.batch_instruction_template_for(
+                self.get_num_examples()
             )
+
+    def create_batch_template(self, instruction_template: str) -> PromptTemplate:
+        return self.create_template(instruction_template, self._settings["batch_system_message"])
 
     def get_batch_instruction_template(self) -> str:
         return self._settings["batch_instruction_template"]
@@ -340,61 +355,66 @@ class RemotePromptConfig(PromptConfig):
 
 
 class RemoteLLMConfig(LLMConfig[PromptMessages]):
+    _GUIDANCE = (
+        "Use the examples as evidence for {trg_lang} vocabulary, grammar, inflection, names, spelling and "
+        "punctuation. Retain shared words and established borrowings when the examples support them; use "
+        "natural target constructions instead of mechanically copying source wording.\n"
+        "Preserve the full meaning of the source: participants, actions, negation, relationships and "
+        "emphasis. Adapt an example's wording to the current sentence; similar examples may describe "
+        "different people or events."
+    )
+
+    # Word for word the benchmarked prompt, including its sentence about nearby verses, which are never sent.
     _SYSTEM_MESSAGE = (
-        "You are a member of a Bible translation team translating from {src_lang} into {trg_lang}. "
-        "Your job is to produce the translation this team would produce, not a translation of your "
-        "own.\n\n"
-        "Any examples you are given are the team's own completed work, and they are your authority. "
-        "Study them and follow what they show you about:\n"
-        "- Style: how closely the team follows the source wording rather than restructuring it into "
-        "natural {trg_lang}, their sentence length and register, and how much implicit information "
-        "they make explicit.\n"
-        "- Key terms: the rendering the team has settled on for recurring theological terms, and "
-        "their spelling of the names of people, places, and peoples. Reuse these exactly; never "
-        "substitute a synonym or a variant spelling.\n"
-        "- Exegesis: where the source is ambiguous, resolve it the way the team resolved comparable "
-        "passages.\n"
-        "- Orthography: their spelling conventions, punctuation, and the way they mark direct "
-        "speech.\n\n"
-        "Follow the examples in preference to any published {trg_lang} translation you may recall. "
-        "Where they do not settle a question, make the choice a careful member of this team would "
-        "make, and stay consistent with it. Translate what the source says: add nothing it does not "
-        "say, and leave out nothing it does.\n\n"
-        "Reply with only the translation itself - no commentary, notes, alternatives, explanations, "
-        "or verse numbers."
+        "Translate the final {src_lang} Bible verse into {trg_lang}, following the translation conventions "
+        "demonstrated by this project's parallel examples.\n"
+        + _GUIDANCE
+        + " Nearby translations provide context, not additional content to translate.\n"
+        "Return only the {trg_lang} translation of the final source verse on one line, without a label, "
+        "verse number, explanation or alternative translations."
     )
 
-    _SINGLE_INSTRUCTION = (
-        "Translate this {src_lang} passage into {trg_lang} as the team would translate it. Reply with "
-        "only the translation.\n\n{source}"
+    _BATCH_SYSTEM_MESSAGE = (
+        "Translate the numbered {src_lang} Bible passages at the end into {trg_lang}, following the "
+        "translation conventions demonstrated by this project's parallel examples.\n"
+        + _GUIDANCE
+        + "\nReturn only the {trg_lang} translations, one numbered line per source passage, without labels, "
+        "explanations or alternative translations."
     )
 
-    _BATCH_INSTRUCTION = (
-        "Translate the following {num_segments} consecutive {src_lang} passages into {trg_lang} as the "
-        "team would translate them. Some may be section headings rather than verses. Read them "
-        "together, so that participants, pronouns, and the flow of the passage stay consistent across "
-        "them, but translate each one on its own.\n"
-        "Reply with exactly {num_segments} lines, one per passage, in the same order, each formatted "
-        "as `<number>. <translation>`. Do not merge, split, reorder, or omit passages, and do not add "
-        "any other text.\n\n{source}"
+    _SINGLE_TASK = (
+        "only this {src_lang} verse into {trg_lang}.\n<source_to_translate>\n{source}\n</source_to_translate>\n"
+        "{trg_lang}:"
     )
 
-    _EXAMPLES_HEADING = (
-        "The team has already translated these passages. They are your model for this team's style, "
-        "terminology, and exegesis:\n\n{examples}"
+    _BATCH_TASK = (
+        "each of these {num_segments} consecutive {src_lang} passages into {trg_lang}. Some may be section "
+        "headings rather than verses. Read them together, so that participants, pronouns, and the flow of the "
+        "passage stay consistent across them, but translate each one on its own.\n"
+        "Reply with exactly {num_segments} lines, one per passage, in the same order, each formatted as "
+        "`<number>. <translation>`. Do not merge, split, reorder, or omit passages, and do not add any other "
+        "text.\n<source_to_translate>\n{source}\n</source_to_translate>"
     )
 
-    _CORPUS_HEADING = (
-        "This is everything the team has translated so far. It is your reference for this team's "
-        "style, terminology, exegesis, spelling, and punctuation:"
-    )
+    _EXAMPLES_BLOCK = "<translation_examples>\n{examples}\n</translation_examples>"
 
-    _FEW_SHOT_BATCH_INSTRUCTION = _EXAMPLES_HEADING + _BATCH_INSTRUCTION
+    _FOLLOWING_THE_EXAMPLES = _EXAMPLES_BLOCK + "\n\nFollowing the project's examples above, translate "
+
+    _SINGLE_INSTRUCTION = "Translate " + _SINGLE_TASK
+
+    _BATCH_INSTRUCTION = "Translate " + _BATCH_TASK
+
+    _FEW_SHOT_BATCH_INSTRUCTION = _FOLLOWING_THE_EXAMPLES + _BATCH_TASK
 
     DEFAULT_SYSTEM_MESSAGE = _SYSTEM_MESSAGE
     DEFAULT_INSTRUCTION_TEMPLATE = _SINGLE_INSTRUCTION
-    DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE = _EXAMPLES_HEADING + _SINGLE_INSTRUCTION
-    DEFAULT_EXAMPLE_FORMAT = {"type": "text", "template": "{src_lang}: {source}\n{trg_lang}: {target}\n\n"}
+    DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE = _FOLLOWING_THE_EXAMPLES + _SINGLE_TASK
+    DEFAULT_EXAMPLE_FORMAT = {
+        "type": "text",
+        "template": "{src_lang}: {source}\n{trg_lang}: {target}",
+        "separator": "\n\n",
+        "escape": True,
+    }
 
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
         super().__init__(exp_dir, config, environment)
@@ -427,8 +447,9 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
                 },
                 "infer": {
                     "prompt": {
-                        "num_examples": 10,
-                        "example_selection": {"method": ExampleRetrieverFactory.DEFAULT_METHOD, "model": None},
+                        "num_examples": 100,
+                        "example_selection": {"method": CoverageExampleRetriever.method, "model": None},
+                        "batch_system_message": None,
                         "batch_instruction_template": None,
                     },
                     "infer_batch_size": 1,
@@ -457,16 +478,21 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
         return PreferredCorpusPairProvider(detokenized, self._train_corpus_pair())
 
     def build_corpus_block(self, rendered_examples: str) -> str:
-        return f"{self._CORPUS_HEADING}\n\n{rendered_examples}" if rendered_examples else ""
+        return self._EXAMPLES_BLOCK.format(examples=rendered_examples) if rendered_examples else ""
+
+    def prompt_defaults(self) -> RemotePromptDefaults:
+        return RemotePromptDefaults(
+            system_message=self.DEFAULT_SYSTEM_MESSAGE,
+            instruction_template=self.DEFAULT_INSTRUCTION_TEMPLATE,
+            few_shot_instruction_template=self.DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE,
+            example_format=self.DEFAULT_EXAMPLE_FORMAT,
+            batch_system_message=self._BATCH_SYSTEM_MESSAGE,
+            batch_instruction_template=self._BATCH_INSTRUCTION,
+            few_shot_batch_instruction_template=self._FEW_SHOT_BATCH_INSTRUCTION,
+        )
 
     def _create_infer_prompt_config(self, settings: dict) -> RemotePromptConfig:
-        self._infer_prompt = RemotePromptConfig(
-            settings,
-            self.prompt_defaults(),
-            self._SINGLE_INSTRUCTION,
-            self._BATCH_INSTRUCTION,
-            self._FEW_SHOT_BATCH_INSTRUCTION,
-        )
+        self._infer_prompt = RemotePromptConfig(settings, self.prompt_defaults())
         return self._infer_prompt
 
     def create_messages_factory(self) -> PromptMessagesFactory[PromptMessages]:
@@ -475,7 +501,7 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
     def _create_single_prompt_builder(self, instruction_template: str) -> PromptBuilder[PromptMessages]:
         prompt = self._infer_prompt_config()
         return PromptBuilder(
-            self._variant_templates(instruction_template),
+            self._variant_templates(prompt.create_template(instruction_template)),
             prompt.get_num_examples(),
             self._infer_example_pool,
             self.create_messages_factory(),
@@ -485,7 +511,7 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
         self, instruction_template: str, validate_as: Optional[str] = None
     ) -> BatchPromptBuilder:
         prompt = self._infer_prompt_config()
-        templates = self._variant_templates(instruction_template)
+        templates = self._variant_templates(prompt.create_batch_template(instruction_template))
         if validate_as is not None:
             templates.validate_for_icl(prompt.get_num_examples(), validate_as)
         return BatchPromptBuilder(
@@ -495,11 +521,9 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
     def _infer_prompt_config(self) -> RemotePromptConfig:
         return self._infer_prompt
 
-    def _variant_templates(self, instruction_template: str) -> PromptTemplateCollection:
+    def _variant_templates(self, template: PromptTemplate) -> PromptTemplateCollection:
         """Every variant draws on the single-segment builder's examples, so the corpus is indexed once."""
-        return PromptTemplateCollection.from_fixed_prompt_template(
-            self._infer_prompt_config().create_template(instruction_template)
-        )
+        return PromptTemplateCollection.from_fixed_prompt_template(template)
 
     def _validate(self) -> None:
         if not str(self.model).strip():

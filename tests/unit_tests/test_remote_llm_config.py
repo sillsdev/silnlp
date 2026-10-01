@@ -109,13 +109,17 @@ def make_config(exp_dir: Path, **overrides) -> RemoteLLMConfig:
             section.update(value)
         else:
             config[key] = value
+    # Fewer examples than the default, so that a test's small training corpus is not sent whole.
+    config.setdefault("infer", {}).setdefault("prompt", {}).setdefault("num_examples", 10)
     return RemoteLLMConfig(exp_dir, config, Mock())
 
 
 def test_config_defaults(tmp_path: Path):
-    config = make_config(tmp_path)
-    assert config.get_prompt()["example_selection"]["method"] == "tfidf"
-    assert config.get_prompt()["num_examples"] == 10
+    config = RemoteLLMConfig(
+        tmp_path, {"model_type": "remote_llm", "model": "gpt-4o", "data": {"corpus_pairs": []}}, Mock()
+    )
+    assert config.get_prompt()["example_selection"]["method"] == "coverage"
+    assert config.get_prompt()["num_examples"] == 100
     assert config.get_infer_batch_size() == 1
     # The hosted model tokenizes for itself, so preprocessing writes raw text.
     assert config.data["tokenize"] is False
@@ -165,8 +169,49 @@ def test_single_segment_prompt_has_no_numbering(tmp_path: Path):
 
     assert [message["role"] for message in messages] == ["system", "user"]
     assert "English" in messages[0]["content"] and "Spanish" in messages[0]["content"]
-    assert messages[1]["content"].endswith("hello")
+    assert "<source_to_translate>\nhello\n</source_to_translate>" in messages[1]["content"]
     assert "1. hello" not in messages[1]["content"]
+
+
+def test_the_default_prompt_is_the_benchmarked_prompt_word_for_word(tmp_path: Path):
+    # The default rests on a benchmark of exactly this prompt, so any change to it is a new, unmeasured prompt.
+    examples = [
+        Example("God so loved the world.", "Porque de tal manera amó Dios al mundo."),
+        Example("Love one another & <all>.", "Amaos 'unos' a otros."),
+    ]
+    system, user = (m["content"] for m in make_config(tmp_path).build_messages(["God is love."], examples, EN, ES))
+
+    assert system == (
+        "Translate the final English Bible verse into Spanish, following the translation conventions demonstrated "
+        "by this project's parallel examples.\nUse the examples as evidence for Spanish vocabulary, grammar, "
+        "inflection, names, spelling and punctuation. Retain shared words and established borrowings when the "
+        "examples support them; use natural target constructions instead of mechanically copying source wording."
+        "\nPreserve the full meaning of the source: participants, actions, negation, relationships and emphasis. "
+        "Adapt an example's wording to the current sentence; similar examples may describe different people or "
+        "events. Nearby translations provide context, not additional content to translate.\nReturn only the "
+        "Spanish translation of the final source verse on one line, without a label, verse number, explanation or "
+        "alternative translations."
+    )
+    assert user == (
+        "<translation_examples>\nEnglish: God so loved the world.\nSpanish: Porque de tal manera amó Dios al "
+        "mundo.\n\nEnglish: Love one another &amp; &lt;all&gt;.\nSpanish: Amaos 'unos' a otros.\n"
+        "</translation_examples>\n\nFollowing the project's examples above, translate only this English verse "
+        "into Spanish.\n<source_to_translate>\nGod is love.\n</source_to_translate>\nSpanish:"
+    )
+
+
+def test_markup_in_the_source_is_escaped_but_apostrophes_are_kept(tmp_path: Path):
+    user = make_config(tmp_path).build_messages(["Bread & <fish> for 'all'"], [], EN, ES)[1]["content"]
+    assert "<source_to_translate>\nBread &amp; &lt;fish&gt; for 'all'\n</source_to_translate>" in user
+
+
+def test_a_zero_shot_prompt_has_no_examples_block(tmp_path: Path):
+    user = make_config(tmp_path, infer={"prompt": {"num_examples": 0}}).build_messages(["hello"], [], EN, ES)[1]
+
+    assert user["content"] == (
+        "Translate only this English verse into Spanish.\n<source_to_translate>\nhello\n</source_to_translate>\n"
+        "Spanish:"
+    )
 
 
 def test_batch_prompt_numbers_the_segments(tmp_path: Path):
@@ -177,41 +222,47 @@ def test_batch_prompt_numbers_the_segments(tmp_path: Path):
     assert "exactly 3 lines" in user
 
 
-def test_system_message_casts_the_model_as_a_team_member(tmp_path: Path):
-    # Consistency with one project's decisions is the point, so the examples have to be
-    # authoritative rather than the prompt asking for a generically good translation.
-    system = make_config(tmp_path).build_messages(["hello"], [], EN, ES)[0]["content"]
+def test_a_batch_prompt_follows_the_examples_it_is_given(tmp_path: Path):
+    user = make_config(tmp_path).build_messages(["one", "two"], [Example("greeting", "saludo")], EN, ES)[1]
 
-    assert "Bible translation team" in system
-    assert "not a translation of your own" in system
-    assert "your authority" in system
+    assert "<translation_examples>\nEnglish: greeting\nSpanish: saludo\n</translation_examples>" in user["content"]
+    assert "Following the project's examples above, translate each of these 2 consecutive" in user["content"]
 
 
-@pytest.mark.parametrize("dimension", ["Style", "Key terms", "Exegesis", "Orthography"])
-def test_system_message_names_what_to_infer_from_the_examples(tmp_path: Path, dimension: str):
-    system = make_config(tmp_path).build_messages(["hello"], [], EN, ES)[0]["content"]
-    assert dimension in system
+def test_a_batch_system_message_asks_for_numbered_lines_rather_than_one(tmp_path: Path):
+    # The single-segment system message asks for one line, which would contradict a batched request.
+    system = make_config(tmp_path).build_messages(["one", "two"], [], EN, ES)[0]["content"]
+
+    assert "one numbered line per source passage" in system
+    assert "on one line" not in system
 
 
-def test_system_message_prefers_the_examples_over_a_remembered_translation(tmp_path: Path):
-    # A model asked for a well-known verse will otherwise reproduce a published version it has
-    # memorized, which is exactly the wrong output for a team with its own conventions.
-    system = make_config(tmp_path).build_messages(["hello"], [], EN, ES)[0]["content"]
-    assert "in preference to any published Spanish translation you may recall" in system
+def test_a_custom_system_message_also_governs_batches(tmp_path: Path):
+    config = make_config(tmp_path, infer={"prompt": {"system_message": "Be terse."}})
+    assert config.build_messages(["one", "two"], [], EN, ES)[0]["content"] == "Be terse."
 
 
-def test_examples_are_presented_as_the_team_own_work(tmp_path: Path):
-    config = make_config(tmp_path)
-    user = config.build_messages(["hello"], [Example("greeting", "saludo")], EN, ES)[1]["content"]
-    assert "The team has already translated these passages" in user
+def test_a_batch_system_message_applies_only_to_batches(tmp_path: Path):
+    config = make_config(tmp_path, infer={"prompt": {"batch_system_message": "Number them."}})
+
+    assert config.build_messages(["one", "two"], [], EN, ES)[0]["content"] == "Number them."
+    assert config.build_messages(["one"], [], EN, ES)[0]["content"].startswith("Translate the final English")
 
 
-def test_full_corpus_block_is_presented_as_the_team_own_work(tmp_path: Path):
+def test_a_hoisted_corpus_is_wrapped_as_translation_examples(tmp_path: Path):
     model, client = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"num_examples": 1000000}})
     write_training_corpus(tmp_path)
     list(model.translate(["anything"], "en", "es"))
 
-    assert "everything the team has translated so far" in client.calls[0][0]["content"]
+    system, user = client.calls[0][0]["content"], client.calls[0][1]["content"]
+    assert system.endswith(
+        "\n\n<translation_examples>\nEnglish: in the beginning\nSpanish: en el principio\n\n"
+        "English: let there be light\nSpanish: sea la luz\n</translation_examples>"
+    )
+    assert user == (
+        "Translate only this English verse into Spanish.\n<source_to_translate>\nanything\n</source_to_translate>\n"
+        "Spanish:"
+    )
 
 
 def test_batch_prompt_tells_the_model_to_read_the_passages_together(tmp_path: Path):
@@ -461,7 +512,7 @@ def test_train_records_the_retrieval_method_it_built(tmp_path: Path):
 
     checkpoint_dir = tmp_path / "run" / "checkpoint-1"
     info = json.loads((checkpoint_dir / "remote_llm_model.json").read_text(encoding="utf-8"))
-    assert info["retrieval_method"] == "tfidf"
+    assert info["retrieval_method"] == "coverage"
     assert info["num_training_pairs"] == 2
     # A lexical index refits in seconds, so none is cached for inference to pick up.
     assert [path.name for path in checkpoint_dir.glob("retrieval*")] == []
@@ -732,7 +783,8 @@ def test_the_effective_config_records_the_prompts_actually_used(tmp_path: Path):
     model.save_effective_config(path)
 
     prompt = yaml.safe_load(path.read_text(encoding="utf-8"))["infer"]["prompt"]
-    assert "Bible translation team" in prompt["system_message"]
+    assert "Translate the final {src_lang} Bible verse" in prompt["system_message"]
+    assert "one numbered line per source passage" in prompt["batch_system_message"]
     assert "{source}" in prompt["instruction_template"]
     assert "{num_segments}" in prompt["batch_instruction_template"]
 
@@ -870,14 +922,15 @@ def test_translating_logs_the_usage_and_cost(tmp_path: Path, caplog):
     assert "$0.0040" in caplog.text
 
 
-def test_a_hoisted_corpus_does_not_leave_a_dangling_examples_heading(tmp_path: Path):
+def test_a_hoisted_corpus_does_not_leave_a_dangling_examples_block(tmp_path: Path):
     model, client = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"num_examples": 1000000}})
     write_training_corpus(tmp_path)
     list(model.translate(["anything"], "en", "es"))
 
     system, user = client.calls[0][0]["content"], client.calls[0][1]["content"]
-    assert "everything the team has translated so far" in system
-    assert "The team has already translated these passages" not in user
+    assert "<translation_examples>" in system
+    assert "<translation_examples>" not in user
+    assert "Following the project's examples above" not in user
 
 
 def test_a_hoisted_corpus_keeps_a_custom_instruction_template(tmp_path: Path):
@@ -892,15 +945,15 @@ def test_a_hoisted_corpus_keeps_a_custom_instruction_template(tmp_path: Path):
     assert client.calls[0][1]["content"] == "Mine: anything"
 
 
-def test_retrieved_examples_keep_their_heading_when_the_corpus_is_not_hoisted(tmp_path: Path):
+def test_retrieved_examples_keep_their_block_when_the_corpus_is_not_hoisted(tmp_path: Path):
     model, client = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"num_examples": 1}})
     write_training_corpus(tmp_path)
     list(model.translate(["let there be light"], "en", "es"))
 
-    assert "The team has already translated these passages" in client.calls[0][1]["content"]
+    assert "<translation_examples>" in client.calls[0][1]["content"]
 
 
-def test_the_batch_prompt_drops_its_examples_heading_when_the_corpus_is_hoisted(tmp_path: Path):
+def test_the_batch_prompt_drops_its_examples_block_when_the_corpus_is_hoisted(tmp_path: Path):
     model, client = make_model(
         tmp_path,
         lambda messages: "1. hola\n2. adios",
@@ -910,7 +963,7 @@ def test_the_batch_prompt_drops_its_examples_heading_when_the_corpus_is_hoisted(
     list(model.translate(["one", "two"], "en", "es"))
 
     user = client.calls[0][1]["content"]
-    assert "The team has already translated these passages" not in user
+    assert "<translation_examples>" not in user
     assert "consecutive" in user
 
 
