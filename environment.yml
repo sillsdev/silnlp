@@ -3,6 +3,6 @@ channels:
   - defaults
   - conda-forge
 dependencies:
-  - python==3.10.12
+  - python>=3.12,<3.13
   - git>=2.40,<3.0
   - cxx-compiler>=1.7.0,<2.0.0
