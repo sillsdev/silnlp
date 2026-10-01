@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import threading
+import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -25,6 +26,7 @@ from .example_retrieval import (
     CoverageExampleRetriever,
     Example,
     PreferredCorpusPairProvider,
+    TargetLanguageProfile,
 )
 from .llm_config import (
     LLMConfig,
@@ -46,6 +48,7 @@ class ModelReply:
 
     _CODE_FENCE = re.compile(r"^\s*```[^\n]*\n(.*?)\n?\s*```\s*$", re.DOTALL)
     _NUMBERED_LINE = re.compile(r"^\s*(\d{1,4})\s*[.):\]]\s*(.*)$")
+    _LABEL_WORDS = ("target", "translation", "output", "answer")
 
     def __init__(self, text: str) -> None:
         self._text = text
@@ -53,6 +56,19 @@ class ModelReply:
     def strip_code_fence(self) -> str:
         match = self._CODE_FENCE.match(self._text.strip())
         return match.group(1) if match is not None else self._text
+
+    def single_translation(self, trg_lang_name: str, profile: TargetLanguageProfile) -> str:
+        """One line per segment, so a reply with an aside keeps only its most target-like line."""
+        labels = "|".join(re.escape(word) for word in (trg_lang_name, *self._LABEL_WORDS) if word != "")
+        label = re.compile(rf"^\s*({labels})\s*[:\-]\s*", re.IGNORECASE)
+        lines = []
+        for raw_line in self.strip_code_fence().strip().splitlines():
+            line = label.sub("", raw_line.strip().strip("`").strip()).strip()
+            if line != "":
+                lines.append(line)
+        if len(lines) == 0:
+            return ""
+        return max(lines, key=profile.resemblance)
 
     def parse(self, num_segments: int) -> Optional[List[str]]:
         """None when the reply is malformed, which is the signal for the caller's recovery ladder.
@@ -109,6 +125,19 @@ class Completion:
             return None
         return sum(entry.logprob for entry in self.token_logprobs) / len(self.token_logprobs)
 
+    def is_empty(self) -> bool:
+        return self.text.strip() == ""
+
+    def with_usage_of(self, earlier: "Completion") -> "Completion":
+        """This reply, also billed for an earlier attempt that was discarded."""
+        cost = None if self.cost is None or earlier.cost is None else self.cost + earlier.cost
+        return replace(
+            self,
+            prompt_tokens=self.prompt_tokens + earlier.prompt_tokens,
+            completion_tokens=self.completion_tokens + earlier.completion_tokens,
+            cost=cost,
+        )
+
 
 @dataclass
 class UsageTotals:
@@ -119,6 +148,7 @@ class UsageTotals:
     completion_tokens: int = 0
     cost: float = 0.0
     unpriced_requests: int = 0
+    empty_replies: int = 0
 
     def __post_init__(self) -> None:
         # Requests are made from several threads.
@@ -133,6 +163,8 @@ class UsageTotals:
                 self.unpriced_requests += 1
             else:
                 self.cost += completion.cost
+            if completion.is_empty():
+                self.empty_replies += 1
 
     def describe(self) -> str:
         summary = (
@@ -140,10 +172,14 @@ class UsageTotals:
             f"{self.completion_tokens:,} completion tokens"
         )
         if self.unpriced_requests == 0:
-            return f"{summary}, ${self.cost:.4f}"
-        if self.unpriced_requests == self.requests:
-            return f"{summary}; cost unavailable (no pricing for this model)"
-        return f"{summary}, ${self.cost:.4f} excluding {self.unpriced_requests:,} unpriced requests"
+            summary = f"{summary}, ${self.cost:.4f}"
+        elif self.unpriced_requests == self.requests:
+            summary = f"{summary}; cost unavailable (no pricing for this model)"
+        else:
+            summary = f"{summary}, ${self.cost:.4f} excluding {self.unpriced_requests:,} unpriced requests"
+        if self.empty_replies > 0:
+            summary = f"{summary}; segments left blank by an empty reply: {self.empty_replies:,}"
+        return summary
 
 
 @dataclass(frozen=True)
@@ -281,6 +317,66 @@ class LiteLLMCompletionClient(CompletionClient):
         return "logprobs" in supported
 
 
+class RetryPolicy:
+    """Which failed requests are worth sending again, and how long to wait before each retry."""
+
+    _RETRYABLE_CLIENT_ERRORS = (408, 409, 429)
+    _BILLING_PHRASES = ("credit", "quota", "billing", "spend", "key limit")
+
+    def __init__(self, max_retries: int, delay_seconds: float = 5.0) -> None:
+        self._max_retries = max_retries
+        self._delay_seconds = delay_seconds
+
+    def allows_retry(self, retry_number: int) -> bool:
+        return retry_number <= self._max_retries
+
+    def is_retryable(self, error: Exception) -> bool:
+        # Some providers report exhausted credit as a rate limit, and waiting never clears it.
+        if any(phrase in str(error).lower() for phrase in self._BILLING_PHRASES):
+            return False
+        status = getattr(error, "status_code", None)
+        if isinstance(status, int) and 400 <= status < 500:
+            return status in self._RETRYABLE_CLIENT_ERRORS
+        return True
+
+    def wait_before_retry(self, retry_number: int) -> None:
+        time.sleep(min(self._delay_seconds * retry_number, 8 * self._delay_seconds))
+
+
+class RetryingCompletionClient(CompletionClient):
+    """Retries a malformed or empty reply, which providers send intermittently and LiteLLM does not retry."""
+
+    def __init__(self, client: CompletionClient, policy: RetryPolicy) -> None:
+        self._client = client
+        self._policy = policy
+
+    def complete(self, messages: List[Dict[str, str]], logprobs: bool = False) -> Completion:
+        discarded: Optional[Completion] = None
+        retries = 0
+        while True:
+            try:
+                completion = self._client.complete(messages, logprobs)
+            except Exception as error:
+                if not (self._policy.is_retryable(error) and self._policy.allows_retry(retries + 1)):
+                    raise
+                LOGGER.warning("A request failed (%s); retrying it.", error)
+            else:
+                if discarded is not None:
+                    completion = completion.with_usage_of(discarded)
+                if not completion.is_empty() or not self._policy.allows_retry(retries + 1):
+                    return completion
+                discarded = completion
+                LOGGER.warning("The model returned an empty reply; retrying the request.")
+            retries += 1
+            self._policy.wait_before_retry(retries)
+
+    def supports_logprobs(self) -> bool:
+        return self._client.supports_logprobs()
+
+    def count_tokens(self, text: str) -> Optional[int]:
+        return self._client.count_tokens(text)
+
+
 class CompletionClientFactory(ABC):
     @abstractmethod
     def create(self, config: "RemoteLLMConfig") -> CompletionClient: ...
@@ -288,7 +384,11 @@ class CompletionClientFactory(ABC):
 
 class LiteLLMCompletionClientFactory(CompletionClientFactory):
     def create(self, config: "RemoteLLMConfig") -> CompletionClient:
-        return LiteLLMCompletionClient(config.model, config.create_completion_settings(), config.get_litellm_options())
+        settings = config.create_completion_settings()
+        return RetryingCompletionClient(
+            LiteLLMCompletionClient(config.model, settings, config.get_litellm_options()),
+            RetryPolicy(settings.num_retries),
+        )
 
 
 class BatchPromptBuilder(PromptBuilder[PromptMessages]):
@@ -619,7 +719,8 @@ class RemoteLLMModel(NMTModel):
         self._client_factory = completion_client_factory or LiteLLMCompletionClientFactory()
         self._client: Optional[CompletionClient] = None
         self._corpus_block: Optional[str] = None
-        # Requests run on a thread pool; guards the lazily built client and corpus block.
+        self._target_profile: Optional[TargetLanguageProfile] = None
+        # Requests run on a thread pool; guards the lazily built client, corpus block and target profile.
         self._lock = threading.Lock()
 
     def train(self) -> None:
@@ -908,11 +1009,17 @@ class RemoteLLMModel(NMTModel):
         usage: Optional[UsageTotals] = None,
     ) -> Completion:
         completion = self._complete(self._build_messages([text], src_lang, trg_lang), want_logprobs, usage)
-        stripped = ModelReply(completion.text).strip_code_fence().strip()
-        if stripped == completion.text:
+        translation = ModelReply(completion.text).single_translation(trg_lang.name, self._get_target_profile())
+        if translation == completion.text:
             return completion
-        # The scores still cover the stripped text, so drop them rather than misalign them.
-        return replace(completion, text=stripped, token_logprobs=[])
+        # The scores still cover the discarded text, so drop them rather than misalign them.
+        return replace(completion, text=translation, token_logprobs=[])
+
+    def _get_target_profile(self) -> TargetLanguageProfile:
+        with self._lock:
+            if self._target_profile is None:
+                self._target_profile = self._config.get_infer_prompt_builder().create_target_language_profile()
+            return self._target_profile
 
     def _complete(
         self, messages: List[Dict[str, str]], logprobs: bool = False, usage: Optional[UsageTotals] = None

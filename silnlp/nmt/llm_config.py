@@ -24,6 +24,7 @@ from .example_retrieval import (
     ExampleRetriever,
     ExampleRetrieverFactory,
     FixedCorpusPairProvider,
+    TargetLanguageProfile,
 )
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -280,6 +281,11 @@ class PromptBuilder(Generic[TPromptMessages]):
         if self._pool is None:
             return ""
         return self._templates.template_for(None).render_examples(self._pool.all_examples(), src_lang, trg_lang)
+
+    def create_target_language_profile(self) -> TargetLanguageProfile:
+        if self._pool is None:
+            return TargetLanguageProfile([])
+        return self._pool.create_target_language_profile()
 
 
 @dataclass(frozen=True)

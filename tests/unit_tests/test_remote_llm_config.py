@@ -11,7 +11,7 @@ import yaml
 
 from silnlp.nmt.config import Language
 from silnlp.nmt.config_utils import is_local_llm_config, is_remote_llm_config
-from silnlp.nmt.example_retrieval import Example
+from silnlp.nmt.example_retrieval import Example, TargetLanguageProfile
 from silnlp.nmt.remote_llm_config import (
     Completion,
     CompletionClient,
@@ -19,6 +19,8 @@ from silnlp.nmt.remote_llm_config import (
     CompletionSettings,
     RemoteLLMConfig,
     RemoteLLMModel,
+    RetryingCompletionClient,
+    RetryPolicy,
     TokenLogprob,
     UsageTotals,
     LiteLLMCompletionClient,
@@ -89,6 +91,38 @@ def test_parse_numbered_response_rejects_unnumbered_prose():
 def test_strip_code_fence_leaves_unfenced_text_alone():
     assert ModelReply("plain text").strip_code_fence() == "plain text"
     assert ModelReply("```\nfenced\n```").strip_code_fence() == "fenced"
+
+
+SPANISH = TargetLanguageProfile(["en el principio creó Dios los cielos y la tierra", "sea la luz"])
+
+
+@pytest.mark.parametrize("label", ["Spanish:", "SPANISH -", "Translation:", "Target:", "Output:", "Answer:"])
+def test_single_translation_strips_a_leading_label(label: str):
+    assert ModelReply(f"{label} sea la luz").single_translation("Spanish", SPANISH) == "sea la luz"
+
+
+def test_single_translation_keeps_the_line_most_like_the_target_corpus():
+    reply = "Here is the translation of the verse:\n\nsea la luz"
+    assert ModelReply(reply).single_translation("Spanish", SPANISH) == "sea la luz"
+
+
+def test_single_translation_strips_code_fences_and_backticks():
+    assert ModelReply("```text\nsea la luz\n```").single_translation("Spanish", SPANISH) == "sea la luz"
+    assert ModelReply("`sea la luz`").single_translation("Spanish", SPANISH) == "sea la luz"
+
+
+def test_single_translation_keeps_quotation_marks_and_apostrophes():
+    # A verse can open and close with a quotation mark, and an apostrophe is a letter in some orthographies.
+    reply = "\"ŋa'a sea la luz.\""
+    assert ModelReply(reply).single_translation("Spanish", SPANISH) == reply
+
+
+def test_single_translation_keeps_a_leading_dash_when_the_language_has_no_name():
+    assert ModelReply("- sea la luz").single_translation("", SPANISH) == "- sea la luz"
+
+
+def test_single_translation_of_an_empty_reply_is_empty():
+    assert ModelReply("  \n ").single_translation("Spanish", SPANISH) == ""
 
 
 # --- batching ---------------------------------------------------------------------------
@@ -482,6 +516,15 @@ def test_translate_test_files_writes_one_line_per_source(tmp_path: Path):
     model.translate_test_files([tmp_path / "test.src.txt"], [tmp_path / "out.txt"])
 
     assert (tmp_path / "out.txt").read_text(encoding="utf-8").splitlines() == ["hola", "hola"]
+
+
+def test_a_reply_with_an_aside_still_writes_one_line_per_source(tmp_path: Path):
+    (tmp_path / "test.src.txt").write_text("let there be light\nin the beginning\n", encoding="utf-8")
+    model, _ = make_model(tmp_path, lambda messages: "Sure! Here it is:\nsea la luz", infer={"concurrency": 1})
+
+    model.translate_test_files([tmp_path / "test.src.txt"], [tmp_path / "out.txt"])
+
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8").splitlines() == ["sea la luz", "sea la luz"]
 
 
 def test_translate_test_files_writes_one_file_per_draft(tmp_path: Path):
@@ -1016,3 +1059,119 @@ def test_a_single_segment_request_does_not_use_the_batch_wording(tmp_path: Path)
     list(model.translate(["one"], "en", "es"))
 
     assert "consecutive" not in client.calls[0][1]["content"]
+
+
+# --- retries ------------------------------------------------------------------------------
+
+
+class HttpError(Exception):
+    def __init__(self, status_code: int, message: str = "request failed") -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class SequenceClient(CompletionClient):
+    """Replies to, or fails, each request in turn from a fixed list of outcomes."""
+
+    def __init__(self, outcomes: List[object]) -> None:
+        self._outcomes = list(outcomes)
+        self.calls = 0
+
+    def complete(self, messages: List[Dict[str, str]], logprobs: bool = False) -> Completion:
+        outcome = self._outcomes[self.calls]
+        self.calls += 1
+        if isinstance(outcome, Exception):
+            raise outcome
+        assert isinstance(outcome, Completion)
+        return outcome
+
+
+def retrying(outcomes: List[object], max_retries: int = 2) -> Tuple[RetryingCompletionClient, SequenceClient]:
+    inner = SequenceClient(outcomes)
+    return RetryingCompletionClient(inner, RetryPolicy(max_retries, delay_seconds=0)), inner
+
+
+def test_an_empty_reply_is_retried():
+    client, inner = retrying([Completion(""), Completion("hola")])
+
+    assert client.complete([]).text == "hola"
+    assert inner.calls == 2
+
+
+def test_a_retried_reply_is_billed_for_the_discarded_attempt():
+    client, _ = retrying(
+        [
+            Completion("", prompt_tokens=100, completion_tokens=5, cost=0.01),
+            Completion("hola", prompt_tokens=100, completion_tokens=2, cost=0.01),
+        ]
+    )
+    completion = client.complete([])
+
+    assert (completion.prompt_tokens, completion.completion_tokens) == (200, 7)
+    assert completion.cost == pytest.approx(0.02)
+
+
+def test_an_unpriced_attempt_leaves_the_cost_unknown():
+    client, _ = retrying([Completion("", cost=None), Completion("hola", cost=0.01)])
+    assert client.complete([]).cost is None
+
+
+def test_an_empty_reply_is_returned_once_the_retries_run_out():
+    client, inner = retrying([Completion("")] * 3, max_retries=2)
+
+    assert client.complete([]).is_empty()
+    assert inner.calls == 3
+
+
+def test_a_malformed_response_is_retried():
+    # LiteLLM raises a plain exception, with no HTTP status, for a reply that has no choices.
+    client, _ = retrying([Exception("Invalid response object"), Completion("hola")])
+    assert client.complete([]).text == "hola"
+
+
+@pytest.mark.parametrize("status", [408, 429, 500, 503])
+def test_transient_http_errors_are_retried(status: int):
+    client, _ = retrying([HttpError(status), Completion("hola")])
+    assert client.complete([]).text == "hola"
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404])
+def test_client_errors_are_not_retried(status: int):
+    client, inner = retrying([HttpError(status), Completion("hola")])
+
+    with pytest.raises(HttpError):
+        client.complete([])
+    assert inner.calls == 1
+
+
+@pytest.mark.parametrize("message", ["Insufficient credits", "You exceeded your current quota", "Key limit exceeded"])
+def test_billing_errors_are_not_retried_even_when_reported_as_rate_limits(message: str):
+    client, inner = retrying([HttpError(429, message), Completion("hola")])
+
+    with pytest.raises(HttpError):
+        client.complete([])
+    assert inner.calls == 1
+
+
+def test_a_persistent_failure_is_raised_once_the_retries_run_out():
+    client, inner = retrying([HttpError(503)] * 3, max_retries=2)
+
+    with pytest.raises(HttpError):
+        client.complete([])
+    assert inner.calls == 3
+
+
+def test_the_retrying_client_reports_what_the_wrapped_client_supports():
+    inner = ScriptedClient(lambda messages: "hola", logprobs_supported=True, tokens_per_word=2)
+    client = RetryingCompletionClient(inner, RetryPolicy(0))
+
+    assert client.supports_logprobs()
+    assert client.count_tokens("two words") == 4
+
+
+def test_usage_totals_count_the_segments_an_empty_reply_left_blank():
+    totals = UsageTotals()
+    totals.add(Completion("", cost=0.0))
+    totals.add(Completion("hola", cost=0.0))
+
+    assert "segments left blank by an empty reply: 1" in totals.describe()

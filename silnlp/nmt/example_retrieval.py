@@ -7,7 +7,7 @@ import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Protocol, Sequence, Tuple, Union
+from typing import Any, Iterable, List, Optional, Protocol, Sequence, Set, Tuple, Union
 from xml.sax.saxutils import escape as xml_escape
 
 import numpy as np
@@ -451,6 +451,25 @@ class ExamplePoolSummary:
     selection_method: str
 
 
+class TargetLanguageProfile:
+    """The character trigrams a target corpus attests, which tell its text from an aside in the same script."""
+
+    def __init__(self, target_lines: Iterable[str]) -> None:
+        self._trigrams: Set[str] = set()
+        for line in target_lines:
+            self._trigrams.update(self._trigrams_of(line.strip()))
+
+    def resemblance(self, line: str) -> float:
+        """The fraction of the line's trigrams that the corpus attests."""
+        trigrams = self._trigrams_of(line.strip())
+        if len(trigrams) == 0:
+            return 0.0
+        return sum(1 for trigram in trigrams if trigram in self._trigrams) / len(trigrams)
+
+    def _trigrams_of(self, text: str) -> List[str]:
+        return [text[i : i + 3] for i in range(len(text) - 2)]
+
+
 @dataclass(frozen=True)
 class CorpusPair:
     """The source and target files of one parallel corpus."""
@@ -546,6 +565,9 @@ class ExamplePool:
         else:
             ranked = retriever.rank_excluding(self.all_examples()[pool_index].source, pool_index, k)
         return [self.all_examples()[i] for i in reversed(ranked)]
+
+    def create_target_language_profile(self) -> "TargetLanguageProfile":
+        return TargetLanguageProfile(example.target for example in self.all_examples())
 
     def get_retriever(self) -> ExampleRetriever:
         with self._lock:

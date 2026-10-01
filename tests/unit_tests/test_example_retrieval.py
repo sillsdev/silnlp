@@ -21,6 +21,7 @@ from silnlp.nmt.example_retrieval import (
     JsonExampleFormatter,
     PreferredCorpusPairProvider,
     RetrievalTokenizer,
+    TargetLanguageProfile,
     TextExampleFormatter,
     TfidfExampleRetriever,
     XmlExampleFormatter,
@@ -663,3 +664,21 @@ def test_create_example_formatter_passes_the_separator_and_escaping_through():
         {"type": "text", "template": "{source}", "separator": " | ", "escape": True}
     )
     assert formatter.format(_examples(("a&b", "x"), ("c", "y")), "English", "French") == "a&amp;b | c"
+
+
+def test_target_profile_tells_attested_text_from_an_aside():
+    profile = TargetLanguageProfile(["en el principio creó Dios los cielos y la tierra", "sea la luz"])
+
+    assert profile.resemblance("en el principio") == 1.0
+    assert profile.resemblance("Here is the translation of the verse:") == 0.0
+
+
+def test_target_profile_scores_text_too_short_for_a_trigram_as_unattested():
+    assert TargetLanguageProfile(["sea la luz"]).resemblance("se") == 0.0
+
+
+def test_example_pool_profiles_its_target_side(tmp_path):
+    profile = _write_pool(tmp_path, ["in the beginning"], ["en el principio"]).create_target_language_profile()
+
+    assert profile.resemblance("en el principio") == 1.0
+    assert profile.resemblance("in the beginning") < 0.5
