@@ -110,6 +110,7 @@ def preprocess_both_kinds(
         {"test_size": 2, "val_size": 2, "score_threshold": 2},
         {"src": [{"name": "en-AAA", "include_test": False}], "test_size": 2, "val_size": 2},
         {"test_size": 2, "val_size": 2, "src_noise": [{"replacement": [1.0, "<blank>"]}]},
+        {"test_size": 2, "val_size": 2, "size": 0.5},
     ],
 )
 def test_corpora_and_scripture_pairs_write_the_same_data_sets(tmp_path: Path, pair_settings: dict):
@@ -240,3 +241,11 @@ def test_src_noise_is_only_added_to_training_sources(experiment: PreprocessingEx
 
     assert set(experiment.read_sources("train")) == {"<blank> <blank>"}
     assert set(experiment.read_sources("test") + experiment.read_sources("val")) <= set(experiment.sources(range(8)))
+
+
+def test_fractional_size_is_a_fraction_of_the_pairs_left_for_training(experiment: PreprocessingExperiment):
+    experiment.write_corpus(8)
+
+    experiment.preprocess({"test_size": 2, "val_size": 2, "size": 0.5})
+
+    assert len(experiment.read_sources("train")) == 2

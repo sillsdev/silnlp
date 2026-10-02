@@ -1167,10 +1167,8 @@ class Config(ABC):
 
             train_indices: Optional[Set[int]] = set()
             if pair.is_train and test_indices is not None and val_indices is not None:
-                train_size = pair.size
-                train_indices = split_corpus(
-                    corpus_size, train_size, test_indices | val_indices | poorly_aligned_indices
-                )
+                untaken_indices = set(range(corpus_size)) - (test_indices | val_indices | poorly_aligned_indices)
+                train_indices = split_corpus(untaken_indices, pair.size)
 
             train_blank_files: List[DataSetFile] = []
             val_blank_files: List[DataSetFile] = []
