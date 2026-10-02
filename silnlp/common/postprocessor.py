@@ -369,27 +369,26 @@ class PostprocessConfig:
     ) -> List[Tuple[Optional[str], Optional[Dict[int, List[int]]]]]:
         # Target project info is only needed for quote convention detection
         if self.is_quote_convention_detection_required():
-            if len(training_corpus_pairs) > 1:
+            # Conventions are detected from a pair's Paratext project, which basic corpora don't come from.
+            scripture_pairs = [corpus_pair for corpus_pair in training_corpus_pairs if corpus_pair.is_scripture]
+            if len(scripture_pairs) > 1:
                 LOGGER.warning(
                     "The experiment has multiple corpus pairs. "
                     "Quotation mark denormalization is unlikely to work correctly in this scenario."
                 )
-            if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].src_files) > 1:
+            if len(scripture_pairs) > 0 and len(scripture_pairs[0].src_files) > 1:
                 LOGGER.warning(
                     "The experiment has multiple source projects. "
                     "Quotation mark denormalization is unlikely to work correctly in this scenario."
                 )
-            if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].trg_files) > 1:
+            if len(scripture_pairs) > 0 and len(scripture_pairs[0].trg_files) > 1:
                 LOGGER.warning(
                     "The experiment has multiple target projects. "
                     "Quotation mark denormalization is unlikely to work correctly in this scenario."
                 )
 
-            if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].trg_files) > 0:
-                return [
-                    (corpus_pair.trg_files[0].project, corpus_pair.corpus_books)
-                    for corpus_pair in training_corpus_pairs
-                ]
+            if len(scripture_pairs) > 0 and len(scripture_pairs[0].trg_files) > 0:
+                return [(corpus_pair.trg_files[0].project, corpus_pair.corpus_books) for corpus_pair in scripture_pairs]
 
         return [(None, None)]
 
