@@ -154,6 +154,13 @@ def parse_corpus_pairs(corpus_pairs: List[dict], environment: SilNlpEnv) -> List
         is_scripture = src_files[0].is_scripture
         if not all(df.is_scripture == is_scripture for df in (src_files + trg_files)):
             raise RuntimeError("All corpora in a corpus pair must contain the same type of data.")
+        verse_settings = [key for key in ("corpus_books", "test_books", "use_test_set_from") if key in pair]
+        if not is_scripture and len(verse_settings) > 0:
+            raise RuntimeError(
+                f"Basic corpus pairs have no verse references, so they do not support {', '.join(verse_settings)}."
+            )
+        if is_scripture and (is_set(type, DataFileType.DICT) or pair.get("lexical", False)):
+            raise RuntimeError("Scripture corpus pairs cannot be used as dictionary or lexical data.")
 
         tags: Union[str, List[str]] = pair.get("tags", [])
         if isinstance(tags, str):

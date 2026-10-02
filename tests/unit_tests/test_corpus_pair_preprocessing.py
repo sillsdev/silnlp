@@ -249,3 +249,23 @@ def test_fractional_size_is_a_fraction_of_the_pairs_left_for_training(experiment
     experiment.preprocess({"test_size": 2, "val_size": 2, "size": 0.5})
 
     assert len(experiment.read_sources("train")) == 2
+
+
+@pytest.mark.parametrize(
+    "pair_settings", [{"corpus_books": "GEN"}, {"test_books": "GEN"}, {"use_test_set_from": "other"}]
+)
+def test_basic_pairs_reject_settings_that_select_verses(tmp_path: Path, pair_settings: dict):
+    experiment = PreprocessingExperiment(tmp_path, "corpora")
+    experiment.write_corpus(8)
+
+    with pytest.raises(RuntimeError, match="no verse references"):
+        experiment.preprocess(pair_settings)
+
+
+@pytest.mark.parametrize("pair_settings", [{"type": "train,dict"}, {"lexical": True}])
+def test_scripture_pairs_reject_dictionary_and_lexical_data(tmp_path: Path, pair_settings: dict):
+    experiment = PreprocessingExperiment(tmp_path, "scripture")
+    experiment.write_corpus(8)
+
+    with pytest.raises(RuntimeError, match="dictionary or lexical"):
+        experiment.preprocess(pair_settings)
