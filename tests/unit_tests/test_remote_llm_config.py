@@ -21,6 +21,7 @@ from silnlp.nmt.remote_llm_config import (
     RemoteLLMModel,
     RetryingCompletionClient,
     RetryPolicy,
+    SavedReplies,
     TokenLogprob,
     UsageTotals,
     LiteLLMCompletionClient,
@@ -155,6 +156,8 @@ def test_config_defaults(tmp_path: Path):
     assert config.get_prompt()["example_selection"]["method"] == "coverage"
     assert config.get_prompt()["num_examples"] == 100
     assert config.get_infer_batch_size() == 1
+    assert config.infer["num_retries"] == 8
+    assert config.infer["reuse_saved_replies"] is True
     # The hosted model tokenizes for itself, so preprocessing writes raw text.
     assert config.data["tokenize"] is False
     assert config.model_dir == tmp_path / "run"
@@ -1175,3 +1178,185 @@ def test_usage_totals_count_the_segments_an_empty_reply_left_blank():
     totals.add(Completion("hola", cost=0.0))
 
     assert "segments left blank by an empty reply: 1" in totals.describe()
+
+
+class FakeLiteLLM:
+    """LiteLLM's module interface, narrowed to what LiteLLMCompletionClient calls."""
+
+    def __init__(self, outcome: object) -> None:
+        self._outcome = outcome
+        self.calls: List[dict] = []
+
+    def completion(self, **kwargs) -> dict:
+        self.calls.append(kwargs)
+        if isinstance(self._outcome, Exception):
+            raise self._outcome
+        assert isinstance(self._outcome, dict)
+        return self._outcome
+
+    def completion_cost(self, completion_response) -> float:
+        return 0.0
+
+
+HOLA_RESPONSE = {"choices": [{"message": {"content": "hola"}}], "usage": {"prompt_tokens": 3, "completion_tokens": 1}}
+
+
+def test_litellm_is_asked_not_to_retry_on_its_own():
+    # LiteLLM's retries need tenacity, and when it is missing they replace the provider's error with an import error.
+    fake = FakeLiteLLM(HOLA_RESPONSE)
+    LiteLLMCompletionClient("gpt-4o", CompletionSettings(0.0, 16, 5, 10), litellm=fake).complete([])
+    assert fake.calls[0]["num_retries"] == 0
+
+
+def test_a_provider_error_reaches_the_retry_policy_unchanged():
+    fake = FakeLiteLLM(HttpError(429, "rate-limited upstream"))
+    client = RetryingCompletionClient(
+        LiteLLMCompletionClient("gpt-4o", CompletionSettings(0.0, 16, 1, 10), litellm=fake),
+        RetryPolicy(1, delay_seconds=0),
+    )
+
+    with pytest.raises(HttpError, match="rate-limited upstream"):
+        client.complete([])
+    assert len(fake.calls) == 2
+
+
+def test_importing_litellm_turns_off_its_feedback_banner():
+    litellm = pytest.importorskip("litellm")
+    LiteLLMCompletionClient("gpt-4o", CompletionSettings(0.0, 16, 0, 10))
+    assert litellm.suppress_debug_info is True
+
+
+# --- saved replies -------------------------------------------------------------------------
+
+
+def save_reply(saved: SavedReplies, key: str, completion: Completion) -> None:
+    occurrence, _ = saved.claim(key)
+    saved.save(key, occurrence, completion)
+
+
+def test_a_saved_reply_comes_back_whole_in_a_later_session(tmp_path: Path):
+    saved = SavedReplies(tmp_path / "replies.jsonl")
+    original = Completion("hola", [TokenLogprob("hola", -0.5)], prompt_tokens=10, completion_tokens=2, cost=0.003)
+    with saved.session():
+        save_reply(saved, "request", original)
+
+    with saved.session():
+        assert saved.claim("request")[1] == original
+
+
+def test_identical_requests_in_one_session_are_told_apart(tmp_path: Path):
+    saved = SavedReplies(tmp_path / "replies.jsonl")
+    with saved.session():
+        save_reply(saved, "request", Completion("first"))
+        save_reply(saved, "request", Completion("second"))
+
+    with saved.session():
+        assert [saved.claim("request")[1] for _ in range(3)] == [Completion("first"), Completion("second"), None]
+
+
+def test_nothing_is_saved_outside_a_session(tmp_path: Path):
+    saved = SavedReplies(tmp_path / "replies.jsonl")
+    save_reply(saved, "request", Completion("hola"))
+
+    assert not (tmp_path / "replies.jsonl").exists()
+    with saved.session():
+        assert saved.claim("request")[1] is None
+
+
+def test_a_partly_written_last_line_does_not_spoil_the_next_reply(tmp_path: Path):
+    path = tmp_path / "replies.jsonl"
+    saved = SavedReplies(path)
+    with saved.session():
+        save_reply(saved, "kept", Completion("hola"))
+    with path.open("a", encoding="utf-8") as file:
+        file.write('{"key": "interrupted", "occ')
+
+    with saved.session():
+        save_reply(saved, "after", Completion("adios"))
+
+    with saved.session():
+        assert saved.claim("kept")[1] == Completion("hola")
+        assert saved.claim("interrupted")[1] is None
+        assert saved.claim("after")[1] == Completion("adios")
+
+
+def test_a_failed_run_resumes_without_repeating_the_finished_requests(tmp_path: Path):
+    calls: List[List[Dict[str, str]]] = []
+
+    def fail_on_the_third(messages: List[Dict[str, str]]) -> str:
+        calls.append(messages)
+        if len(calls) == 3:
+            raise RuntimeError("provider unavailable")
+        return f"reply {len(calls)}"
+
+    model, _ = make_model(tmp_path, fail_on_the_third, infer={"concurrency": 1})
+    with pytest.raises(RuntimeError):
+        list(model.translate(["one", "two", "three", "four"], "en", "es"))
+
+    resumed, client = make_model(tmp_path, lambda messages: "fresh", infer={"concurrency": 1})
+    groups = list(resumed.translate(["one", "two", "three", "four"], "en", "es"))
+
+    assert translations_of(groups) == ["reply 1", "reply 2", "fresh", "fresh"]
+    assert len(client.calls) == 2
+
+
+def test_a_failed_run_says_that_rerunning_resumes(tmp_path: Path, caplog):
+    def unavailable(messages: List[Dict[str, str]]) -> str:
+        raise RuntimeError("provider unavailable")
+
+    model, _ = make_model(tmp_path, unavailable, infer={"concurrency": 1})
+    with caplog.at_level("ERROR"), pytest.raises(RuntimeError):
+        list(model.translate(["one"], "en", "es"))
+
+    assert "rerunning resumes" in caplog.text
+
+
+def test_each_draft_of_a_segment_resumes_with_its_own_reply(tmp_path: Path):
+    replies = iter(["draft a", "draft b", "draft c"])
+    infer = {"num_drafts": 3, "temperature": 0.8, "concurrency": 1}
+    model, _ = make_model(tmp_path, lambda messages: next(replies), infer=dict(infer))
+    list(model.translate(["one"], "en", "es", produce_multiple_translations=True))
+
+    resumed, client = make_model(tmp_path, lambda messages: "fresh", infer=dict(infer))
+    group = list(resumed.translate(["one"], "en", "es", produce_multiple_translations=True))[0]
+
+    assert sorted(translation.get_translation() for translation in group) == ["draft a", "draft b", "draft c"]
+    assert client.calls == []
+
+
+def test_an_empty_reply_is_asked_for_again_when_resuming(tmp_path: Path):
+    model, _ = make_model(tmp_path, lambda messages: "", infer={"concurrency": 1})
+    list(model.translate(["one"], "en", "es"))
+
+    resumed, client = make_model(tmp_path, lambda messages: "hola", infer={"concurrency": 1})
+    assert translations_of(list(resumed.translate(["one"], "en", "es"))) == ["hola"]
+    assert len(client.calls) == 1
+
+
+def test_a_saved_reply_is_not_reused_under_different_settings(tmp_path: Path):
+    model, _ = make_model(tmp_path, lambda messages: "cool", infer={"concurrency": 1, "temperature": 0.2})
+    list(model.translate(["one"], "en", "es"))
+
+    warmer, _ = make_model(tmp_path, lambda messages: "warm", infer={"concurrency": 1, "temperature": 0.9})
+    assert translations_of(list(warmer.translate(["one"], "en", "es"))) == ["warm"]
+
+
+def test_saved_replies_are_neither_kept_nor_reused_when_reuse_is_off(tmp_path: Path):
+    infer = {"concurrency": 1, "reuse_saved_replies": False}
+    model, _ = make_model(tmp_path, lambda messages: "first", infer=dict(infer))
+    list(model.translate(["one"], "en", "es"))
+
+    again, _ = make_model(tmp_path, lambda messages: "second", infer=dict(infer))
+    assert translations_of(list(again.translate(["one"], "en", "es"))) == ["second"]
+    assert list(tmp_path.glob("*.jsonl")) == []
+
+
+def test_usage_totals_count_reused_replies_without_billing_them_again():
+    totals = UsageTotals()
+    totals.add(Completion("hola", prompt_tokens=100, cost=0.01, reused=True))
+    totals.add(Completion("adios", prompt_tokens=100, cost=0.01))
+
+    described = totals.describe()
+    assert "1 requests, 100 prompt" in described
+    assert "$0.0100" in described
+    assert "replies reused from an earlier run: 1" in described
