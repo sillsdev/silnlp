@@ -48,6 +48,7 @@ from .corpora import (
     get_terms_glosses_file_paths,
     parse_corpus_pairs,
 )
+from .data_set_files import DataSetFile, SplitFiles
 from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger((__package__ or "") + ".config")
@@ -1173,45 +1174,61 @@ class Config(ABC):
                     corpus_size, train_size, test_indices | val_indices | poorly_aligned_indices
                 )
 
-            train_src_file = stack.enter_context(self._open_append(self.train_src_filename()))
-            train_trg_file = stack.enter_context(self._open_append(self.train_trg_filename()))
-            val_src_file = stack.enter_context(self._open_append(self.val_src_filename()))
-            val_trg_file = stack.enter_context(self._open_append(self.val_trg_filename()))
-            test_src_file = stack.enter_context(self._open_append(self.test_src_filename(src_file.iso, trg_file.iso)))
-            test_trg_file = stack.enter_context(self._open_append(self.test_trg_filename(src_file.iso, trg_file.iso)))
-
-            train_vref_file: Optional[TextIO] = None
-            val_vref_file: Optional[TextIO] = None
-            test_vref_file: Optional[TextIO] = None
-            test_trg_project_files: List[TextIO] = []
-            val_trg_ref_files: List[TextIO] = []
-            dict_src_file: Optional[TextIO] = None
-            dict_trg_file: Optional[TextIO] = None
-            dict_vref_file: Optional[TextIO] = None
+            train_blank_files: List[DataSetFile] = []
+            val_blank_files: List[DataSetFile] = []
+            test_blank_files: List[DataSetFile] = []
             if self.has_scripture_data:
-                train_vref_file = stack.enter_context(self._open_append(self.train_vref_filename()))
-                val_vref_file = stack.enter_context(self._open_append(self.val_vref_filename()))
-                test_vref_file = stack.enter_context(
-                    self._open_append(self.test_vref_filename(src_file.iso, trg_file.iso))
-                )
-                test_projects = self._get_test_projects(src_file.iso, trg_file.iso)
-                if self._has_multiple_test_projects(src_file.iso, trg_file.iso):
-                    test_trg_project_files = [
-                        stack.enter_context(
-                            self._open_append(self.test_trg_filename(src_file.iso, trg_file.iso, project))
-                        )
-                        for project in test_projects
-                        if project != BASIC_DATA_PROJECT
-                    ]
+                train_blank_files = self._open_data_set_files(stack, self.train_vref_filename())
                 val_ref_count = self._get_val_ref_count(src_file.iso, trg_file.iso)
-                val_trg_ref_files = [
-                    stack.enter_context(self._open_append(self.val_trg_filename(index)))
-                    for index in range(1, val_ref_count)
-                ]
-            if pair.is_dictionary:
-                dict_src_file = stack.enter_context(self._open_append(self.dict_src_filename()))
-                dict_trg_file = stack.enter_context(self._open_append(self.dict_trg_filename()))
-                dict_vref_file = stack.enter_context(self._open_append(self.dict_vref_filename()))
+                val_blank_files = self._open_data_set_files(
+                    stack,
+                    self.val_vref_filename(),
+                    *(self.val_trg_filename(index) for index in range(1, val_ref_count)),
+                    *(self.val_trg_detok_filename(index) for index in range(1, val_ref_count)),
+                )
+                test_blank_files = self._open_data_set_files(stack, self.test_vref_filename(src_file.iso, trg_file.iso))
+                if self._has_multiple_test_projects(src_file.iso, trg_file.iso):
+                    test_blank_files += self._open_data_set_files(
+                        stack,
+                        *(
+                            self.test_trg_filename(src_file.iso, trg_file.iso, project)
+                            for project in self._get_test_projects(src_file.iso, trg_file.iso)
+                            if project != BASIC_DATA_PROJECT
+                        ),
+                    )
+            train_files = SplitFiles(
+                self._open_data_set_files(
+                    stack,
+                    self.train_src_filename(),
+                    self.train_trg_filename(),
+                    self.train_src_detok_filename(),
+                    self.train_trg_detok_filename(),
+                ),
+                train_blank_files,
+            )
+            val_files = SplitFiles(
+                self._open_data_set_files(
+                    stack,
+                    self.val_src_filename(),
+                    self.val_src_detok_filename(),
+                    self.val_trg_filename(),
+                    self.val_trg_detok_filename(),
+                ),
+                val_blank_files,
+            )
+            test_files = SplitFiles(
+                self._open_data_set_files(
+                    stack,
+                    self.test_src_filename(src_file.iso, trg_file.iso),
+                    self.test_src_detok_filename(src_file.iso, trg_file.iso),
+                    self.test_trg_filename(src_file.iso, trg_file.iso),
+                ),
+                test_blank_files,
+            )
+            dict_files = SplitFiles(
+                self._open_data_set_files(stack, self.dict_src_filename(), self.dict_trg_filename()),
+                self._open_data_set_files(stack, self.dict_vref_filename()),
+            )
 
             index = 0
             for src_line, trg_line in tqdm(zip(input_src_file, input_trg_file)):
@@ -1224,24 +1241,23 @@ class Config(ABC):
                 trg_sentence = trg_line
 
                 if pair.is_test and (test_indices is None or index in test_indices):
-                    test_src_file.write(tokenizer.tokenize(Side.SOURCE, src_sentence) + "\n")
-                    test_trg_file.write(tokenizer.normalize(Side.TARGET, trg_sentence) + "\n")
-                    if test_vref_file is not None:
-                        test_vref_file.write("\n")
-                    for test_trg_project_file in test_trg_project_files:
-                        test_trg_project_file.write("\n")
+                    test_files.write_row(
+                        tokenizer.tokenize(Side.SOURCE, src_sentence),
+                        src_sentence,
+                        tokenizer.normalize(Side.TARGET, trg_sentence),
+                    )
                     test_count += 1
                 elif (
                     pair.is_val
                     and index not in poorly_aligned_indices
                     and (val_indices is None or index in val_indices)
                 ):
-                    val_src_file.write(tokenizer.tokenize(Side.SOURCE, src_sentence) + "\n")
-                    val_trg_file.write(tokenizer.tokenize(Side.TARGET, trg_sentence) + "\n")
-                    if val_vref_file is not None:
-                        val_vref_file.write("\n")
-                    for val_trg_ref_file in val_trg_ref_files:
-                        val_trg_ref_file.write("\n")
+                    val_files.write_row(
+                        tokenizer.tokenize(Side.SOURCE, src_sentence),
+                        src_sentence,
+                        tokenizer.tokenize(Side.TARGET, trg_sentence),
+                        trg_sentence,
+                    )
                     val_count += 1
                 elif (
                     pair.is_train
@@ -1250,13 +1266,7 @@ class Config(ABC):
                 ):
                     noised_src_sentence = add_tags_to_sentence(pair.tags, self._noise(pair.src_noise, src_line))
                     train_count += self._write_train_sentence_pair(
-                        train_src_file,
-                        train_trg_file,
-                        train_vref_file,
-                        tokenizer,
-                        noised_src_sentence,
-                        trg_sentence,
-                        pair.is_lexical_data,
+                        train_files, tokenizer, noised_src_sentence, trg_sentence, pair.is_lexical_data
                     )
                     if self.mirror:
                         tokenizer.set_src_lang(trg_file.iso)
@@ -1264,23 +1274,12 @@ class Config(ABC):
                         mirror_src_sentence = add_tags_to_sentence(pair.tags, self._noise(pair.src_noise, trg_line))
                         mirror_trg_sentence = src_line
                         train_count += self._write_train_sentence_pair(
-                            train_src_file,
-                            train_trg_file,
-                            train_vref_file,
-                            tokenizer,
-                            mirror_src_sentence,
-                            mirror_trg_sentence,
-                            pair.is_lexical_data,
+                            train_files, tokenizer, mirror_src_sentence, mirror_trg_sentence, pair.is_lexical_data
                         )
                         tokenizer.set_src_lang(src_file.iso)
                         tokenizer.set_trg_lang(trg_file.iso)
 
-                if (
-                    pair.is_dictionary
-                    and dict_src_file is not None
-                    and dict_trg_file is not None
-                    and dict_vref_file is not None
-                ):
+                if pair.is_dictionary:
                     src_variants = [
                         tokenizer.tokenize(Side.SOURCE, src_sentence, add_dummy_prefix=True, add_special_tokens=False),
                         tokenizer.tokenize(Side.SOURCE, src_sentence, add_dummy_prefix=False, add_special_tokens=False),
@@ -1289,9 +1288,7 @@ class Config(ABC):
                         tokenizer.tokenize(Side.TARGET, trg_sentence, add_dummy_prefix=True, add_special_tokens=False),
                         tokenizer.tokenize(Side.TARGET, trg_sentence, add_dummy_prefix=False, add_special_tokens=False),
                     ]
-                    dict_src_file.write("\t".join(src_variants) + "\n")
-                    dict_trg_file.write("\t".join(trg_variants) + "\n")
-                    dict_vref_file.write("\n")
+                    dict_files.write_row("\t".join(src_variants), "\t".join(trg_variants))
                     dict_count += 1
 
                 index += 1
@@ -1301,11 +1298,12 @@ class Config(ABC):
         )
         return train_count
 
+    def _open_data_set_files(self, stack: ExitStack, *filenames: str) -> List[DataSetFile]:
+        return [stack.enter_context(DataSetFile(self.exp_dir / filename)) for filename in filenames]
+
     def _write_train_sentence_pair(
         self,
-        src_file: TextIO,
-        trg_file: TextIO,
-        vref_file: Optional[TextIO],
+        train_files: SplitFiles,
         tokenizer: Tokenizer,
         src_sentence: str,
         trg_sentence: str,
@@ -1319,10 +1317,7 @@ class Config(ABC):
             trg_variants.append(tokenizer.tokenize(Side.TARGET, trg_sentence, add_dummy_prefix=False))
 
         for src_variant, trg_variant in zip(src_variants, trg_variants):
-            src_file.write(src_variant + "\n")
-            trg_file.write(trg_variant + "\n")
-            if vref_file is not None:
-                vref_file.write("\n")
+            train_files.write_row(src_variant, trg_variant, src_sentence, trg_sentence)
         return len(src_variants)
 
     def _noise(self, src_noise: List[NoiseMethod], src_sentence: str) -> str:
