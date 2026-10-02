@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from enum import Enum, Flag, auto
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
 
 import pandas as pd
 from machine.corpora import TextFileTextCorpus
@@ -248,28 +248,34 @@ def get_terms_glosses_file_paths(terms_files: List[DataFile], environment: SilNl
     return glosses_file_paths
 
 
-def get_parallel_corpus_size(src_file_path: Path, trg_file_path: Path) -> int:
-    count = 0
-    with src_file_path.open("r", encoding="utf-8") as src_file, trg_file_path.open("r", encoding="utf-8") as trg_file:
-        for src_line, trg_line in zip(src_file, trg_file):
-            src_line = src_line.strip()
-            trg_line = trg_line.strip()
-            if len(src_line) > 0 and len(trg_line) > 0:
-                count += 1
-    return count
+class BasicParallelCorpus:
+    """A parallel corpus from MT/corpora, whose two files are aligned line by line."""
 
+    def __init__(self, src_file_path: Path, trg_file_path: Path) -> None:
+        self._src_file_path = src_file_path
+        self._trg_file_path = trg_file_path
 
-def get_basic_parallel_corpus(src_file_path: Path, trg_file_path: Path) -> pd.DataFrame:
-    sources: List[str] = []
-    targets: List[str] = []
-    with src_file_path.open("r", encoding="utf-8") as src_file, trg_file_path.open("r", encoding="utf-8") as trg_file:
-        for src_line, trg_line in zip(src_file, trg_file):
-            src_line = src_line.strip()
-            trg_line = trg_line.strip()
-            if len(src_line) > 0 and len(trg_line) > 0:
-                sources.append(src_line)
-                targets.append(trg_line)
-    return pd.DataFrame({"source": sources, "target": targets})
+    def __iter__(self) -> Iterator[Tuple[str, str]]:
+        with (
+            self._src_file_path.open("r", encoding="utf-8") as src_file,
+            self._trg_file_path.open("r", encoding="utf-8") as trg_file,
+        ):
+            for src_line, trg_line in zip(src_file, trg_file):
+                src_sentence = self._clean(src_line)
+                trg_sentence = self._clean(trg_line)
+                if len(src_sentence) > 0 and len(trg_sentence) > 0:
+                    yield src_sentence, trg_sentence
+
+    def count(self) -> int:
+        return sum(1 for _ in self)
+
+    def to_data_frame(self) -> pd.DataFrame:
+        return pd.DataFrame(list(self), columns=["source", "target"])
+
+    def _clean(self, line: str) -> str:
+        line = line.strip()
+        # Scripture extracts mark a verse with no text this way, and both kinds of corpus must drop the same rows.
+        return "" if line == "..." else line
 
 
 def read_parallel_text_pairs(src_path: Path, trg_path: Path) -> Optional[Tuple[List[str], List[str]]]:

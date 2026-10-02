@@ -122,6 +122,20 @@ def test_corpora_and_scripture_pairs_write_the_same_mirrored_data_sets(tmp_path:
     assert corpora_data_sets == scripture_data_sets
 
 
+def test_corpora_and_scripture_pairs_skip_the_same_empty_and_placeholder_lines(tmp_path: Path):
+    train_sources = []
+    for corpus_dir_name in ("corpora", "scripture"):
+        experiment = PreprocessingExperiment(tmp_path / corpus_dir_name, corpus_dir_name)
+        experiment.write_sentence_pairs(
+            ["source 0", "...", "source 2", "", "source 4", "source 5"],
+            ["objetivo 0", "objetivo 1", "...", "objetivo 3", "", "objetivo 5"],
+        )
+        experiment.preprocess({"type": "train"})
+        train_sources.append(experiment.read_sources("train"))
+
+    assert train_sources == [["source 0", "source 5"], ["source 0", "source 5"]]
+
+
 def test_mixed_experiment_keeps_the_files_of_each_split_aligned(tmp_path: Path):
     experiment = PreprocessingExperiment(tmp_path, "scripture")
     experiment.write_corpus(8)

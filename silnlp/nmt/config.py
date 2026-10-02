@@ -38,13 +38,12 @@ from ..common.utils import NoiseMethod, Side, add_tags_to_dataframe, add_tags_to
 from .alignment_scores import AlignmentScores
 from .corpora import (
     BASIC_DATA_PROJECT,
+    BasicParallelCorpus,
     CorpusPair,
     DataFile,
     DataFileMapping,
     IsoPairInfo,
-    get_basic_parallel_corpus,
     get_data_file_pairs,
-    get_parallel_corpus_size,
     get_terms_glosses_file_paths,
     parse_corpus_pairs,
 )
@@ -1141,14 +1140,13 @@ class Config(ABC):
         LOGGER.info(f"Preprocessing {src_file.path.stem} -> {trg_file.path.stem}")
         tokenizer.set_src_lang(src_file.iso)
         tokenizer.set_trg_lang(trg_file.iso)
-        corpus_size = get_parallel_corpus_size(src_file.path, trg_file.path)
+        corpus = BasicParallelCorpus(src_file.path, trg_file.path)
+        corpus_size = corpus.count()
         train_count = 0
         val_count = 0
         test_count = 0
         dict_count = 0
         with ExitStack() as stack:
-            input_src_file = stack.enter_context(src_file.path.open("r", encoding="utf-8"))
-            input_trg_file = stack.enter_context(trg_file.path.open("r", encoding="utf-8"))
             test_indices: Optional[Set[int]] = set()
             if pair.is_test:
                 test_size = pair.size if pair.test_size is None else pair.test_size
@@ -1156,9 +1154,9 @@ class Config(ABC):
 
             poorly_aligned_indices: Set[int] = set()
             if pair.is_train and pair.score_threshold > 0 and test_indices is not None:
-                corpus = get_basic_parallel_corpus(src_file.path, trg_file.path)
-                alignment_scores.add_to(corpus, src_file.path.stem, trg_file.path.stem)
-                train_candidates = corpus.drop(list(test_indices))
+                scored_corpus = corpus.to_data_frame()
+                alignment_scores.add_to(scored_corpus, src_file.path.stem, trg_file.path.stem)
+                train_candidates = scored_corpus.drop(list(test_indices))
                 well_aligned = alignment_scores.filter(train_candidates, pair.score_threshold)
                 poorly_aligned_indices = set(train_candidates.index.difference(well_aligned.index))
 
@@ -1230,13 +1228,7 @@ class Config(ABC):
                 self._open_data_set_files(stack, self.dict_vref_filename()),
             )
 
-            index = 0
-            for src_line, trg_line in tqdm(zip(input_src_file, input_trg_file)):
-                src_line = src_line.strip()
-                trg_line = trg_line.strip()
-                if len(src_line) == 0 or len(trg_line) == 0:
-                    continue
-
+            for index, (src_line, trg_line) in enumerate(tqdm(corpus)):
                 src_sentence = add_tags_to_sentence(pair.tags, src_line)
                 trg_sentence = trg_line
 
@@ -1290,8 +1282,6 @@ class Config(ABC):
                     ]
                     dict_files.write_row("\t".join(src_variants), "\t".join(trg_variants))
                     dict_count += 1
-
-                index += 1
 
         LOGGER.info(
             f"train size: {train_count}, val size: {val_count}, test size: {test_count}, dict size: {dict_count}"
