@@ -1,3 +1,4 @@
+from copy import deepcopy
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
@@ -41,7 +42,8 @@ class PreprocessingExperiment:
     def preprocess_pairs(
         self, pairs: List[dict], force_align: bool = False, data_settings: Optional[dict] = None
     ) -> None:
-        data = {"corpus_pairs": pairs, "tokenize": False, **(data_settings or {})}
+        # Parsing a corpus pair consumes parts of its settings, and the comparisons reuse them.
+        data = {"corpus_pairs": deepcopy(pairs), "tokenize": False, **(data_settings or {})}
         environment = SilNlpEnv.create_environment_with_mt_dir(self._mt_dir)
         config = Seq2SeqConfig(self._exp_dir, {"data": data}, environment)
         config.set_seed()
@@ -106,6 +108,7 @@ def preprocess_both_kinds(
         {"test_size": 2, "val_size": 2, "tags": "tag"},
         {"test_size": 2, "val_size": 2, "score_threshold": 0.5},
         {"test_size": 2, "val_size": 2, "score_threshold": 2},
+        {"src": [{"name": "en-AAA", "include_test": False}], "test_size": 2, "val_size": 2},
     ],
 )
 def test_corpora_and_scripture_pairs_write_the_same_data_sets(tmp_path: Path, pair_settings: dict):

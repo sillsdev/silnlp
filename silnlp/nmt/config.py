@@ -1233,12 +1233,13 @@ class Config(ABC):
                 trg_sentence = trg_line
 
                 if pair.is_test and (test_indices is None or index in test_indices):
-                    test_files.write_row(
-                        tokenizer.tokenize(Side.SOURCE, src_sentence),
-                        src_sentence,
-                        tokenizer.normalize(Side.TARGET, trg_sentence),
-                    )
-                    test_count += 1
+                    if src_file.include_test:
+                        test_files.write_row(
+                            tokenizer.tokenize(Side.SOURCE, src_sentence),
+                            src_sentence,
+                            tokenizer.normalize(Side.TARGET, trg_sentence),
+                        )
+                        test_count += 1
                 elif (
                     pair.is_val
                     and index not in poorly_aligned_indices
