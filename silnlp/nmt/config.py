@@ -654,8 +654,6 @@ class Config(ABC):
             project_isos[src_file.project] = src_file.iso
             project_isos[trg_file.project] = trg_file.iso
             corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, environment=self._environment)
-            if len(pair.src_noise) > 0:
-                corpus["source"] = [self._noise(pair.src_noise, x) for x in corpus["source"]]
 
             if len(pair.corpus_books) > 0:
                 cur_train = include_chapters(corpus, pair.corpus_books)
@@ -748,6 +746,7 @@ class Config(ABC):
                             "target_lang": "source_lang",
                         }
                     )
+                    self._noise_sources(pair.src_noise, mirror_cur_train)
                     train = self._add_to_train_data_set(
                         trg_file.project,
                         src_file.project,
@@ -757,6 +756,7 @@ class Config(ABC):
                         mirror_cur_train,
                     )
 
+                self._noise_sources(pair.src_noise, cur_train)
                 train = self._add_to_train_data_set(
                     src_file.project,
                     trg_file.project,
@@ -1310,6 +1310,10 @@ class Config(ABC):
         for src_variant, trg_variant in zip(src_variants, trg_variants):
             train_files.write_row(src_variant, trg_variant, src_sentence, trg_sentence)
         return len(src_variants)
+
+    def _noise_sources(self, src_noise: List[NoiseMethod], data_set: pd.DataFrame) -> None:
+        if len(src_noise) > 0:
+            data_set["source"] = [self._noise(src_noise, sentence) for sentence in data_set["source"]]
 
     def _noise(self, src_noise: List[NoiseMethod], src_sentence: str) -> str:
         if len(src_noise) == 0:

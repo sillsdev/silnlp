@@ -109,6 +109,7 @@ def preprocess_both_kinds(
         {"test_size": 2, "val_size": 2, "score_threshold": 0.5},
         {"test_size": 2, "val_size": 2, "score_threshold": 2},
         {"src": [{"name": "en-AAA", "include_test": False}], "test_size": 2, "val_size": 2},
+        {"test_size": 2, "val_size": 2, "src_noise": [{"replacement": [1.0, "<blank>"]}]},
     ],
 )
 def test_corpora_and_scripture_pairs_write_the_same_data_sets(tmp_path: Path, pair_settings: dict):
@@ -120,6 +121,14 @@ def test_corpora_and_scripture_pairs_write_the_same_data_sets(tmp_path: Path, pa
 def test_corpora_and_scripture_pairs_write_the_same_mirrored_data_sets(tmp_path: Path):
     corpora_data_sets, scripture_data_sets = preprocess_both_kinds(
         tmp_path, {"test_size": 2, "val_size": 2}, {"mirror": True}
+    )
+
+    assert corpora_data_sets == scripture_data_sets
+
+
+def test_corpora_and_scripture_pairs_write_the_same_mirrored_noised_data_sets(tmp_path: Path):
+    corpora_data_sets, scripture_data_sets = preprocess_both_kinds(
+        tmp_path, {"test_size": 2, "val_size": 2, "src_noise": [{"replacement": [1.0, "<blank>"]}]}, {"mirror": True}
     )
 
     assert corpora_data_sets == scripture_data_sets
@@ -222,3 +231,12 @@ def test_force_align_recomputes_cached_scores(experiment: PreprocessingExperimen
 
     assert experiment.read_cached_scores() != [0.0] * 8
     assert len(experiment.read_sources("train")) > 0
+
+
+def test_src_noise_is_only_added_to_training_sources(experiment: PreprocessingExperiment):
+    experiment.write_corpus(8)
+
+    experiment.preprocess({"test_size": 2, "val_size": 2, "src_noise": [{"replacement": [1.0, "<blank>"]}]})
+
+    assert set(experiment.read_sources("train")) == {"<blank> <blank>"}
+    assert set(experiment.read_sources("test") + experiment.read_sources("val")) <= set(experiment.sources(range(8)))
