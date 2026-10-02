@@ -666,9 +666,7 @@ class Config(ABC):
             corpus_count = len(cur_train)
 
             if pair.is_train and pair.score_threshold > 0:
-                alignment_scores.add_to(
-                    cur_train, f"{src_file.iso}-{src_file.project}", f"{trg_file.iso}-{trg_file.project}"
-                )
+                alignment_scores.add_to(cur_train, src_file.corpus_name, trg_file.corpus_name)
 
             if pair.is_test:
                 if len(pair.test_books) > 0:
@@ -1155,7 +1153,7 @@ class Config(ABC):
             poorly_aligned_indices: Set[int] = set()
             if pair.is_train and pair.score_threshold > 0 and test_indices is not None:
                 scored_corpus = corpus.to_data_frame()
-                alignment_scores.add_to(scored_corpus, src_file.path.stem, trg_file.path.stem)
+                alignment_scores.add_to(scored_corpus, src_file.corpus_name, trg_file.corpus_name)
                 train_candidates = scored_corpus.drop(list(test_indices))
                 well_aligned = alignment_scores.filter(train_candidates, pair.score_threshold)
                 poorly_aligned_indices = set(train_candidates.index.difference(well_aligned.index))

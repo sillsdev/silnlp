@@ -51,6 +51,11 @@ class DataFile:
     def is_scripture(self) -> bool:
         return self.project != BASIC_DATA_PROJECT
 
+    @property
+    def corpus_name(self) -> str:
+        # Every basic corpus shares the BASIC project, so only its file name tells it apart.
+        return f"{self.iso}-{self.project}" if self.is_scripture else self.path.stem
+
 
 @dataclass
 class CorpusPair:
@@ -263,21 +268,24 @@ class BasicParallelCorpus:
         self._trg_file_path = trg_file_path
 
     def __iter__(self) -> Iterator[Tuple[str, str]]:
+        for src_sentence, trg_sentence in self._read_line_pairs():
+            if len(src_sentence) > 0 and len(trg_sentence) > 0:
+                yield src_sentence, trg_sentence
+
+    def count(self) -> int:
+        return sum(1 for _ in self)
+
+    def to_data_frame(self, remove_empty_sentences: bool = True) -> pd.DataFrame:
+        rows = self if remove_empty_sentences else (row for row in self._read_line_pairs() if row != ("", ""))
+        return pd.DataFrame(list(rows), columns=["source", "target"])
+
+    def _read_line_pairs(self) -> Iterator[Tuple[str, str]]:
         with (
             self._src_file_path.open("r", encoding="utf-8") as src_file,
             self._trg_file_path.open("r", encoding="utf-8") as trg_file,
         ):
             for src_line, trg_line in zip(src_file, trg_file):
-                src_sentence = self._clean(src_line)
-                trg_sentence = self._clean(trg_line)
-                if len(src_sentence) > 0 and len(trg_sentence) > 0:
-                    yield src_sentence, trg_sentence
-
-    def count(self) -> int:
-        return sum(1 for _ in self)
-
-    def to_data_frame(self) -> pd.DataFrame:
-        return pd.DataFrame(list(self), columns=["source", "target"])
+                yield self._clean(src_line), self._clean(trg_line)
 
     def _clean(self, line: str) -> str:
         line = line.strip()
