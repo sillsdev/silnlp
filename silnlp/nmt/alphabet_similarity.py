@@ -11,7 +11,7 @@ from .config_utils import load_config
 
 
 def get_corpus_path(project: str, environment: SilNlpEnv) -> Path:
-    return environment.mt_scripture_dir / f"{project}.txt"
+    return environment.get_mt_corpus_path(project)
 
 
 def computeSimilarity(projects: List[str], environment: SilNlpEnv) -> None:
@@ -97,11 +97,8 @@ def main() -> None:
 
     projects: Set[str] = set()
     for pair in config.corpus_pairs:
-        if pair.is_scripture:
-            for src_file in pair.src_files:
-                projects.add(f"{src_file.iso}-{src_file.project}")
-            for trg_file in pair.trg_files:
-                projects.add(f"{trg_file.iso}-{trg_file.project}")
+        for data_file in pair.src_files + pair.trg_files:
+            projects.add(data_file.corpus_name)
 
     computeSimilarity(list(projects), environment)
 
