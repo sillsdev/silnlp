@@ -19,12 +19,9 @@ from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
 from machine.tokenization import LatinWordTokenizer
 from tqdm import tqdm
 
-from ..alignment.config import get_aligner_name
-from ..alignment.utils import add_alignment_scores
 from ..common.corpus import (
     Term,
     exclude_chapters,
-    filter_parallel_corpus,
     get_scripture_parallel_corpus,
     get_terms,
     get_terms_corpus,
@@ -38,12 +35,14 @@ from ..common.corpus import (
 from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import SentenceTranslationGroup
 from ..common.utils import NoiseMethod, Side, add_tags_to_dataframe, add_tags_to_sentence, set_seed
+from .alignment_scores import AlignmentScores
 from .corpora import (
     BASIC_DATA_PROJECT,
     CorpusPair,
     DataFile,
     DataFileMapping,
     IsoPairInfo,
+    get_basic_parallel_corpus,
     get_data_file_pairs,
     get_parallel_corpus_size,
     get_terms_glosses_file_paths,
@@ -474,11 +473,12 @@ class Config(ABC):
         terms_config = self.data["terms"]
         src_terms_files: List[Tuple[DataFile, List[str]]] = []
         trg_terms_files: List[Tuple[DataFile, List[str]]] = []
+        alignment_scores = AlignmentScores(self.exp_dir, self.data["aligner"], force_align)
         for pair in self.corpus_pairs:
             if pair.is_scripture:
-                train_count += self._write_scripture_data_sets(tokenizer, pair, force_align)
+                train_count += self._write_scripture_data_sets(tokenizer, pair, alignment_scores)
             else:
-                train_count += self._write_basic_data_sets(tokenizer, pair)
+                train_count += self._write_basic_data_sets(tokenizer, pair, alignment_scores)
 
             if terms_config["dictionary"] or terms_config["train"]:
                 for file in pair.src_terms_files:
@@ -623,7 +623,7 @@ class Config(ABC):
         self,
         tokenizer: Tokenizer,
         pair: CorpusPair,
-        force_align: bool,
+        alignment_scores: AlignmentScores,
     ) -> int:
         src_corpora_str = ", ".join(sf.path.stem for sf in pair.src_files)
         if len(pair.src_files) > 1:
@@ -668,20 +668,9 @@ class Config(ABC):
             corpus_count = len(cur_train)
 
             if pair.is_train and pair.score_threshold > 0:
-                pair_align_path = (
-                    self.exp_dir / f"{src_file.iso}-{src_file.project}_{trg_file.iso}-{trg_file.project}.csv"
+                alignment_scores.add_to(
+                    cur_train, f"{src_file.iso}-{src_file.project}", f"{trg_file.iso}-{trg_file.project}"
                 )
-                if pair_align_path.is_file() and not force_align:
-                    LOGGER.info(f"Using pre-existing alignment scores from {pair_align_path}")
-                    pair_scores = pd.read_csv(pair_align_path)
-                    pair_scores["idx"] = cur_train.index
-                    pair_scores.set_index("idx", inplace=True)
-                    cur_train["score"] = pair_scores["score"]
-                else:
-                    aligner_id = self.data["aligner"]
-                    LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
-                    add_alignment_scores(cur_train, aligner_id)
-                    cur_train.to_csv(pair_align_path, index=False)
 
             if pair.is_test:
                 if len(pair.test_books) > 0:
@@ -723,12 +712,7 @@ class Config(ABC):
                     )
 
             if pair.is_train and pair.score_threshold > 0:
-                unfiltered_count = len(cur_train)
-                cur_train = filter_parallel_corpus(cur_train, pair.score_threshold)
-                cur_train = cur_train.drop("score", axis=1, errors="ignore")
-                LOGGER.info(
-                    f"Filtered out {unfiltered_count - len(cur_train)} verses pairs with alignment below {pair.score_threshold}."
-                )
+                cur_train = alignment_scores.filter(cur_train, pair.score_threshold)
 
             if pair.is_val:
                 if pair.disjoint_val and val_indices is None:
@@ -1139,10 +1123,10 @@ class Config(ABC):
     def _open_append(self, filename: str) -> TextIO:
         return (self.exp_dir / filename).open("a", encoding="utf-8", newline="\n")
 
-    def _write_basic_data_sets(self, tokenizer: Tokenizer, pair: CorpusPair) -> int:
+    def _write_basic_data_sets(self, tokenizer: Tokenizer, pair: CorpusPair, alignment_scores: AlignmentScores) -> int:
         total_train_count = 0
         for src_file, trg_file in zip(pair.src_files, pair.trg_files):
-            total_train_count += self._write_basic_data_file_pair(tokenizer, pair, src_file, trg_file)
+            total_train_count += self._write_basic_data_file_pair(tokenizer, pair, src_file, trg_file, alignment_scores)
         return total_train_count
 
     def _write_basic_data_file_pair(
@@ -1151,6 +1135,7 @@ class Config(ABC):
         pair: CorpusPair,
         src_file: DataFile,
         trg_file: DataFile,
+        alignment_scores: AlignmentScores,
     ) -> int:
         LOGGER.info(f"Preprocessing {src_file.path.stem} -> {trg_file.path.stem}")
         tokenizer.set_src_lang(src_file.iso)
@@ -1168,15 +1153,25 @@ class Config(ABC):
                 test_size = pair.size if pair.test_size is None else pair.test_size
                 test_indices = split_corpus(corpus_size, test_size)
 
+            poorly_aligned_indices: Set[int] = set()
+            if pair.is_train and pair.score_threshold > 0 and test_indices is not None:
+                corpus = get_basic_parallel_corpus(src_file.path, trg_file.path)
+                alignment_scores.add_to(corpus, src_file.path.stem, trg_file.path.stem)
+                train_candidates = corpus.drop(list(test_indices))
+                well_aligned = alignment_scores.filter(train_candidates, pair.score_threshold)
+                poorly_aligned_indices = set(train_candidates.index.difference(well_aligned.index))
+
             val_indices: Optional[Set[int]] = set()
             if pair.is_val and test_indices is not None:
                 val_size = pair.size if pair.val_size is None else pair.val_size
-                val_indices = split_corpus(corpus_size, val_size, test_indices)
+                val_indices = split_corpus(corpus_size, val_size, test_indices | poorly_aligned_indices)
 
             train_indices: Optional[Set[int]] = set()
             if pair.is_train and test_indices is not None and val_indices is not None:
                 train_size = pair.size
-                train_indices = split_corpus(corpus_size, train_size, test_indices | val_indices)
+                train_indices = split_corpus(
+                    corpus_size, train_size, test_indices | val_indices | poorly_aligned_indices
+                )
 
             train_src_file = stack.enter_context(self._open_append(self.train_src_filename()))
             train_trg_file = stack.enter_context(self._open_append(self.train_trg_filename()))
@@ -1236,7 +1231,11 @@ class Config(ABC):
                     for test_trg_project_file in test_trg_project_files:
                         test_trg_project_file.write("\n")
                     test_count += 1
-                elif pair.is_val and (val_indices is None or index in val_indices):
+                elif (
+                    pair.is_val
+                    and index not in poorly_aligned_indices
+                    and (val_indices is None or index in val_indices)
+                ):
                     val_src_file.write(tokenizer.tokenize(Side.SOURCE, src_sentence) + "\n")
                     val_trg_file.write(tokenizer.tokenize(Side.TARGET, trg_sentence) + "\n")
                     if val_vref_file is not None:
@@ -1244,7 +1243,11 @@ class Config(ABC):
                     for val_trg_ref_file in val_trg_ref_files:
                         val_trg_ref_file.write("\n")
                     val_count += 1
-                elif pair.is_train and (train_indices is None or index in train_indices):
+                elif (
+                    pair.is_train
+                    and index not in poorly_aligned_indices
+                    and (train_indices is None or index in train_indices)
+                ):
                     noised_src_sentence = add_tags_to_sentence(pair.tags, self._noise(pair.src_noise, src_line))
                     train_count += self._write_train_sentence_pair(
                         train_src_file,

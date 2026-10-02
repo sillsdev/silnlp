@@ -3,6 +3,7 @@ from enum import Enum, Flag, auto
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
+import pandas as pd
 from machine.corpora import TextFileTextCorpus
 from machine.scripture import get_chapters
 
@@ -256,6 +257,19 @@ def get_parallel_corpus_size(src_file_path: Path, trg_file_path: Path) -> int:
             if len(src_line) > 0 and len(trg_line) > 0:
                 count += 1
     return count
+
+
+def get_basic_parallel_corpus(src_file_path: Path, trg_file_path: Path) -> pd.DataFrame:
+    sources: List[str] = []
+    targets: List[str] = []
+    with src_file_path.open("r", encoding="utf-8") as src_file, trg_file_path.open("r", encoding="utf-8") as trg_file:
+        for src_line, trg_line in zip(src_file, trg_file):
+            src_line = src_line.strip()
+            trg_line = trg_line.strip()
+            if len(src_line) > 0 and len(trg_line) > 0:
+                sources.append(src_line)
+                targets.append(trg_line)
+    return pd.DataFrame({"source": sources, "target": targets})
 
 
 def read_parallel_text_pairs(src_path: Path, trg_path: Path) -> Optional[Tuple[List[str], List[str]]]:
