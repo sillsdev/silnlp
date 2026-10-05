@@ -233,6 +233,8 @@ class TranslationTask:
             else:
                 src_file_paths = list(p for p in src_path.rglob("*.*") if p.is_file())
 
+            src_training_rows: Optional[List[str]] = None
+            trg_training_rows: Optional[List[str]] = None
             for src_file_path in src_file_paths:
                 if trg_path.is_dir():
                     if src_path.is_file():
@@ -265,8 +267,9 @@ class TranslationTask:
                         src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations, tags
                     )
                 elif ext == ".usfm" or ext == ".sfm":
-                    src_training_rows = list(load_corpus(config.exp_dir / config.train_src_detok_filename()))
-                    trg_training_rows = list(load_corpus(config.exp_dir / config.train_trg_detok_filename()))
+                    if src_training_rows is None or trg_training_rows is None:
+                        src_training_rows = list(load_corpus(config.exp_dir / config.train_src_detok_filename()))
+                        trg_training_rows = list(load_corpus(config.exp_dir / config.train_trg_detok_filename()))
                     translator.translate_usfm(
                         src_file_path,
                         trg_file_path,
