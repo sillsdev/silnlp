@@ -1,8 +1,7 @@
 import re
-from math import exp
+from math import exp, log, nan
 from pathlib import Path
-from statistics import mean
-from typing import Dict, List, Optional, Set
+from typing import Dict, Iterable, List, Optional, Set
 
 from attr import dataclass
 from machine.corpora import ScriptureRef, TextRow, UsfmFileText, UsfmStylesheet, UsfmTextType
@@ -11,22 +10,53 @@ from .postprocessor import PostprocessHandler
 from .utils import NLTKSentenceTokenizer, add_tags_to_sentence
 
 
+@dataclass
+class SequenceConfidence:
+    confidence: float
+    num_tokens: int
+
+
+class TokenWeightedConfidence:
+    """Equivalent to the geometric mean of the token probabilities pooled across all added sequences."""
+
+    def __init__(self) -> None:
+        self._log_prob_sum = 0.0
+        self._num_tokens = 0
+
+    @classmethod
+    def from_sequence_confidences(cls, sequence_confidences: Iterable[SequenceConfidence]) -> "TokenWeightedConfidence":
+        weighted_confidence = cls()
+        for sequence_confidence in sequence_confidences:
+            weighted_confidence.add_sequence(log(sequence_confidence.confidence), sequence_confidence.num_tokens)
+        return weighted_confidence
+
+    def add_sequence(self, mean_token_log_prob: float, num_tokens: int) -> None:
+        self._log_prob_sum += mean_token_log_prob * num_tokens
+        self._num_tokens += num_tokens
+
+    def compute_mean_token_log_prob(self) -> float:
+        if self._num_tokens == 0:
+            return nan
+        return self._log_prob_sum / self._num_tokens
+
+    def compute(self) -> float:
+        return exp(self.compute_mean_token_log_prob())
+
+
 class SentenceTranslation:
+    """``tokens`` and ``token_scores`` hold only generated tokens: no decoder start token and no padding."""
+
     def __init__(
         self,
         translation: str,
         tokens: List[str],
         token_scores: List[float],
         sequence_score: Optional[float],
-        starts_with_special_token: bool = True,
     ):
         self._translation = translation
         self._tokens = tokens
         self._token_scores = token_scores
         self._sequence_score = sequence_score
-        # Seq2seq models emit the forced decoder start/language token as tokens[0]; it must be
-        # excluded from test files. Decoder-only LLM output has no such token.
-        self._starts_with_special_token = starts_with_special_token
 
     @classmethod
     def combine(cls, translations: List["SentenceTranslation"]) -> "SentenceTranslation":
@@ -36,18 +66,13 @@ class SentenceTranslation:
         combined_translation: str = " ".join([t.get_translation() for t in translations])
         combined_tokens: List[str] = [token for t in translations for token in t._tokens]
         combined_token_scores: List[float] = [ts for t in translations for ts in t._token_scores if ts is not None]
-        combined_sequence_score: Optional[float] = (
-            mean([t._sequence_score for t in translations if t.has_sequence_confidence_score()])
-            if all(t.has_sequence_confidence_score() for t in translations)
-            else None
-        )
-        return cls(
-            combined_translation,
-            combined_tokens,
-            combined_token_scores,
-            combined_sequence_score,
-            translations[0]._starts_with_special_token,
-        )
+        combined_sequence_score: Optional[float] = None
+        if all(t.has_sequence_confidence_score() for t in translations):
+            combined_confidence = TokenWeightedConfidence()
+            for translation in translations:
+                translation.add_to_confidence(combined_confidence)
+            combined_sequence_score = combined_confidence.compute_mean_token_log_prob()
+        return cls(combined_translation, combined_tokens, combined_token_scores, combined_sequence_score)
 
     def get_translation(self) -> str:
         return self._translation
@@ -58,9 +83,13 @@ class SentenceTranslation:
     def get_sequence_confidence_score(self) -> Optional[float]:
         return exp(self._sequence_score) if self._sequence_score is not None else None
 
+    def add_to_confidence(self, confidence: TokenWeightedConfidence) -> None:
+        if self._sequence_score is not None:
+            # Decoder-only LLM output stores the whole translation as one token, so only the scores give the count.
+            confidence.add_sequence(self._sequence_score, len(self._token_scores))
+
     def join_tokens_for_test_file(self) -> str:
-        tokens = self._tokens[1:] if self._starts_with_special_token else self._tokens
-        return " ".join([token for token in tokens if token != "<pad>"])
+        return " ".join(self._tokens)
 
     def join_tokens_for_confidence_file(self) -> str:
         return "\t".join(self._tokens)
@@ -145,14 +174,17 @@ class TranslatedDraft:
             return "VRef"
         return "Sequence Number"
 
-    def get_all_sequence_confidence_scores(self, exclude_none_type: bool = False) -> List[Optional[float]]:
-        if exclude_none_type:
-            return [
-                scs
-                for scs in [t.get_sequence_confidence_score() for t in self._sentence_translations]
-                if scs is not None
-            ]
+    def get_all_sequence_confidence_scores(self) -> List[Optional[float]]:
         return [st.get_sequence_confidence_score() for st in self._sentence_translations]
+
+    def compute_confidence(self, sentence_indices: Iterable[int]) -> float:
+        confidence = TokenWeightedConfidence()
+        for sentence_index in sentence_indices:
+            self._sentence_translations[sentence_index].add_to_confidence(confidence)
+        return confidence.compute()
+
+    def compute_overall_confidence(self) -> float:
+        return self.compute_confidence(range(len(self._sentence_translations)))
 
     def get_all_translations(self) -> List[str]:
         return [st.get_translation() for st in self._sentence_translations]

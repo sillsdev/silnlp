@@ -1232,7 +1232,5 @@ class LocalLLMModel(NMTModel):
                         token_scores = valid
                         if len(valid) > 0:
                             sequence_score = sum(valid) / len(valid)
-                    translations.append(
-                        SentenceTranslation(text, [text], token_scores, sequence_score, starts_with_special_token=False)
-                    )
+                    translations.append(SentenceTranslation(text, [text], token_scores, sequence_score))
                 yield SentenceTranslationGroup(translations)

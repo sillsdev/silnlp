@@ -870,11 +870,18 @@ class ModelOutput:
     sequence_score: Optional[float]
 
     def convert_to_sentence_translation(self, tokenizer: PreTrainedTokenizerBase) -> SentenceTranslation:
-        tokens = tokenizer.convert_ids_to_tokens(self.translation_token_ids)
+        token_ids: List[int] = to_py_obj(self.translation_token_ids)
+        token_scores: List[float] = to_py_obj(self.token_scores)
+        # The decoder start token is never generated, and padding only fills out shorter beams.
+        generated_positions = [
+            position
+            for position, token_id in enumerate(token_ids)
+            if position > 0 and token_id != tokenizer.pad_token_id
+        ]
         return SentenceTranslation(
             to_py_obj(self.translated_text),
-            to_py_obj(tokens),
-            to_py_obj(self.token_scores),
+            tokenizer.convert_ids_to_tokens([token_ids[position] for position in generated_positions]),
+            [token_scores[position] for position in generated_positions],
             to_py_obj(self.sequence_score),
         )
 

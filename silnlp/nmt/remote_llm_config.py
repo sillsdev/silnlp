@@ -100,7 +100,6 @@ class Completion:
             [self.text],
             [entry.logprob for entry in self.token_logprobs],
             self.mean_logprob(),
-            starts_with_special_token=False,
         )
 
     def mean_logprob(self) -> Optional[float]:

@@ -21,7 +21,6 @@ from machine.corpora import (
     parse_usfm,
 )
 from machine.scripture import VerseRef, is_book_id_valid
-from scipy.stats import gmean
 
 from silnlp.common.utils import add_tags_to_sentence
 from silnlp.nmt.corpora import CorpusPair
@@ -30,7 +29,13 @@ from .corpus import load_corpus, write_corpus
 from .environment import SilNlpEnv
 from .paratext import get_book_path, get_iso, get_parent_project_dir
 from .postprocessor import NoDetectedQuoteConventionException, PostprocessHandler, UnknownQuoteConventionException
-from .translation_data_structures import DraftGroup, SentenceTranslationGroup, TranslatedDraft, UsfmTextRowCollection
+from .translation_data_structures import (
+    DraftGroup,
+    SentenceTranslationGroup,
+    SequenceConfidence,
+    TranslatedDraft,
+    UsfmTextRowCollection,
+)
 from .utils import NLTKSentenceTokenizer
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
@@ -151,16 +156,25 @@ class UsfmConfidenceFile(ConfidenceFile[VerseRef]):
     def write_chapter_confidence_scores_to_file(
         self, translated_draft: TranslatedDraft, scripture_refs: List[ScriptureRef]
     ) -> None:
-        chapter_confidences: DefaultDict[int, List[float]] = defaultdict(list)
-        for vref, confidence in zip(scripture_refs, translated_draft.get_all_sequence_confidence_scores()):
-            if not vref.is_verse or confidence is None:
-                continue
-            chapter_confidences[vref.chapter_num].append(confidence)
+        chapter_sentence_indices: DefaultDict[int, List[int]] = defaultdict(list)
+        for sentence_index in self._get_scored_verse_indices(translated_draft, scripture_refs):
+            chapter_sentence_indices[scripture_refs[sentence_index].chapter_num].append(sentence_index)
         with self.get_chapters_path().open("w", encoding="utf-8", newline="\n") as chapter_confidences_file:
             chapter_confidences_file.write("Chapter\tConfidence\n")
-            for chapter, confidences in chapter_confidences.items():
-                chapter_confidence = gmean(confidences)
+            for chapter, sentence_indices in chapter_sentence_indices.items():
+                chapter_confidence = translated_draft.compute_confidence(sentence_indices)
                 chapter_confidences_file.write(f"{chapter}\t{chapter_confidence}\n")
+
+    def _get_scored_verse_indices(
+        self, translated_draft: TranslatedDraft, scripture_refs: List[ScriptureRef]
+    ) -> List[int]:
+        return [
+            sentence_index
+            for sentence_index, (vref, confidence) in enumerate(
+                zip(scripture_refs, translated_draft.get_all_sequence_confidence_scores())
+            )
+            if vref.is_verse and confidence is not None
+        ]
 
     def chapter_confidence_iterator(self) -> Generator[Tuple[int, float], None, None]:
         with open(self.get_chapters_path(), "r", encoding="utf-8") as f:
@@ -178,14 +192,10 @@ class UsfmConfidenceFile(ConfidenceFile[VerseRef]):
     def write_book_confidence_score_to_file(
         self, translated_draft: TranslatedDraft, scripture_refs: List[ScriptureRef]
     ) -> None:
-        book_confidences: List[float] = []
-        for vref, confidence in zip(scripture_refs, translated_draft.get_all_sequence_confidence_scores()):
-            if not vref.is_verse or confidence is None:
-                continue
-            book_confidences.append(confidence)
-
         current_book = scripture_refs[0].book
-        self._book_confidences[current_book] = gmean(book_confidences)
+        self._book_confidences[current_book] = translated_draft.compute_confidence(
+            self._get_scored_verse_indices(translated_draft, scripture_refs)
+        )
         with self.get_books_path().open("w", encoding="utf-8", newline="\n") as book_confidences_file:
             book_confidences_file.write("Book\tConfidence\n")
             for book, confidence in self._book_confidences.items():
@@ -230,9 +240,7 @@ class TxtConfidenceFile(ConfidenceFile[int]):
             for file_stem, confidence in self.file_confidence_iterator():
                 existing_files[file_stem] = confidence
 
-        existing_files[self._trg_draft_file_path.stem] = gmean(
-            translated_draft.get_all_sequence_confidence_scores(exclude_none_type=True)
-        )
+        existing_files[self._trg_draft_file_path.stem] = translated_draft.compute_overall_confidence()
         with self.get_files_path().open("w", encoding="utf-8", newline="\n") as file_confidences_file:
             file_confidences_file.write("File\tConfidence\n")
             for file_stem, confidence in existing_files.items():
@@ -267,9 +275,13 @@ class TestConfidenceFile(ConfidenceFile[int]):
     def exists(self) -> bool:
         return self._path.is_file()
 
-    def get_sequence_confidences(self) -> List[float]:
+    def get_sequence_confidences(self) -> List[SequenceConfidence]:
+        sequence_confidences: List[SequenceConfidence] = []
         with self._path.open("r", encoding="utf-8") as confidences_file:
-            return [float(line.split("\t")[0]) for line in list(confidences_file)[3::2]]
+            for line in list(confidences_file)[3::2]:
+                sequence_score, *token_scores = line.rstrip("\n").split("\t")
+                sequence_confidences.append(SequenceConfidence(float(sequence_score), len(token_scores)))
+        return sequence_confidences
 
 
 def generate_confidence_files(

@@ -130,6 +130,9 @@ def check_confidences(exp_dir: Path):
         score_row = rows[3 + 2 * sentence_index]
         assert token_row[0] == str(sentence_index + 1)
         assert float(score_row[0]) == expected_confidence(sentence_index)
+        # Only generated tokens are stored, so the decoder start token is left out and every token has a score.
+        assert token_row[1] == "spa_Latn"
+        assert len(score_row) == len(token_row)
 
 
 def check_scores(exp_dir: Path):
@@ -147,7 +150,8 @@ def check_scores(exp_dir: Path):
         assert 0 <= float(overall_score[scorer]) <= 100
     assert float(overall_score["TER"]) >= 0
 
-    # The overall confidence is the geometric mean of the sentence confidences
+    # Every sentence has the same tokens, so the token-weighted overall confidence is the geometric mean
+    # of the sentence confidences.
     expected_overall_confidence = math.exp(
         sum(mock_sequence_log_prob(sentence_index) for sentence_index in range(TEST_SIZE)) / TEST_SIZE
     )

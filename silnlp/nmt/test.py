@@ -10,10 +10,10 @@ from typing import Dict, List, Optional, Set, TextIO, Tuple
 import sacrebleu
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_id, get_chapters
 from sacrebleu.metrics import BLEUScore
-from scipy.stats import gmean
 
 from ..common.environment import SilNlpEnv
 from ..common.linear_regression import perform_enhanced_linear_regression
+from ..common.translation_data_structures import SequenceConfidence, TokenWeightedConfidence
 from ..common.translator import CONFIDENCE_SUFFIX, TestConfidenceFile
 from ..common.utils import get_git_revision_hash
 from .clearml_connection import TAGS_LIST, SILClearML
@@ -118,7 +118,7 @@ def score_pair(
     src_iso: str,
     trg_iso: str,
     predictions_detok_file_name: str,
-    pair_confs: Optional[List[float]],
+    pair_confs: Optional[List[SequenceConfidence]],
     scorers: Set[str],
     config: Config,
     ref_projects: Set[str],
@@ -223,7 +223,9 @@ def score_pair(
             other_scores["TER"] = ter_score.score
 
     if "confidence" in scorers:
-        other_scores["Confidence"] = None if pair_confs is None else gmean(pair_confs)
+        other_scores["Confidence"] = (
+            None if pair_confs is None else TokenWeightedConfidence.from_sequence_confidences(pair_confs).compute()
+        )
 
     if book == "ALL":
         write_pair_verse_scores(
@@ -249,7 +251,7 @@ def write_pair_verse_scores(
     scorers: Set[str],
     other_scores: Dict[str, Optional[float]],
     config: Config,
-    confidences: Optional[List[float]],
+    confidences: Optional[List[SequenceConfidence]],
     linregress_file_name: Optional[str] = None,
 ) -> None:
     scorers = scorers.intersection(SUPPORTED_SENTENCE_SCORERS)
@@ -318,7 +320,7 @@ def write_pair_verse_scores(
                     other_verse_scores["TER"] = ter_verse_score.score
 
             if "confidence" in scorers and confidences is not None:
-                other_verse_scores["Confidence"] = confidences[index]
+                other_verse_scores["Confidence"] = confidences[index].confidence
 
             if compute_linregress:
                 linregress_chrf3_scores.append(other_verse_scores["chrF3"])
@@ -380,7 +382,7 @@ def get_linregress_file_name(
 
 
 def score_individual_books(
-    book_dict: Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]]]],
+    book_dict: Dict[str, Tuple[List[str], List[List[str]], Optional[List[SequenceConfidence]]]],
     src_iso: str,
     trg_iso: str,
     predictions_detok_file_name: str,
@@ -420,12 +422,12 @@ def process_individual_books(
     pred_file_path: Path,
     ref_file_paths: List[Path],
     vref_file_path: Path,
-    confidences: Optional[List[float]],
+    confidences: Optional[List[SequenceConfidence]],
     select_rand_ref_line: bool,
     books: Dict[int, List[int]],
-) -> Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]]]]:
+) -> Dict[str, Tuple[List[str], List[List[str]], Optional[List[SequenceConfidence]]]]:
     # Output data structure
-    book_dict: Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]]]] = {}
+    book_dict: Dict[str, Tuple[List[str], List[List[str]], Optional[List[SequenceConfidence]]]] = {}
     with ExitStack() as stack:
         # Get all references
         ref_files: List[TextIO] = []
@@ -488,12 +490,12 @@ def load_test_data(
 ) -> Tuple[
     List[str],
     List[List[str]],
-    Optional[List[float]],
-    Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]]]],
+    Optional[List[SequenceConfidence]],
+    Dict[str, Tuple[List[str], List[List[str]], Optional[List[SequenceConfidence]]]],
 ]:
     sys: List[str] = []
     refs: List[List[str]] = []
-    book_dict: Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]]]] = {}
+    book_dict: Dict[str, Tuple[List[str], List[List[str]], Optional[List[SequenceConfidence]]]] = {}
     pred_file_path = config.exp_dir / pred_file_name
     kept_line_indices: List[int] = []
     with ExitStack() as stack:
