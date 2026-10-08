@@ -15,6 +15,7 @@ WORKDIR /root
 RUN apt-get update
 RUN apt-get upgrade -y
 RUN apt-get install --no-install-recommends -y \
+    ca-certificates \
     git \
     python$PYTHON_VERSION \
     python3-dev \
