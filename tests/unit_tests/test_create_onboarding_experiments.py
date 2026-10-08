@@ -1360,7 +1360,7 @@ def test_submit_experiments(monkeypatch, capsys, tmp_path: Path):
 
     submit_experiments([experiment], tmp_path, submit=False)
     output = capsys.readouterr().out
-    assert f"poetry run python {' '.join(EXPERIMENT_ARGS)} Country/Lang/NIV11R_sdl_1" in output
+    assert f"uv run python {' '.join(EXPERIMENT_ARGS)} Country/Lang/NIV11R_sdl_1" in output
     assert calls == []
 
     submit_experiments([experiment], tmp_path, submit=True)

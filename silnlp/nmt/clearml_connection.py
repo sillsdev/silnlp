@@ -64,16 +64,6 @@ class SILClearML:
                     "--env SIL_NLP_DATA_PATH=/root/M",
                 ],
                 docker_setup_bash_script=[
-                    "apt install -y python3-venv",
-                    "python3 -m pip install --user pipx",
-                    "PATH=$PATH:/root/.local/bin",
-                    "pipx install poetry==2.4.1",
-                    # update config.toml and pyvenv.cfg to give poetry environment access to system site packages
-                    "poetry config virtualenvs.options.system-site-packages true",
-                    (
-                        "sed -i 's/include-system-site-packages = .*/include-system-site-packages = true/' "
-                        "/root/.local/share/pipx/venvs/poetry/pyvenv.cfg"
-                    ),
                     # automatically connect to the MinIO bucket
                     "apt-get install --no-install-recommends -y fuse3 rclone",
                     "mkdir -p /root/M",

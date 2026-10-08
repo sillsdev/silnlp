@@ -1,32 +1,11 @@
 ARG PYTHON_VERSION=3.12
-ARG POETRY_VERSION=2.4.1
-
-FROM python:$PYTHON_VERSION-slim AS builder
-ARG POETRY_VERSION
-
-ENV POETRY_HOME=/opt/poetry
-ENV POETRY_VENV=/opt/poetry-venv
-ENV POETRY_CACHE_DIR=/opt/.cache
-
-# Install poetry separated from system interpreter
-RUN python3 -m venv $POETRY_VENV \
-    && $POETRY_VENV/bin/pip install -U pip setuptools \
-    && $POETRY_VENV/bin/pip install poetry==${POETRY_VERSION} poetry-plugin-export
-
-# Add `poetry` to PATH
-ENV PATH="${PATH}:${POETRY_VENV}/bin"
-
-WORKDIR /src
-COPY poetry.lock pyproject.toml /src/
-RUN poetry export --without-hashes -f requirements.txt > requirements.txt
-COPY . /src
-RUN poetry build
 
 FROM ubuntu:24.04
 
 ARG PYTHON_VERSION=3.12
 
-ENV PIP_DISABLE_PIP_VERSION_CHECK=on
+COPY --from=ghcr.io/astral-sh/uv:0.12.23 /uv /uvx /bin/
+
 ENV TZ=America/New_York
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
@@ -38,7 +17,6 @@ RUN apt-get upgrade -y
 RUN apt-get install --no-install-recommends -y \
     git \
     python$PYTHON_VERSION \
-    python3-pip \
     python3-dev \
     wget \
     build-essential \
@@ -55,13 +33,17 @@ RUN apt-get install --no-install-recommends -y \
 RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
     ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python
 
-# Install dependencies from poetry
-COPY --from=builder /src/requirements.txt .
-RUN sed -i '/^wheel==/d' requirements.txt \
-    && pip install --break-system-packages -r requirements.txt \
+# Install locked runtime dependencies
+WORKDIR /tmp/silnlp
+COPY pyproject.toml uv.lock ./
+# Hashes keep the cross-index lookup safe for the CUDA-specific torch wheel.
+RUN uv export --locked --no-dev --no-emit-project --emit-index-url --format requirements-txt --output-file requirements.txt \
+    && uv pip install --system --break-system-packages --index-strategy unsafe-best-match --require-hashes \
+        --requirements requirements.txt \
     && rm requirements.txt
 
 # Install fast_align
+WORKDIR /root
 RUN apt-get update && \
     apt-get install --no-install-recommends -y libgoogle-perftools-dev libsparsehash-dev
 RUN git clone https://github.com/clab/fast_align.git
