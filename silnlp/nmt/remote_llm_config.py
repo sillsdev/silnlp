@@ -341,7 +341,7 @@ class LiteLLMCompletionClient(CompletionClient):
         except ImportError as e:
             raise ImportError(
                 "Remote LLM experiments require the 'litellm' package, which is part of the "
-                "'llm' extra. Install it with `poetry install -E llm`."
+                "'llm' extra. Install it with `uv sync --extra llm`."
             ) from e
         # Its feedback banner, printed on every failure, buries the warnings that say what failed.
         litellm.suppress_debug_info = True
