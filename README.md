@@ -258,6 +258,16 @@ Follow the instructions below to set up a Dev Container in VS Code. This is the 
 
 To get back into the dev container and poetry environment each subsequent time, open the silnlp folder in VS Code, select the "Reopen in Container" option from the Remote Connection menu (bottom left corner), and use the `poetry env activate` command in the terminal.
 
+## Adding a Script
+Build a script's command-line parser with `SilnlpArgumentParser` from `silnlp.common.argument_parser` instead of `argparse.ArgumentParser`. It parses arguments exactly as argparse does, and also lets tools such as a web front end read the script's options:
+
+```
+python -m silnlp.nmt.experiment --describe-json -          # one script's options, as JSON
+python -m silnlp.common.describe_scripts                    # every script, one JSON object per line
+```
+
+A unit test fails if a module in `silnlp` builds a plain `ArgumentParser`.
+
 ## Setting Up and Running Experiments
 See the [wiki](../../wiki) for information on setting up and running experiments. The most important pages for getting started are the ones on [file structure](../../wiki/File-conventions-and-cleanup), [model configuration](../../wiki/Configure-a-model), and [running experiments](../../wiki/NMT:-Usage). A lot of the instructions are specific to NMT, but are still helpful starting points for doing other things like [alignment](../../wiki/Alignment:-Usage).
 
