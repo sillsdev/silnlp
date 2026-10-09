@@ -1,4 +1,5 @@
 import json
+import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -24,6 +25,7 @@ from silnlp.nmt.example_retrieval import (
     TargetLanguageProfile,
     TextExampleFormatter,
     TfidfExampleRetriever,
+    TranslationMemory,
     XmlExampleFormatter,
 )
 
@@ -571,26 +573,32 @@ def test_tfidf_and_bm25_agree_on_what_counts_as_a_word():
     assert tfidf[0] == bm25[0] == 1
 
 
-_SHEPHERD_SOURCES = [
-    "the shepherd counted his sheep in the green field",
-    "the shepherd counted his sheep in the green field again",
-    "the shepherd counted all his sheep in the green field",
-    "fishermen mended nets",
-    "a woman drew water from the well",
-]
-_SHEPHERD_QUERY = "the shepherd counted his sheep in the green field while fishermen mended nets"
+@pytest.fixture
+def coverage_sources() -> list:
+    return [
+        "the shepherd counted his sheep in the green field",
+        "the shepherd counted his sheep in the green field again",
+        "the shepherd counted all his sheep in the green field",
+        "fishermen mended nets",
+        "a woman drew water from the well",
+    ]
 
 
-def test_coverage_retriever_prefers_an_uncovered_clause_to_a_near_duplicate():
-    retriever = _fitted(CoverageExampleRetriever(), _SHEPHERD_SOURCES)
+@pytest.fixture
+def coverage_query() -> str:
+    return "the shepherd counted his sheep in the green field while fishermen mended nets"
+
+
+def test_coverage_retriever_prefers_an_uncovered_clause_to_a_near_duplicate(coverage_sources, coverage_query):
+    retriever = _fitted(CoverageExampleRetriever(), coverage_sources)
     # Ranked by similarity, the second shepherd sentence (2) is closer to the query than the fishermen one (3).
-    assert retriever.rank(_SHEPHERD_QUERY, k=3) == [0, 2, 3]
+    assert retriever.rank(coverage_query, k=3) == [0, 2, 3]
     # Asked for two, it takes the fishermen sentence, which shows a part of the query that the first does not.
-    assert retriever.rank(_SHEPHERD_QUERY, k=2) == [0, 3]
+    assert retriever.rank(coverage_query, k=2) == [0, 3]
 
 
-def test_coverage_retriever_keeps_the_closest_example():
-    assert _fitted(CoverageExampleRetriever(), _SHEPHERD_SOURCES).rank(_SHEPHERD_QUERY, k=1) == [0]
+def test_coverage_retriever_keeps_the_closest_example(coverage_sources, coverage_query):
+    assert _fitted(CoverageExampleRetriever(), coverage_sources).rank(coverage_query, k=1) == [0]
 
 
 def test_coverage_retriever_chooses_a_repeated_pair_only_once():
@@ -608,10 +616,24 @@ def test_coverage_retriever_keeps_a_repeated_source_with_a_different_target():
     assert sorted(retriever.rank("apple pie", k=2)) == [0, 1]
 
 
-def test_coverage_retriever_rank_excluding_leaves_out_its_own_position():
-    ranked = _fitted(CoverageExampleRetriever(), _SHEPHERD_SOURCES).rank_excluding(_SHEPHERD_SOURCES[0], 0, k=2)
+def test_coverage_retriever_rank_excluding_leaves_out_its_own_position(coverage_sources):
+    ranked = _fitted(CoverageExampleRetriever(), coverage_sources).rank_excluding(coverage_sources[0], 0, k=2)
     assert len(ranked) == 2
     assert 0 not in ranked
+
+
+def test_coverage_retriever_rank_excluding_leaves_out_copies_of_the_excluded_pair():
+    retriever = CoverageExampleRetriever()
+    retriever.fit(_examples(("apple pie", "tarte"), ("apple pie", "tarte"), ("banana split", "banane")))
+
+    assert retriever.rank_excluding("apple pie", 0, k=2) == [2]
+
+
+def test_coverage_retriever_rank_excluding_finds_nothing_when_every_other_pair_is_a_copy():
+    retriever = CoverageExampleRetriever()
+    retriever.fit(_examples(("apple pie", "tarte"), ("apple pie", "tarte")))
+
+    assert retriever.rank_excluding("apple pie", 0, k=1) == []
 
 
 def test_coverage_retriever_matches_a_script_written_without_spaces():
@@ -632,11 +654,11 @@ def test_create_example_retriever_knows_coverage():
     assert isinstance(ExampleRetrieverFactory.create("coverage"), CoverageExampleRetriever)
 
 
-def test_example_pool_puts_the_closest_coverage_choice_last(tmp_path):
+def test_example_pool_puts_the_closest_coverage_choice_last(tmp_path, coverage_sources, coverage_query):
     pool = _write_pool(
-        tmp_path, _SHEPHERD_SOURCES, [str(i) for i in range(len(_SHEPHERD_SOURCES))], CoverageExampleRetriever()
+        tmp_path, coverage_sources, [str(i) for i in range(len(coverage_sources))], CoverageExampleRetriever()
     )
-    assert [ex.target for ex in pool.select(_SHEPHERD_QUERY, k=2)] == ["3", "0"]
+    assert [ex.target for ex in pool.select(coverage_query, k=2)] == ["3", "0"]
 
 
 def test_text_formatter_separates_examples_without_a_trailing_separator():
@@ -652,7 +674,7 @@ def test_text_formatter_escapes_markup_in_the_examples_and_the_source_when_asked
 
 
 def test_text_formatter_leaves_quotes_and_apostrophes_alone_when_escaping():
-    assert TextExampleFormatter("{source}", escape=True).format_source("ŋa'a \"x\"") == "ŋa'a \"x\""
+    assert TextExampleFormatter("{source}", escape=True).format_source('ŋa\'a "x"') == 'ŋa\'a "x"'
 
 
 def test_text_formatter_escapes_nothing_by_default():
@@ -675,6 +697,27 @@ def test_target_profile_tells_attested_text_from_an_aside():
 
 def test_target_profile_scores_text_too_short_for_a_trigram_as_unattested():
     assert TargetLanguageProfile(["sea la luz"]).resemblance("se") == 0.0
+
+
+def test_translation_memory_finds_the_translation_of_an_identical_source():
+    examples = _examples(("let there be light", "sea la luz"), ("in the beginning", "en el principio"))
+    memory = TranslationMemory(examples, random.Random(0))
+
+    assert memory.translate(" let there be light ") == "sea la luz"
+    assert memory.translate("let there be more light") is None
+
+
+def test_translation_memory_picks_any_of_the_translations_of_a_source_translated_two_ways():
+    examples = _examples(("amen", "amén"), ("amen", "así sea"))
+    picks = {TranslationMemory(examples, random.Random(seed)).translate("amen") for seed in range(20)}
+    assert picks == {"amén", "así sea"}
+
+
+def test_translation_memory_ignores_a_pair_with_a_blank_side():
+    memory = TranslationMemory(_examples(("", "sea la luz"), ("let there be light", " ")), random.Random(0))
+
+    assert memory.translate("") is None
+    assert memory.translate("let there be light") is None
 
 
 def test_example_pool_profiles_its_target_side(tmp_path):

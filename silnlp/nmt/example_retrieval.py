@@ -3,11 +3,12 @@
 
 import json
 import logging
+import random
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Protocol, Sequence, Set, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Protocol, Sequence, Set, Tuple, Union
 from xml.sax.saxutils import escape as xml_escape
 
 import numpy as np
@@ -297,15 +298,18 @@ class CoverageExampleRetriever(ExampleRetriever):
             return []
         if vector.nnz == 0:
             return ranked[:k].tolist()
-        candidates = self._distinct_candidates(ranked, k)
+        candidates = self._distinct_candidates(ranked, k, None if exclude is None else self._examples[exclude])
+        if len(candidates) == 0:
+            return []
         chosen = self._choose_for_coverage(vector, self._matrix[candidates], similarities[candidates], k)
         # Ties are broken by position so that the same corpus always yields the same prompt.
         return sorted((int(candidates[i]) for i in chosen), key=lambda i: (similarities[i], i), reverse=True)
 
-    def _distinct_candidates(self, ranked: np.ndarray, k: int) -> np.ndarray:
+    def _distinct_candidates(self, ranked: np.ndarray, k: int, excluded: Optional[Example]) -> np.ndarray:
         limit = max(self._CANDIDATE_MULTIPLE * k, self._MIN_CANDIDATES)
         candidates: List[int] = []
-        seen = set()
+        # A copy of the excluded example would show the answer to the row it is excluded for.
+        seen = set() if excluded is None else {excluded}
         for index in ranked:
             example = self._examples[index]
             if example not in seen:
@@ -470,6 +474,21 @@ class TargetLanguageProfile:
         return [text[i : i + 3] for i in range(len(text) - 2)]
 
 
+class TranslationMemory:
+    """A record of existing team translations, used to avoid queries for already-translated text"""
+
+    def __init__(self, examples: Iterable[Example], rng: random.Random) -> None:
+        targets: Dict[str, List[str]] = {}
+        for example in examples:
+            if example.source.strip() != "" and example.target.strip() != "":
+                targets.setdefault(example.source.strip(), []).append(example.target.strip())
+        # Drawn from every occurrence, so that a more common translation is likelier to be picked.
+        self._translations = {source: rng.choice(found) for source, found in targets.items()}
+
+    def translate(self, source: str) -> Optional[str]:
+        return self._translations.get(source.strip())
+
+
 @dataclass(frozen=True)
 class CorpusPair:
     """The source and target files of one parallel corpus."""
@@ -568,6 +587,9 @@ class ExamplePool:
 
     def create_target_language_profile(self) -> "TargetLanguageProfile":
         return TargetLanguageProfile(example.target for example in self.all_examples())
+
+    def create_translation_memory(self, rng: random.Random) -> "TranslationMemory":
+        return TranslationMemory(self.all_examples(), rng)
 
     def get_retriever(self) -> ExampleRetriever:
         with self._lock:

@@ -13,20 +13,24 @@ from silnlp.nmt.config import Language
 from silnlp.nmt.config_utils import is_local_llm_config, is_remote_llm_config
 from silnlp.nmt.example_retrieval import Example, TargetLanguageProfile
 from silnlp.nmt.remote_llm_config import (
+    BatchReplyReader,
+    CodeFenceRemover,
     Completion,
     CompletionClient,
     CompletionClientFactory,
     CompletionSettings,
+    LiteLLMCompletionClient,
+    LiteLLMResponse,
     RemoteLLMConfig,
     RemoteLLMModel,
+    ReplyReusingClient,
     RetryingCompletionClient,
     RetryPolicy,
     SavedReplies,
+    SingleReplyReader,
     TokenLogprob,
+    TranslationLabelRemover,
     UsageTotals,
-    LiteLLMCompletionClient,
-    LiteLLMResponse,
-    ModelReply,
 )
 
 EN = Language("en", "English")
@@ -54,76 +58,121 @@ def test_an_remote_llm_config_is_not_claimed_by_the_llm_dispatch():
 # --- response parsing -------------------------------------------------------------------
 
 
-def test_parse_numbered_response_reads_one_translation_per_line():
-    assert ModelReply("1. uno\n2. dos\n3. tres").parse(3) == ["uno", "dos", "tres"]
+def test_batch_reply_reader_reads_one_translation_per_line():
+    assert BatchReplyReader(3).read("1. uno\n2. dos\n3. tres") == ["uno", "dos", "tres"]
 
 
-@pytest.mark.parametrize("delimiter", [".", ")", ":", "]"])
-def test_parse_numbered_response_accepts_common_delimiters(delimiter: str):
-    assert ModelReply(f"1{delimiter} uno\n2{delimiter} dos").parse(2) == ["uno", "dos"]
+def test_batch_reply_reader_accepts_numbers_followed_by_a_parenthesis():
+    assert BatchReplyReader(2).read("1) uno\n2) dos") == ["uno", "dos"]
 
 
-def test_parse_numbered_response_ignores_preamble_and_reorders():
-    assert ModelReply("Certainly! Here you go:\n\n2. dos\n1. uno").parse(2) == ["uno", "dos"]
+def test_batch_reply_reader_accepts_numbers_followed_by_a_colon():
+    assert BatchReplyReader(2).read("1: uno\n2: dos") == ["uno", "dos"]
 
 
-def test_parse_numbered_response_strips_code_fences():
-    assert ModelReply("```text\n1. uno\n2. dos\n```").parse(2) == ["uno", "dos"]
+def test_batch_reply_reader_accepts_numbers_followed_by_a_bracket():
+    assert BatchReplyReader(2).read("1] uno\n2] dos") == ["uno", "dos"]
 
 
-def test_parse_numbered_response_treats_unnumbered_lines_as_continuations():
-    assert ModelReply("1. uno\nand more\n2. dos").parse(2) == ["uno and more", "dos"]
+def test_batch_reply_reader_ignores_preamble_and_reorders():
+    assert BatchReplyReader(2).read("Certainly! Here you go:\n\n2. dos\n1. uno") == ["uno", "dos"]
 
 
-def test_parse_numbered_response_rejects_a_miscount():
-    assert ModelReply("1. uno\n2. dos").parse(3) is None
-    assert ModelReply("1. uno\n2. dos\n3. tres").parse(2) is None
+def test_batch_reply_reader_strips_code_fences():
+    assert BatchReplyReader(2).read("```text\n1. uno\n2. dos\n```") == ["uno", "dos"]
 
 
-def test_parse_numbered_response_rejects_gaps_and_duplicates():
-    assert ModelReply("1. uno\n3. tres").parse(2) is None
-    assert ModelReply("1. uno\n1. otro").parse(2) is None
+def test_batch_reply_reader_treats_unnumbered_lines_as_continuations():
+    assert BatchReplyReader(2).read("1. uno\nand more\n2. dos") == ["uno and more", "dos"]
 
 
-def test_parse_numbered_response_rejects_unnumbered_prose():
-    assert ModelReply("uno dos tres").parse(3) is None
+def test_batch_reply_reader_rejects_a_miscount():
+    assert BatchReplyReader(3).read("1. uno\n2. dos") is None
+    assert BatchReplyReader(2).read("1. uno\n2. dos\n3. tres") is None
 
 
-def test_strip_code_fence_leaves_unfenced_text_alone():
-    assert ModelReply("plain text").strip_code_fence() == "plain text"
-    assert ModelReply("```\nfenced\n```").strip_code_fence() == "fenced"
+def test_batch_reply_reader_rejects_gaps_and_duplicates():
+    assert BatchReplyReader(2).read("1. uno\n3. tres") is None
+    assert BatchReplyReader(2).read("1. uno\n1. otro") is None
 
 
-SPANISH = TargetLanguageProfile(["en el principio creó Dios los cielos y la tierra", "sea la luz"])
+def test_batch_reply_reader_rejects_unnumbered_prose():
+    assert BatchReplyReader(3).read("uno dos tres") is None
 
 
-@pytest.mark.parametrize("label", ["Spanish:", "SPANISH -", "Translation:", "Target:", "Output:", "Answer:"])
-def test_single_translation_strips_a_leading_label(label: str):
-    assert ModelReply(f"{label} sea la luz").single_translation("Spanish", SPANISH) == "sea la luz"
+def test_batch_reply_reader_rejects_a_blank_entry():
+    assert BatchReplyReader(3).read("1. uno\n2.\n3. tres") is None
 
 
-def test_single_translation_keeps_the_line_most_like_the_target_corpus():
-    reply = "Here is the translation of the verse:\n\nsea la luz"
-    assert ModelReply(reply).single_translation("Spanish", SPANISH) == "sea la luz"
+def test_code_fence_leaves_unfenced_text_alone():
+    assert CodeFenceRemover().remove_from("plain text") == "plain text"
+    assert CodeFenceRemover().remove_from("```\nfenced\n```") == "fenced"
 
 
-def test_single_translation_strips_code_fences_and_backticks():
-    assert ModelReply("```text\nsea la luz\n```").single_translation("Spanish", SPANISH) == "sea la luz"
-    assert ModelReply("`sea la luz`").single_translation("Spanish", SPANISH) == "sea la luz"
+def test_translation_label_naming_the_target_language_is_removed():
+    assert TranslationLabelRemover("Spanish").remove_from("Spanish: sea la luz") == "sea la luz"
 
 
-def test_single_translation_keeps_quotation_marks_and_apostrophes():
+def test_translation_label_is_removed_whatever_its_case_and_when_a_dash_follows_it():
+    assert TranslationLabelRemover("Spanish").remove_from("SPANISH - sea la luz") == "sea la luz"
+
+
+def test_translation_label_saying_translation_is_removed():
+    assert TranslationLabelRemover("Spanish").remove_from("Translation: sea la luz") == "sea la luz"
+
+
+def test_translation_label_saying_target_is_removed():
+    assert TranslationLabelRemover("Spanish").remove_from("Target: sea la luz") == "sea la luz"
+
+
+def test_translation_label_saying_output_is_removed():
+    assert TranslationLabelRemover("Spanish").remove_from("Output: sea la luz") == "sea la luz"
+
+
+def test_translation_label_saying_answer_is_removed():
+    assert TranslationLabelRemover("Spanish").remove_from("Answer: sea la luz") == "sea la luz"
+
+
+def test_translation_label_leaves_a_leading_dash_when_the_language_has_no_name():
+    assert TranslationLabelRemover("").remove_from("- sea la luz") == "- sea la luz"
+
+
+@pytest.fixture
+def spanish() -> TargetLanguageProfile:
+    return TargetLanguageProfile(["en el principio creó Dios los cielos y la tierra", "sea la luz"])
+
+
+@pytest.fixture
+def spanish_reader(spanish: TargetLanguageProfile) -> SingleReplyReader:
+    return SingleReplyReader(TranslationLabelRemover("Spanish"), spanish)
+
+
+def test_single_reply_reader_strips_a_leading_label(spanish_reader: SingleReplyReader):
+    assert spanish_reader.read("Spanish: sea la luz") == "sea la luz"
+
+
+def test_single_reply_reader_keeps_the_line_most_like_the_target_corpus(spanish_reader: SingleReplyReader):
+    assert spanish_reader.read("Here is the translation of the verse:\n\nsea la luz") == "sea la luz"
+
+
+def test_single_reply_reader_without_a_target_corpus_skips_a_leading_aside():
+    reader = SingleReplyReader(TranslationLabelRemover("Spanish"), TargetLanguageProfile([]))
+    assert reader.read("Here is the translation of the verse:\n\nsea la luz") == "sea la luz"
+
+
+def test_single_reply_reader_strips_code_fences_and_backticks(spanish_reader: SingleReplyReader):
+    assert spanish_reader.read("```text\nsea la luz\n```") == "sea la luz"
+    assert spanish_reader.read("`sea la luz`") == "sea la luz"
+
+
+def test_single_reply_reader_keeps_quotation_marks_and_apostrophes(spanish_reader: SingleReplyReader):
     # A verse can open and close with a quotation mark, and an apostrophe is a letter in some orthographies.
-    reply = "\"ŋa'a sea la luz.\""
-    assert ModelReply(reply).single_translation("Spanish", SPANISH) == reply
+    reply = '"ŋa\'a sea la luz."'
+    assert spanish_reader.read(reply) == reply
 
 
-def test_single_translation_keeps_a_leading_dash_when_the_language_has_no_name():
-    assert ModelReply("- sea la luz").single_translation("", SPANISH) == "- sea la luz"
-
-
-def test_single_translation_of_an_empty_reply_is_empty():
-    assert ModelReply("  \n ").single_translation("Spanish", SPANISH) == ""
+def test_single_reply_reader_of_an_empty_reply_is_empty(spanish_reader: SingleReplyReader):
+    assert spanish_reader.read("  \n ") == ""
 
 
 # --- batching ---------------------------------------------------------------------------
@@ -158,6 +207,7 @@ def test_config_defaults(tmp_path: Path):
     assert config.get_infer_batch_size() == 1
     assert config.infer["num_retries"] == 8
     assert config.infer["reuse_saved_replies"] is True
+    assert config.infer["copy_exact_matches"] is True
     # The hosted model tokenizes for itself, so preprocessing writes raw text.
     assert config.data["tokenize"] is False
     assert config.model_dir == tmp_path / "run"
@@ -168,19 +218,29 @@ def test_config_requires_a_model(tmp_path: Path):
         RemoteLLMConfig(tmp_path, {"model_type": "remote_llm", "model": "", "data": {"corpus_pairs": []}}, Mock())
 
 
-@pytest.mark.parametrize(
-    "infer, message",
-    [
-        ({"prompt": {"example_selection": {"method": "embeddings"}}}, "Unknown example_selection.method"),
-        ({"infer_batch_size": 0}, "infer.get_infer_batch_size()"),
-        ({"num_drafts": 0}, "infer.num_drafts"),
-        ({"concurrency": 0}, "infer.concurrency"),
-        ({"prompt": {"num_examples": -1}}, "num_examples"),
-    ],
-)
-def test_config_validation(tmp_path: Path, infer: dict, message: str):
-    with pytest.raises(ValueError, match=message):
-        make_config(tmp_path, infer=infer)
+def test_config_rejects_an_unknown_example_selection_method(tmp_path: Path):
+    with pytest.raises(ValueError, match="Unknown example_selection.method"):
+        make_config(tmp_path, infer={"prompt": {"example_selection": {"method": "embeddings"}}})
+
+
+def test_config_rejects_a_batch_size_below_one(tmp_path: Path):
+    with pytest.raises(ValueError, match="infer.get_infer_batch_size()"):
+        make_config(tmp_path, infer={"infer_batch_size": 0})
+
+
+def test_config_rejects_fewer_than_one_draft(tmp_path: Path):
+    with pytest.raises(ValueError, match="infer.num_drafts"):
+        make_config(tmp_path, infer={"num_drafts": 0})
+
+
+def test_config_rejects_a_concurrency_below_one(tmp_path: Path):
+    with pytest.raises(ValueError, match="infer.concurrency"):
+        make_config(tmp_path, infer={"concurrency": 0})
+
+
+def test_config_rejects_a_negative_number_of_examples(tmp_path: Path):
+    with pytest.raises(ValueError, match="num_examples"):
+        make_config(tmp_path, infer={"prompt": {"num_examples": -1}})
 
 
 def test_language_falls_back_to_the_iso_code(tmp_path: Path):
@@ -522,7 +582,7 @@ def test_translate_test_files_writes_one_line_per_source(tmp_path: Path):
 
 
 def test_a_reply_with_an_aside_still_writes_one_line_per_source(tmp_path: Path):
-    (tmp_path / "test.src.txt").write_text("let there be light\nin the beginning\n", encoding="utf-8")
+    (tmp_path / "test.src.txt").write_text("one\ntwo\n", encoding="utf-8")
     model, _ = make_model(tmp_path, lambda messages: "Sure! Here it is:\nsea la luz", infer={"concurrency": 1})
 
     model.translate_test_files([tmp_path / "test.src.txt"], [tmp_path / "out.txt"])
@@ -615,7 +675,7 @@ def test_retrieved_examples_reach_the_prompt(tmp_path: Path):
     model, client = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"num_examples": 1}})
     model.train()
 
-    list(model.translate(["let there be light"], "en", "es"))
+    list(model.translate(["let there be more light"], "en", "es"))
 
     user = client.calls[0][1]["content"]
     assert "let there be light" in user
@@ -628,9 +688,48 @@ def test_the_index_is_rebuilt_when_the_checkpoint_is_gone(tmp_path: Path):
     write_training_corpus(tmp_path)
     model, client = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"num_examples": 1}})
 
-    list(model.translate(["let there be light"], "en", "es"))
+    list(model.translate(["let there be more light"], "en", "es"))
 
     assert "sea la luz" in client.calls[0][1]["content"]
+
+
+def test_a_segment_the_corpus_already_translates_is_copied_without_a_request(tmp_path: Path, caplog):
+    model, client = make_model(tmp_path, lambda messages: "hola", infer={"concurrency": 1})
+
+    with caplog.at_level("INFO"):
+        groups = list(model.translate(["let there be light", "anything"], "en", "es"))
+
+    assert translations_of(groups) == ["sea la luz", "hola"]
+    assert len(client.calls) == 1
+    assert "translations copied from the training corpus: 1" in caplog.text
+
+
+def test_a_batch_leaves_out_the_segments_the_corpus_already_translates(tmp_path: Path):
+    model, client = make_model(tmp_path, echo_translations, infer={"infer_batch_size": 3, "concurrency": 1})
+
+    groups = model.translate(["one", "let there be light", "two"], "en", "es")
+
+    assert translations_of(groups) == ["translated 1", "sea la luz", "translated 2"]
+    assert len(client.calls) == 1
+
+
+def test_a_segment_the_corpus_translates_two_ways_is_copied_too(tmp_path: Path):
+    (tmp_path / "train.src.txt").write_text("amen\namen\n", encoding="utf-8")
+    (tmp_path / "train.trg.txt").write_text("amén\nasí sea\n", encoding="utf-8")
+    model, client = make_model(tmp_path, lambda messages: "hola")
+
+    assert translations_of(model.translate(["amen"], "en", "es"))[0] in {"amén", "así sea"}
+    assert len(client.calls) == 0
+
+
+def test_exact_matches_go_to_the_model_when_copying_is_turned_off(tmp_path: Path):
+    model, _ = make_model(tmp_path, lambda messages: "hola", infer={"copy_exact_matches": False})
+    assert translations_of(model.translate(["let there be light"], "en", "es")) == ["hola"]
+
+
+def test_a_zero_shot_run_never_copies_from_the_corpus(tmp_path: Path):
+    model, _ = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"num_examples": 0}})
+    assert translations_of(model.translate(["let there be light"], "en", "es")) == ["hola"]
 
 
 def test_full_corpus_mode_puts_the_whole_corpus_in_the_system_message(tmp_path: Path):
@@ -686,18 +785,20 @@ def test_token_logprobs_read_pydantic_style_objects():
     assert _response_with(choice).token_logprobs() == SCORES
 
 
-@pytest.mark.parametrize(
-    "choice",
-    [
-        {},
-        {"logprobs": None},
-        {"logprobs": {"content": None}},
-        {"logprobs": {"content": []}},
-    ],
-)
-def test_token_logprobs_tolerate_a_provider_that_omits_them(choice: dict):
-    # Providers that do not support logprobs silently omit them rather than failing.
-    assert _response_with(choice).token_logprobs() == []
+def test_token_logprobs_tolerate_a_provider_that_leaves_out_the_logprobs_field():
+    assert _response_with({}).token_logprobs() == []
+
+
+def test_token_logprobs_tolerate_a_provider_that_sends_null_logprobs():
+    assert _response_with({"logprobs": None}).token_logprobs() == []
+
+
+def test_token_logprobs_tolerate_a_provider_that_sends_null_logprob_content():
+    assert _response_with({"logprobs": {"content": None}}).token_logprobs() == []
+
+
+def test_token_logprobs_tolerate_a_provider_that_sends_empty_logprob_content():
+    assert _response_with({"logprobs": {"content": []}}).token_logprobs() == []
 
 
 def test_token_logprobs_skip_incomplete_entries():
@@ -968,6 +1069,28 @@ def test_translating_logs_the_usage_and_cost(tmp_path: Path, caplog):
     assert "$0.0040" in caplog.text
 
 
+def test_translating_warns_of_translations_left_blank(tmp_path: Path, caplog):
+    # Only a label is left once the reply is cleaned.
+    model, _ = make_model(tmp_path, lambda messages: "Spanish:", infer={"concurrency": 1})
+
+    with caplog.at_level("WARNING"):
+        list(model.translate(["one", "", "two"], "en", "es"))
+
+    assert "2 translations were left blank" in caplog.text
+
+
+def test_an_empty_batch_reply_recovered_by_splitting_is_not_reported_as_blank(tmp_path: Path, caplog):
+    def empty_for_a_batch(messages: List[Dict[str, str]]) -> str:
+        return "hola" if echo_translations(messages) == "translated" else ""
+
+    model, _ = make_model(tmp_path, empty_for_a_batch, infer={"infer_batch_size": 2, "concurrency": 1})
+
+    with caplog.at_level("INFO"):
+        assert translations_of(model.translate(["one", "two"], "en", "es")) == ["hola", "hola"]
+
+    assert "left blank" not in caplog.text
+
+
 def test_a_hoisted_corpus_does_not_leave_a_dangling_examples_block(tmp_path: Path):
     model, client = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"num_examples": 1000000}})
     write_training_corpus(tmp_path)
@@ -994,7 +1117,7 @@ def test_a_hoisted_corpus_keeps_a_custom_instruction_template(tmp_path: Path):
 def test_retrieved_examples_keep_their_block_when_the_corpus_is_not_hoisted(tmp_path: Path):
     model, client = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"num_examples": 1}})
     write_training_corpus(tmp_path)
-    list(model.translate(["let there be light"], "en", "es"))
+    list(model.translate(["let there be more light"], "en", "es"))
 
     assert "<translation_examples>" in client.calls[0][1]["content"]
 
@@ -1039,21 +1162,19 @@ def test_the_example_index_serves_batched_requests(tmp_path: Path):
     )
     model.train()
 
-    list(model.translate(["let there be light", "and so on"], "en", "es"))
+    list(model.translate(["let there be more light", "and so on"], "en", "es"))
 
     # A batched request draws on the same indexed corpus as a single-segment one.
     assert "sea la luz" in client.calls[0][1]["content"]
 
 
 def test_the_batch_builder_numbers_the_segments_and_states_the_count(tmp_path: Path):
-    model, client = make_model(
-        tmp_path, lambda messages: "1. uno\n2. dos\n3. tres", infer={"infer_batch_size": 3}
-    )
+    model, client = make_model(tmp_path, lambda messages: "1. uno\n2. dos\n3. tres", infer={"infer_batch_size": 3})
     list(model.translate(["one", "two", "three"], "en", "es"))
 
     user = client.calls[0][1]["content"]
     assert "1. one\n2. two\n3. three" in user
-    # The count is the contract ModelReply.parse checks the reply against.
+    # The count is the contract BatchReplyReader checks the reply against.
     assert "exactly 3 lines" in user
 
 
@@ -1132,28 +1253,95 @@ def test_a_malformed_response_is_retried():
     assert client.complete([]).text == "hola"
 
 
-@pytest.mark.parametrize("status", [408, 429, 500, 503])
-def test_transient_http_errors_are_retried(status: int):
-    client, _ = retrying([HttpError(status), Completion("hola")])
+def test_a_request_timeout_is_retried():
+    client, _ = retrying([HttpError(408), Completion("hola")])
     assert client.complete([]).text == "hola"
 
 
-@pytest.mark.parametrize("status", [400, 401, 403, 404])
-def test_client_errors_are_not_retried(status: int):
-    client, inner = retrying([HttpError(status), Completion("hola")])
+def test_a_rate_limit_is_retried():
+    client, _ = retrying([HttpError(429), Completion("hola")])
+    assert client.complete([]).text == "hola"
+
+
+def test_an_internal_server_error_is_retried():
+    client, _ = retrying([HttpError(500), Completion("hola")])
+    assert client.complete([]).text == "hola"
+
+
+def test_an_unavailable_service_is_retried():
+    client, _ = retrying([HttpError(503), Completion("hola")])
+    assert client.complete([]).text == "hola"
+
+
+def test_a_bad_request_is_not_retried():
+    client, inner = retrying([HttpError(400), Completion("hola")])
 
     with pytest.raises(HttpError):
         client.complete([])
     assert inner.calls == 1
 
 
-@pytest.mark.parametrize("message", ["Insufficient credits", "You exceeded your current quota", "Key limit exceeded"])
-def test_billing_errors_are_not_retried_even_when_reported_as_rate_limits(message: str):
+def test_an_unauthenticated_request_is_not_retried():
+    client, inner = retrying([HttpError(401), Completion("hola")])
+
+    with pytest.raises(HttpError):
+        client.complete([])
+    assert inner.calls == 1
+
+
+def test_a_forbidden_request_is_not_retried():
+    client, inner = retrying([HttpError(403), Completion("hola")])
+
+    with pytest.raises(HttpError):
+        client.complete([])
+    assert inner.calls == 1
+
+
+def test_a_request_for_something_not_found_is_not_retried():
+    client, inner = retrying([HttpError(404), Completion("hola")])
+
+    with pytest.raises(HttpError):
+        client.complete([])
+    assert inner.calls == 1
+
+
+def test_insufficient_credits_reported_as_a_rate_limit_are_not_retried():
+    client, inner = retrying([HttpError(429, "Insufficient credits"), Completion("hola")])
+
+    with pytest.raises(HttpError):
+        client.complete([])
+    assert inner.calls == 1
+
+
+def test_an_openai_insufficient_quota_error_is_not_retried():
+    message = (
+        "Error code: 429 - {'error': {'message': 'You exceeded your current quota.', 'code': 'insufficient_quota'}}"
+    )
     client, inner = retrying([HttpError(429, message), Completion("hola")])
 
     with pytest.raises(HttpError):
         client.complete([])
     assert inner.calls == 1
+
+
+def test_an_api_key_spending_limit_reported_as_a_rate_limit_is_not_retried():
+    client, inner = retrying([HttpError(429, "Key limit exceeded"), Completion("hola")])
+
+    with pytest.raises(HttpError):
+        client.complete([])
+    assert inner.calls == 1
+
+
+def test_a_vertex_rate_limit_worded_as_an_exhausted_quota_is_retried():
+    message = "VertexAIException - Resource has been exhausted (e.g. check quota)."
+    client, _ = retrying([HttpError(429, message), Completion("hola")])
+    assert client.complete([]).text == "hola"
+
+
+def test_a_gemini_rate_limit_that_mentions_quota_and_billing_is_retried():
+    message = "You exceeded your current quota, please check your plan and billing details. Please retry in 41.9s."
+    client, _ = retrying([HttpError(429, message), Completion("hola")])
+    assert client.complete([]).text == "hola"
 
 
 def test_a_persistent_failure_is_raised_once_the_retries_run_out():
@@ -1170,14 +1358,6 @@ def test_the_retrying_client_reports_what_the_wrapped_client_supports():
 
     assert client.supports_logprobs()
     assert client.count_tokens("two words") == 4
-
-
-def test_usage_totals_count_the_segments_an_empty_reply_left_blank():
-    totals = UsageTotals()
-    totals.add(Completion("", cost=0.0))
-    totals.add(Completion("hola", cost=0.0))
-
-    assert "segments left blank by an empty reply: 1" in totals.describe()
 
 
 class FakeLiteLLM:
@@ -1198,12 +1378,9 @@ class FakeLiteLLM:
         return 0.0
 
 
-HOLA_RESPONSE = {"choices": [{"message": {"content": "hola"}}], "usage": {"prompt_tokens": 3, "completion_tokens": 1}}
-
-
 def test_litellm_is_asked_not_to_retry_on_its_own():
     # LiteLLM's retries need tenacity, and when it is missing they replace the provider's error with an import error.
-    fake = FakeLiteLLM(HOLA_RESPONSE)
+    fake = FakeLiteLLM({"choices": [{"message": {"content": "hola"}}], "usage": {"prompt_tokens": 3}})
     LiteLLMCompletionClient("gpt-4o", CompletionSettings(0.0, 16, 5, 10), litellm=fake).complete([])
     assert fake.calls[0]["num_retries"] == 0
 
@@ -1234,14 +1411,34 @@ def save_reply(saved: SavedReplies, key: str, completion: Completion) -> None:
     saved.save(key, occurrence, completion)
 
 
-def test_a_saved_reply_comes_back_whole_in_a_later_session(tmp_path: Path):
+def test_a_saved_reply_comes_back_whole_in_a_later_run(tmp_path: Path):
     saved = SavedReplies(tmp_path / "replies.jsonl")
     original = Completion("hola", [TokenLogprob("hola", -0.5)], prompt_tokens=10, completion_tokens=2, cost=0.003)
     with saved.session():
         save_reply(saved, "request", original)
 
+    resumed = SavedReplies(tmp_path / "replies.jsonl")
+    with resumed.session():
+        assert resumed.claim("request")[1] == original
+
+
+def test_a_saved_reply_comes_back_in_a_later_session_of_the_same_run(tmp_path: Path):
+    saved = SavedReplies(tmp_path / "replies.jsonl")
     with saved.session():
-        assert saved.claim("request")[1] == original
+        save_reply(saved, "request", Completion("hola"))
+
+    with saved.session():
+        assert saved.claim("request")[1] == Completion("hola")
+
+
+def test_a_reply_with_a_unicode_line_separator_comes_back_whole(tmp_path: Path):
+    saved = SavedReplies(tmp_path / "replies.jsonl")
+    with saved.session():
+        save_reply(saved, "request", Completion("one\u2028two\u0085three"))
+
+    resumed = SavedReplies(tmp_path / "replies.jsonl")
+    with resumed.session():
+        assert resumed.claim("request")[1] == Completion("one\u2028two\u0085three")
 
 
 def test_identical_requests_in_one_session_are_told_apart(tmp_path: Path):
@@ -1250,8 +1447,9 @@ def test_identical_requests_in_one_session_are_told_apart(tmp_path: Path):
         save_reply(saved, "request", Completion("first"))
         save_reply(saved, "request", Completion("second"))
 
-    with saved.session():
-        assert [saved.claim("request")[1] for _ in range(3)] == [Completion("first"), Completion("second"), None]
+    resumed = SavedReplies(tmp_path / "replies.jsonl")
+    with resumed.session():
+        assert [resumed.claim("request")[1] for _ in range(3)] == [Completion("first"), Completion("second"), None]
 
 
 def test_nothing_is_saved_outside_a_session(tmp_path: Path):
@@ -1274,10 +1472,24 @@ def test_a_partly_written_last_line_does_not_spoil_the_next_reply(tmp_path: Path
     with saved.session():
         save_reply(saved, "after", Completion("adios"))
 
+    resumed = SavedReplies(path)
+    with resumed.session():
+        assert resumed.claim("kept")[1] == Completion("hola")
+        assert resumed.claim("interrupted")[1] is None
+        assert resumed.claim("after")[1] == Completion("adios")
+
+
+def test_a_last_line_cut_inside_a_character_does_not_spoil_the_earlier_replies(tmp_path: Path):
+    path = tmp_path / "replies.jsonl"
+    saved = SavedReplies(path)
     with saved.session():
-        assert saved.claim("kept")[1] == Completion("hola")
-        assert saved.claim("interrupted")[1] is None
-        assert saved.claim("after")[1] == Completion("adios")
+        save_reply(saved, "kept", Completion("ŋa'a"))
+    with path.open("ab") as file:
+        file.write('{"key": "interrupted", "text": "ŋ'.encode("utf-8")[:-1])
+
+    resumed = SavedReplies(path)
+    with resumed.session():
+        assert resumed.claim("kept")[1] == Completion("ŋa'a")
 
 
 def test_a_failed_run_resumes_without_repeating_the_finished_requests(tmp_path: Path):
@@ -1333,6 +1545,36 @@ def test_an_empty_reply_is_asked_for_again_when_resuming(tmp_path: Path):
     assert len(client.calls) == 1
 
 
+def test_a_reply_that_cleans_to_nothing_is_asked_for_again_when_resuming(tmp_path: Path):
+    model, _ = make_model(tmp_path, lambda messages: "Spanish:", infer={"concurrency": 1})
+    assert translations_of(list(model.translate(["one"], "en", "es"))) == [""]
+
+    resumed, client = make_model(tmp_path, lambda messages: "hola", infer={"concurrency": 1})
+    assert translations_of(list(resumed.translate(["one"], "en", "es"))) == ["hola"]
+    assert len(client.calls) == 1
+
+
+def test_a_batch_reply_with_a_blank_entry_is_recovered_by_splitting(tmp_path: Path):
+    def blank_second(messages: List[Dict[str, str]]) -> str:
+        return "hola" if echo_translations(messages) == "translated" else "1. uno\n2."
+
+    model, _ = make_model(tmp_path, blank_second, infer={"infer_batch_size": 2, "concurrency": 1})
+    assert translations_of(model.translate(["one", "two"], "en", "es")) == ["hola", "hola"]
+
+
+def test_a_saved_reply_the_caller_cannot_use_is_asked_for_again(tmp_path: Path):
+    path = tmp_path / "replies.jsonl"
+    first = ReplyReusingClient(SavedReplies(path), "settings")
+    with first.session():
+        first.complete(ScriptedClient(lambda messages: "Spanish:"), [], False, lambda reply: True)
+
+    resumed = ReplyReusingClient(SavedReplies(path), "settings")
+    client = ScriptedClient(lambda messages: "hola")
+    with resumed.session():
+        assert resumed.complete(client, [], False, lambda reply: reply.text != "Spanish:").text == "hola"
+    assert len(client.calls) == 1
+
+
 def test_a_saved_reply_is_not_reused_under_different_settings(tmp_path: Path):
     model, _ = make_model(tmp_path, lambda messages: "cool", infer={"concurrency": 1, "temperature": 0.2})
     list(model.translate(["one"], "en", "es"))
@@ -1349,6 +1591,87 @@ def test_saved_replies_are_neither_kept_nor_reused_when_reuse_is_off(tmp_path: P
     again, _ = make_model(tmp_path, lambda messages: "second", infer=dict(infer))
     assert translations_of(list(again.translate(["one"], "en", "es"))) == ["second"]
     assert list(tmp_path.glob("*.jsonl")) == []
+
+
+def test_forcing_inference_sends_every_request_again(tmp_path: Path):
+    model, _ = make_model(tmp_path, lambda messages: "first", infer={"concurrency": 1})
+    list(model.translate(["one"], "en", "es"))
+
+    forced, client = make_model(tmp_path, lambda messages: "second", infer={"concurrency": 1})
+    forced.discard_saved_inference()
+    assert translations_of(list(forced.translate(["one"], "en", "es"))) == ["second"]
+    assert len(client.calls) == 1
+
+
+def test_forcing_inference_again_in_the_same_run_keeps_the_replies_it_has_made(tmp_path: Path):
+    model, client = make_model(tmp_path, lambda messages: "fresh", infer={"concurrency": 1})
+    model.discard_saved_inference()
+    list(model.translate(["one"], "en", "es"))
+
+    model.discard_saved_inference()
+    list(model.translate(["one"], "en", "es"))
+    assert len(client.calls) == 1
+
+
+def test_a_forced_run_that_failed_resumes_from_its_own_replies(tmp_path: Path):
+    model, _ = make_model(tmp_path, lambda messages: "old", infer={"concurrency": 1})
+    list(model.translate(["one", "two"], "en", "es"))
+
+    def fail_on_two(messages: List[Dict[str, str]]) -> str:
+        if "two" in messages[-1]["content"]:
+            raise RuntimeError("provider unavailable")
+        return "new"
+
+    forced, _ = make_model(tmp_path, fail_on_two, infer={"concurrency": 1})
+    forced.discard_saved_inference()
+    with pytest.raises(RuntimeError):
+        list(forced.translate(["one", "two"], "en", "es"))
+
+    resumed, _ = make_model(tmp_path, lambda messages: "newer", infer={"concurrency": 1})
+    assert translations_of(list(resumed.translate(["one", "two"], "en", "es"))) == ["new", "newer"]
+
+
+def test_forcing_inference_still_copies_what_the_corpus_translates(tmp_path: Path):
+    model, client = make_model(tmp_path, lambda messages: "hola", infer={"concurrency": 1})
+    model.discard_saved_inference()
+    assert translations_of(model.translate(["let there be light"], "en", "es")) == ["sea la luz"]
+    assert client.calls == []
+
+
+def test_forcing_inference_without_saved_replies_does_nothing(tmp_path: Path):
+    model, _ = make_model(tmp_path, lambda messages: "hola", infer={"reuse_saved_replies": False})
+    model.discard_saved_inference()
+    assert translations_of(model.translate(["one"], "en", "es")) == ["hola"]
+
+
+def test_test_predictions_are_complete_when_only_blank_sources_have_blank_translations(tmp_path: Path):
+    (tmp_path / "test.src.txt").write_text("one\n\nthree\n", encoding="utf-8")
+    (tmp_path / "predictions.txt").write_text("uno\n\ntres\n", encoding="utf-8")
+    model, _ = make_model(tmp_path, lambda messages: "hola")
+
+    assert model.has_completed_translation(tmp_path / "test.src.txt", tmp_path / "predictions.txt")
+
+
+def test_test_predictions_are_incomplete_while_a_source_has_a_blank_translation(tmp_path: Path):
+    (tmp_path / "test.src.txt").write_text("one\n\nthree\n", encoding="utf-8")
+    (tmp_path / "predictions.txt").write_text("uno\ndos\n\n", encoding="utf-8")
+    model, _ = make_model(tmp_path, lambda messages: "hola")
+
+    assert not model.has_completed_translation(tmp_path / "test.src.txt", tmp_path / "predictions.txt")
+
+
+def test_test_predictions_are_incomplete_when_they_have_fewer_lines_than_the_source(tmp_path: Path):
+    (tmp_path / "test.src.txt").write_text("one\n\nthree\n", encoding="utf-8")
+    (tmp_path / "predictions.txt").write_text("uno\n", encoding="utf-8")
+    model, _ = make_model(tmp_path, lambda messages: "hola")
+
+    assert not model.has_completed_translation(tmp_path / "test.src.txt", tmp_path / "predictions.txt")
+
+
+def test_missing_test_predictions_are_unfinished(tmp_path: Path):
+    (tmp_path / "test.src.txt").write_text("one\n", encoding="utf-8")
+    model, _ = make_model(tmp_path, lambda messages: "hola")
+    assert not model.has_completed_translation(tmp_path / "test.src.txt", tmp_path / "predictions.txt")
 
 
 def test_usage_totals_count_reused_replies_without_billing_them_again():

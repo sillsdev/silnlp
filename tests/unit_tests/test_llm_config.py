@@ -294,26 +294,75 @@ def test_prompt_template_file_rejects_an_empty_file(tmp_path):
         PromptTemplateCollection.from_file(path)
 
 
-@pytest.mark.parametrize(
-    "bad_line, message",
-    [
-        ("not json", "not valid JSON"),
-        ('["not", "an", "object"]', "must be a JSON object"),
-        ('{"num_examples": 3}', "unknown field"),
-        (json.dumps({"system_message": "s", "instruction_template": "t"}), "missing required field"),
-        (json.dumps({"system_message": "s", "example_format": "text"}), "missing required field"),
-        (json.dumps(_entry(example_format="bogus")), "invalid example_format"),
-    ],
-)
-def test_prompt_template_file_skips_a_bad_line_and_says_why(tmp_path, caplog, bad_line, message):
+def test_prompt_template_file_skips_a_line_that_is_not_json_and_says_why(tmp_path, caplog):
     path = tmp_path / "templates.jsonl"
+    path.write_text("not json\n" + json.dumps(_entry(instruction_template="ok")) + "\n", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        collection = PromptTemplateCollection.from_file(path)
+
+    assert collection.template_for(None).instruction_template == "ok"
+    assert any("not valid JSON" in record.message for record in caplog.records)
+
+
+def test_prompt_template_file_skips_a_line_that_is_not_a_json_object_and_says_why(tmp_path, caplog):
+    path = tmp_path / "templates.jsonl"
+    path.write_text(
+        '["not", "an", "object"]\n' + json.dumps(_entry(instruction_template="ok")) + "\n", encoding="utf-8"
+    )
+
+    with caplog.at_level(logging.WARNING):
+        collection = PromptTemplateCollection.from_file(path)
+
+    assert collection.template_for(None).instruction_template == "ok"
+    assert any("must be a JSON object" in record.message for record in caplog.records)
+
+
+def test_prompt_template_file_skips_a_line_with_an_unknown_field_and_says_why(tmp_path, caplog):
+    path = tmp_path / "templates.jsonl"
+    path.write_text('{"num_examples": 3}\n' + json.dumps(_entry(instruction_template="ok")) + "\n", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        collection = PromptTemplateCollection.from_file(path)
+
+    assert collection.template_for(None).instruction_template == "ok"
+    assert any("unknown field" in record.message for record in caplog.records)
+
+
+def test_prompt_template_file_skips_a_line_without_an_example_format_and_says_why(tmp_path, caplog):
+    path = tmp_path / "templates.jsonl"
+    bad_line = json.dumps({"system_message": "s", "instruction_template": "t"})
     path.write_text(bad_line + "\n" + json.dumps(_entry(instruction_template="ok")) + "\n", encoding="utf-8")
 
     with caplog.at_level(logging.WARNING):
         collection = PromptTemplateCollection.from_file(path)
 
     assert collection.template_for(None).instruction_template == "ok"
-    assert any(message in record.message for record in caplog.records)
+    assert any("missing required field" in record.message for record in caplog.records)
+
+
+def test_prompt_template_file_skips_a_line_without_an_instruction_template_and_says_why(tmp_path, caplog):
+    path = tmp_path / "templates.jsonl"
+    bad_line = json.dumps({"system_message": "s", "example_format": "text"})
+    path.write_text(bad_line + "\n" + json.dumps(_entry(instruction_template="ok")) + "\n", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        collection = PromptTemplateCollection.from_file(path)
+
+    assert collection.template_for(None).instruction_template == "ok"
+    assert any("missing required field" in record.message for record in caplog.records)
+
+
+def test_prompt_template_file_skips_a_line_with_an_invalid_example_format_and_says_why(tmp_path, caplog):
+    path = tmp_path / "templates.jsonl"
+    bad_line = json.dumps(_entry(example_format="bogus"))
+    path.write_text(bad_line + "\n" + json.dumps(_entry(instruction_template="ok")) + "\n", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        collection = PromptTemplateCollection.from_file(path)
+
+    assert collection.template_for(None).instruction_template == "ok"
+    assert any("invalid example_format" in record.message for record in caplog.records)
 
 
 def test_prompt_template_file_names_every_missing_field(tmp_path, caplog):

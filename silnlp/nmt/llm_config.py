@@ -4,6 +4,7 @@
 
 import json
 import logging
+import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,7 @@ from .example_retrieval import (
     ExampleRetrieverFactory,
     FixedCorpusPairProvider,
     TargetLanguageProfile,
+    TranslationMemory,
 )
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -286,6 +288,11 @@ class PromptBuilder(Generic[TPromptMessages]):
         if self._pool is None:
             return TargetLanguageProfile([])
         return self._pool.create_target_language_profile()
+
+    def create_translation_memory(self, rng: random.Random) -> TranslationMemory:
+        if self._pool is None:
+            return TranslationMemory([], rng)
+        return self._pool.create_translation_memory(rng)
 
 
 @dataclass(frozen=True)
