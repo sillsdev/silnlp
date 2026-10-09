@@ -615,7 +615,7 @@ def test_checkpoint(
     translation_paths: List[Path] = []
     for i in range(len(translation_file_names)):
         predictions_path = config.exp_dir / translation_file_names[i]
-        if force_infer or not predictions_path.is_file():
+        if force_infer or not model.has_completed_translation(config.exp_dir / source_file_names[i], predictions_path):
             source_paths.append(config.exp_dir / source_file_names[i])
             translation_paths.append(predictions_path)
     if len(translation_paths) > 0:
@@ -806,6 +806,8 @@ def test(
     tokenizer = config.create_tokenizer()
     if model is None:
         model = config.create_model(clearml_queue=clearml_queue)
+    if force_infer:
+        model.discard_saved_inference()
     results: Dict[int, List[PairScore]] = {}
     step: int
     if checkpoint is not None:
@@ -963,7 +965,12 @@ def main() -> None:
     parser.add_argument("--avg", default=False, action="store_true", help="Test averaged checkpoint")
     parser.add_argument("--all-checkpoints", default=False, action="store_true", help="Test all saved checkpoints")
     parser.add_argument("--ref-projects", nargs="*", metavar="project", default=[], help="Reference projects")
-    parser.add_argument("--force-infer", default=False, action="store_true", help="Force inferencing")
+    parser.add_argument(
+        "--force-infer",
+        default=False,
+        action="store_true",
+        help="Infer again even where predictions exist, without reusing any saved responses from previous runs",
+    )
     parser.add_argument(
         "--scorers",
         nargs="*",
