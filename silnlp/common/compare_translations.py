@@ -1,13 +1,14 @@
-import argparse
 from pathlib import Path
 from typing import Dict, List, Set
 
 import sacrebleu
 from machine.corpora import ParatextTextCorpus
 
+from .argument_parser import SilnlpArgumentParser
+
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Compare translations")
+    parser = SilnlpArgumentParser(description="Compare translations")
     parser.add_argument(
         "--projects", nargs=2, type=Path, required=True, help="Paths to the Paratext project directories"
     )

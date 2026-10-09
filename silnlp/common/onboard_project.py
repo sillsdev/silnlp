@@ -1,4 +1,3 @@
-import argparse
 import getpass
 import hashlib
 import logging
@@ -26,6 +25,7 @@ from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
 from silnlp.nmt.config import SUPPORTED_GLOSS_ISOS, Config
 
 from ..nmt.config_utils import create_config
+from .argument_parser import SilnlpArgumentParser
 from .collect_verse_counts import collect_verse_counts
 from .environment import SilNlpEnv
 from .extract_corpora import ExtractOutput, extract_corpora
@@ -1031,7 +1031,7 @@ def append_datestamp(project_name: str) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
+    parser = SilnlpArgumentParser(
         description="Performs several steps to onboard a new project before training a model.",
     )
 

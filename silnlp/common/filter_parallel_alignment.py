@@ -1,16 +1,16 @@
-import argparse
 import os
 from pathlib import Path
 
 import pandas as pd
 
 from ..alignment.utils import add_alignment_scores
+from .argument_parser import SilnlpArgumentParser
 from .corpus import load_corpus, write_corpus
 from .utils import get_git_revision_hash
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Filtering parallel corpora based on alignment score threshold")
+    parser = SilnlpArgumentParser(description="Filtering parallel corpora based on alignment score threshold")
     parser.add_argument("src", type=str, help="source file")
     parser.add_argument("trg", type=str, help="target file")
     parser.add_argument("score", type=str, help="score file")

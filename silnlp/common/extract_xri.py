@@ -40,7 +40,6 @@ Other accepted values are "INFO", "WARNING/WARN", "ERROR" and "CRITICAL".
 See https://github.com/sillsdev/silnlp/issues/472 for original context.
 """
 
-import argparse
 import csv
 import logging
 import os
@@ -53,6 +52,8 @@ from pathlib import Path
 from typing import List, Optional
 
 from silnlp.common.environment import SilNlpEnv
+
+from .argument_parser import SilnlpArgumentParser
 
 logger = logging.getLogger(__package__ + ".extract_xri")
 repair_logger = logging.getLogger(logger.name + ".repair")
@@ -450,7 +451,7 @@ def run(cli_input: CliInput, environment: SilNlpEnv) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Transforms XRI tsv files into extract files")
+    parser = SilnlpArgumentParser(description="Transforms XRI tsv files into extract files")
 
     parser.add_argument("input_file", help="Path to the input tsv file with UTF-8 encoding", type=str)
     parser.add_argument("source_iso", help="The ISO 693-3 code for the source/LWC language", type=str)

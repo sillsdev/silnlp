@@ -1,4 +1,3 @@
-import argparse
 import logging
 import os
 from dataclasses import dataclass
@@ -10,6 +9,7 @@ from machine.scripture import book_number_to_id, get_chapters
 
 from silnlp.common.corpus import load_corpus
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.environment import SilNlpEnv
 from ..common.paratext import book_file_name_digits
 from ..common.postprocessor import PostprocessConfig, PostprocessHandler
@@ -320,7 +320,7 @@ class TranslationTask:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Translates text using an NMT model")
+    parser = SilnlpArgumentParser(description="Translates text using an NMT model")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--checkpoint", type=str, help="Checkpoint to use (last, best, avg, or checkpoint #)")
     parser.add_argument(

@@ -1,4 +1,3 @@
-import argparse
 import logging
 import re
 from pathlib import Path
@@ -19,6 +18,7 @@ from machine.corpora import (
 from machine.scripture import book_number_to_id, get_chapters
 from transformers.trainer_utils import get_last_checkpoint
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.corpus import load_corpus
 from ..common.environment import SilNlpEnv
 from ..common.paratext import book_file_name_digits, get_book_path
@@ -284,7 +284,7 @@ def postprocess_experiment(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
+    parser = SilnlpArgumentParser(
         description="Postprocess the drafts created by an NMT model based on the experiment's translate config."
     )
     parser.add_argument("experiment", help="Experiment name")

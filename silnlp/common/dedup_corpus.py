@@ -1,5 +1,6 @@
-import argparse
 from typing import Dict
+
+from .argument_parser import SilnlpArgumentParser
 
 
 def get_best_scores(input_path: str) -> Dict[str, float]:
@@ -15,7 +16,7 @@ def get_best_scores(input_path: str) -> Dict[str, float]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Removes duplicate sentence pairs from a parallel corpus")
+    parser = SilnlpArgumentParser(description="Removes duplicate sentence pairs from a parallel corpus")
     parser.add_argument("--input", type=str, help="The tab-delimited input corpus file")
     parser.add_argument("--src-output", type=str, help="The output source corpus file")
     parser.add_argument("--trg-output", type=str, help="The output target corpus file")

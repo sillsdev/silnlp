@@ -36,7 +36,6 @@ You can change the logging level with the optional `--log-level LOG_LEVEL` which
 "DEBUG", "INFO", "WARNING/WARN", "ERROR" and "CRITICAL".
 """
 
-import argparse
 import logging
 import os
 
@@ -45,6 +44,7 @@ from glob import glob
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from .argument_parser import SilnlpArgumentParser
 from .normalizer import (
     logger as normalizer_logger,
     NormalizationWarning,
@@ -186,7 +186,7 @@ def run(cli_input: CliInput) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Normalizes extract files")
+    parser = SilnlpArgumentParser(description="Normalizes extract files")
 
     parser.add_argument(
         "input_dir", help="Path to the directory containing the extract files to be normalized", type=str

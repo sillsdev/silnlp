@@ -1,4 +1,3 @@
-import argparse
 import logging
 import multiprocessing
 import os
@@ -7,6 +6,7 @@ from typing import List
 
 from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.corpus import get_scripture_parallel_corpus
 from ..common.environment import SilNlpEnv
 from .config import ALIGNERS
@@ -106,7 +106,7 @@ def process_alignments(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Aligns source Bible to defined set of Bibles")
+    parser = SilnlpArgumentParser(description="Aligns source Bible to defined set of Bibles")
     parser.add_argument("src_path", type=str, help="Path to source Bible text")
     parser.add_argument("trg_dir", type=str, help="folder of Bibles to align to")
     parser.add_argument("output_dir", type=str, help="folder to contain Bible alignments")

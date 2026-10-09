@@ -1,10 +1,10 @@
-import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import yaml
 from tqdm import tqdm
 
+from .argument_parser import SilnlpArgumentParser
 from .environment import SilNlpEnv
 
 
@@ -39,7 +39,7 @@ def is_valid_encoding(file: Path, encoding: str = "utf-8") -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Find files referred to in config file and check that they exist.")
+    parser = SilnlpArgumentParser(description="Find files referred to in config file and check that they exist.")
     parser.add_argument(
         "folder", help="An experiment folder (typically in MT/experiments) that contains a config.yml file."
     )

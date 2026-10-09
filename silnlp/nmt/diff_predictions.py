@@ -1,4 +1,3 @@
-import argparse
 import difflib as dl
 import logging
 import math
@@ -15,6 +14,7 @@ import sacrebleu
 from scipy.stats import gmean
 from tqdm import tqdm
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.corpus import load_corpus
 from ..common.environment import SilNlpEnv
 from ..common.translator import CONFIDENCE_SUFFIX
@@ -560,7 +560,7 @@ def main() -> None:
     global score_format
     text_wrap_column_width = 35
 
-    parser = argparse.ArgumentParser(description="Compare the predictions across 2 experiments")
+    parser = SilnlpArgumentParser(description="Compare the predictions across 2 experiments")
     parser.add_argument("exp1", type=str, help="Experiment 1 folder")
     parser.add_argument("--last", default=False, action="store_true", help="Use the last result (instead of best)")
     parser.add_argument(

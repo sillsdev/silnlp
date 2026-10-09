@@ -1,4 +1,3 @@
-import argparse
 import logging
 from statistics import mean
 from typing import Dict, Optional, Set, Tuple
@@ -6,6 +5,7 @@ from typing import Dict, Optional, Set, Tuple
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
 
 from ..alignment.utils import add_alignment_scores
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.corpus import (
     exclude_books,
     get_scripture_parallel_corpus,
@@ -52,7 +52,7 @@ def get_test_indices(config: dict, environment: SilNlpEnv) -> Optional[Set[int]]
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
+    parser = SilnlpArgumentParser(
         description="Preprocesses text corpora into train and test datasets for SMT training"
     )
     parser.add_argument("experiment", help="Experiment name")

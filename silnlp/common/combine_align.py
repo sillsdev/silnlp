@@ -1,9 +1,9 @@
-import argparse
 from pathlib import Path
 
 import regex as re
 import yaml
 
+from .argument_parser import SilnlpArgumentParser
 from .environment import SilNlpEnv
 
 # A hardcoded list of major language ISO codes from the Flores-200 benchmark.
@@ -423,7 +423,7 @@ def update_config(folder: Path, environment: SilNlpEnv):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
+    parser = SilnlpArgumentParser(
         description="Combine multiple config.yml files into one or update config.yml with latest file stems."
     )
     group = parser.add_mutually_exclusive_group(required=False)

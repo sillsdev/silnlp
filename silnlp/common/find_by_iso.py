@@ -7,6 +7,7 @@ from typing import Dict, List, Set, Tuple
 
 import yaml
 
+from .argument_parser import SilnlpArgumentParser
 from .environment import SilNlpEnv
 from .iso_info import ALT_ISO, NLLB_ISO_SET
 
@@ -167,7 +168,7 @@ def resolve_config_file(output_path: str, environment: SilNlpEnv) -> Path:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Find related ISO language codes and create alignment config.")
+    parser = SilnlpArgumentParser(description="Find related ISO language codes and create alignment config.")
     parser.add_argument("inputs", nargs="+", help="ISO codes or file patterns (e.g., 'fra' or 'en-NIV')")
     parser.add_argument(
         "--scripture-dir",

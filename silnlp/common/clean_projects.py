@@ -12,6 +12,8 @@ from typing import Optional
 from machine.corpora import FileParatextProjectSettingsParser, ParatextProjectSettings
 from tqdm import tqdm
 
+from .argument_parser import SilnlpArgumentParser
+
 # --- Global Constants ---
 
 logger = logging.getLogger(__name__)
@@ -327,7 +329,7 @@ def process_single_project_for_cleaning(
 
 # --- Main Function ---
 def main():
-    parser = argparse.ArgumentParser(
+    parser = SilnlpArgumentParser(
         description="Clean Paratext project folders by removing unnecessary files and folders.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

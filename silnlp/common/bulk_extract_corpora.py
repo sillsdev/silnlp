@@ -1,4 +1,3 @@
-import argparse
 import logging
 from itertools import chain
 from multiprocessing import cpu_count
@@ -11,6 +10,7 @@ from tqdm.contrib.concurrent import process_map
 
 from ..common.corpus import count_lines, write_corpus
 from ..common.environment import SilNlpEnv
+from .argument_parser import SilnlpArgumentParser
 from .paratext import extract_project, extract_term_renderings
 
 logging.disable(logging.CRITICAL)
@@ -68,7 +68,7 @@ def extract_directory_or_bundle(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Extracts text corpora from a folder of Paratext projects")
+    parser = SilnlpArgumentParser(description="Extracts text corpora from a folder of Paratext projects")
     parser.add_argument("--input", type=str, required=True, help="The input folder.")
     parser.add_argument("--output", type=str, required=True, help="The output corpus folder.")
     parser.add_argument("--terms-output", type=str, help="The output corpus folder.")

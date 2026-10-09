@@ -1,4 +1,3 @@
-import argparse
 from pathlib import Path
 from typing import Dict, List
 
@@ -6,6 +5,7 @@ from machine.scripture import ORIGINAL_VERSIFICATION
 
 from silnlp.common.environment import SilNlpEnv
 
+from ...common.argument_parser import SilnlpArgumentParser
 from .alignment_generators import (
     EflomalAlignmentGeneratorFactory,
     FastAlignAlignmentGeneratorFactory,
@@ -74,7 +74,7 @@ def write_results_to_file(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Collect verse counts and compute alignment scores")
+    parser = SilnlpArgumentParser(description="Collect verse counts and compute alignment scores")
     parser.add_argument("--source-project", help="Name of source Paratext project", required=True, type=str)
     parser.add_argument("--target-passages", help=".tsv file with target passages", required=True, type=str)
     parser.add_argument(

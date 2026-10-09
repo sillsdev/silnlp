@@ -1,4 +1,3 @@
-import argparse
 import logging
 import os.path
 import time
@@ -15,6 +14,7 @@ from machine.translation import (
 )
 from machine.translation.thot import ThotSmtModel, ThotWordAlignmentModelType
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.corpus import get_scripture_parallel_corpus
 from ..common.environment import SilNlpEnv
 from ..common.utils import get_git_revision_hash
@@ -267,7 +267,7 @@ def suggestions_are_equal(x: List[List[str]], y: List[List[str]]):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
+    parser = SilnlpArgumentParser(
         description="Simulates the generation of translation suggestions during an interactive translation session."
     )
     parser.add_argument("experiment", help="Experiment name")

@@ -9,7 +9,6 @@ selection, and creates <Country>/<Language>/<experiment> folders containing conf
 and translate_config.yml. See create_onboarding_experiments_plan.md for details.
 """
 
-import argparse
 import itertools
 import json
 import logging
@@ -28,6 +27,7 @@ import yaml
 from machine.corpora import FileParatextProjectSettingsParser
 from machine.scripture import ALL_BOOK_IDS, book_id_to_number, book_number_to_id, get_chapters, is_nt, is_ot
 
+from .argument_parser import SilnlpArgumentParser
 from .environment import SilNlpEnv
 from .iso_info import ALT_ISO, NLLB_TAG_FROM_ISO
 
@@ -1402,7 +1402,7 @@ def run(
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
-    parser = argparse.ArgumentParser(description="Create experiment folders from an onboarding request.")
+    parser = SilnlpArgumentParser(description="Create experiment folders from an onboarding request.")
     parser.add_argument(
         "request",
         help="Request folder name in MT/experiments/_OnboardingRequests, or a folder relative to"

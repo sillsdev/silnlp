@@ -3,7 +3,6 @@ Adapted from: www.aclweb.org/anthology/D19-1430: Exploiting Monolingual Data at 
               by  Lijun Wu, Yiren Wang, Yingce Xia, Tao Qin, Jianhuang Lai, Tei-Yan Liu
 """
 
-import argparse
 import json
 import os
 import re
@@ -17,6 +16,7 @@ import yaml
 from tqdm import tqdm
 
 from ..common.utils import get_git_revision_hash, merge_dict
+from .argument_parser import SilnlpArgumentParser
 
 _DEFAULT_FILTER_CONFIG: dict = {
     "filter": {
@@ -355,7 +355,7 @@ def main() -> None:
         )
         out_file.write(f"= {ratio_string(final_line_count, original_line_count)}\tRemaining sentences\n")
 
-    parser = argparse.ArgumentParser(description="Filtering for noisy parallel corpora")
+    parser = SilnlpArgumentParser(description="Filtering for noisy parallel corpora")
     parser.add_argument("src", type=str, help="source file")
     parser.add_argument("trg", type=str, help="target file")
     parser.add_argument("--config", type=str, default="config.yml", help="config file")

@@ -81,4 +81,5 @@ def test_command_lists_silnlp_scripts() -> None:
 
     names = json.loads(result.stdout)
     assert "silnlp.common.describe_scripts" in names
+    assert "silnlp.nmt.experiment" in names
     assert "silnlp.common.argument_parser" not in names

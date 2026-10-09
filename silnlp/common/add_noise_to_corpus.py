@@ -2,11 +2,11 @@
 #
 # Add noise to your corpus
 
-import argparse
 from typing import Iterable, List, cast
 
 from tqdm import tqdm
 
+from .argument_parser import SilnlpArgumentParser
 from .utils import DeleteRandomToken, NoiseMethod, RandomTokenPermutation, ReplaceRandomToken
 
 
@@ -15,7 +15,7 @@ def count_lines(file_path: str) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    parser = SilnlpArgumentParser()
     parser.add_argument("input", help="The text file you want to add noise to")
     parser.add_argument(
         "--output", default=None, help="Optional, the name you want to give to your output, default=yourfilename.noisy"

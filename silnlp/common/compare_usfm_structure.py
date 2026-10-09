@@ -1,4 +1,3 @@
-import argparse
 import logging
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -14,6 +13,7 @@ from machine.corpora import (
 )
 from machine.tokenization import WhitespaceTokenizer
 
+from .argument_parser import SilnlpArgumentParser
 from .usfm_utils import CHARACTER_TYPE_EMBEDS, PARAGRAPH_TYPE_EMBEDS
 
 LOGGER = logging.getLogger(__package__ + ".compare_usfm_structure")
@@ -153,7 +153,7 @@ def evaluate_usfm_marker_placement(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
+    parser = SilnlpArgumentParser(
         description="Compares USFM marker placement of the prediction file to the gold file."
     )
     parser.add_argument(

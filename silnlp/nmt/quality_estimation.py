@@ -1,4 +1,3 @@
-import argparse
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -8,6 +7,7 @@ from typing import Dict, List, Optional, Set, TextIO, Tuple
 from machine.quality_estimation import is_book_confidence_unusually_low
 from machine.scripture import ALL_BOOK_IDS, VerseRef
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.environment import SilNlpEnv
 from ..common.linear_regression import LinearRegressionResult
 from ..common.translator import CONFIDENCE_SUFFIX, ConfidenceFile, TxtConfidenceFile, UsfmConfidenceFile
@@ -367,7 +367,7 @@ def compute_txt_file_labels(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Estimate the quality of drafts created by an NMT model.")
+    parser = SilnlpArgumentParser(description="Estimate the quality of drafts created by an NMT model.")
     parser.add_argument(
         "linregress_file",
         nargs="?",

@@ -1,4 +1,3 @@
-import argparse
 import logging
 from datetime import timedelta
 from pathlib import Path
@@ -11,6 +10,7 @@ from tqdm import tqdm
 
 from silnlp.common.environment import SilNlpEnv
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.utils import get_git_revision_hash
 from .config import create_word_tokenizer, get_thot_word_alignment_type, load_config
 
@@ -108,7 +108,7 @@ def train(exp_name: str, environment: SilNlpEnv) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Trains an SMT model using the Machine library")
+    parser = SilnlpArgumentParser(description="Trains an SMT model using the Machine library")
     parser.add_argument("experiments", nargs="+", help="Experiment names")
     args = parser.parse_args()
 

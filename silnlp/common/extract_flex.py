@@ -1,9 +1,10 @@
 import xml.etree.ElementTree as ET
-from argparse import ArgumentParser
 from typing import Optional, Set
 
 from pathlib2 import Path
 from tqdm import tqdm
+
+from .argument_parser import SilnlpArgumentParser
 
 
 def extract_flex(
@@ -59,7 +60,7 @@ def extract_flex(
 
 
 def main():
-    parser = ArgumentParser(description="Extracts text corpora from FLEx XML data")
+    parser = SilnlpArgumentParser(description="Extracts text corpora from FLEx XML data")
     parser.add_argument("xml", nargs=1, help="FLEx xml data")
     parser.add_argument(
         "--output-folder",

@@ -1,4 +1,3 @@
-import argparse
 import csv
 import re
 from collections import Counter
@@ -7,6 +6,7 @@ import numpy
 import pandas as pd
 
 from ..common.environment import SilNlpEnv
+from .argument_parser import SilnlpArgumentParser
 
 
 def is_word(word: str) -> bool:
@@ -14,7 +14,7 @@ def is_word(word: str) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Counts lexicon entries")
+    parser = SilnlpArgumentParser(description="Counts lexicon entries")
     parser.add_argument("experiment", help="Experiment folder from path S:\\Alignment\\experiments\\")
     parser.add_argument("--aligner", help="Aligner: eflomal, fast-align, hmm", default="eflomal")
     parser.add_argument("--num", help="Number of most common words to include", type=int, default=100)

@@ -1,10 +1,10 @@
-import argparse
 import re
 from typing import List
 
 import numpy
 
 from ..common.environment import SilNlpEnv
+from .argument_parser import SilnlpArgumentParser
 
 
 def get_all_words(src_file: str) -> List:
@@ -31,7 +31,7 @@ def find_unique(words1: List, words2: List) -> List:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Compares unique words in two corpora")
+    parser = SilnlpArgumentParser(description="Compares unique words in two corpora")
     parser.add_argument("exp1", help="First experiment folder from path S:\\Alignment\\experiments\\")
     parser.add_argument("exp2", help="Second experiment folder from path S:\\Alignment\\experiments\\")
     parser.add_argument(

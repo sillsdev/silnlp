@@ -1,4 +1,5 @@
 import argparse
+import ast
 import json
 import subprocess
 import sys
@@ -7,6 +8,7 @@ from typing import Any, Dict
 
 import pytest
 
+import silnlp
 from silnlp.common.argument_parser import SilnlpArgumentParser
 
 
@@ -231,3 +233,15 @@ def test_describe_json_dash_writes_to_stdout() -> None:
     description = json.loads(result.stdout)
     assert argument(description, "--list")["kind"] == "store_true"
 
+
+def test_no_script_builds_a_plain_argument_parser() -> None:
+    package_dir = Path(silnlp.__file__).parent
+    offenders = []
+    for path in sorted(package_dir.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call):
+                continue
+            called = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", None)
+            if called == "ArgumentParser":
+                offenders.append(f"{path.relative_to(package_dir.parent)}:{node.lineno}")
+    assert offenders == [], "Use SilnlpArgumentParser so the web front end can read these scripts' options"

@@ -6,18 +6,18 @@
 # log number of lengths over 200
 
 
-import argparse
 import logging
 
 import matplotlib.pyplot as plt
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.environment import SilNlpEnv
 
 logging.basicConfig()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Display a histogram of segment lengths in tokens")
+    parser = SilnlpArgumentParser(description="Display a histogram of segment lengths in tokens")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("filename", help="Tokenized file in experiment folder")
     args = parser.parse_args()

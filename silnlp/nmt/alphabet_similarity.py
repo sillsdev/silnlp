@@ -1,4 +1,3 @@
-import argparse
 from pathlib import Path
 from typing import List, Set
 
@@ -6,6 +5,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.environment import SilNlpEnv
 from .config_utils import load_config
 
@@ -85,7 +85,7 @@ def get_iso(file_path: Path) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
+    parser = SilnlpArgumentParser(
         description="Calculates alphabet similarity between text corpora in a multilingual data set"
     )
     parser.add_argument("experiment", help="Experiment name")

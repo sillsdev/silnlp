@@ -1,4 +1,3 @@
-import argparse
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Set
@@ -7,6 +6,7 @@ import pandas as pd
 from machine.scripture import ALL_BOOK_IDS, VerseRef, book_id_to_number, get_books, is_ot_nt
 from nltk.translate.api import Alignment
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.environment import SilNlpEnv
 from ..common.utils import set_seed
 from .config import get_all_book_paths, load_config
@@ -108,7 +108,7 @@ def test(exp_dirs: List[Path], by_book: bool, books: Set[int], test_size: Option
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Tests generated alignments against gold standard alignments")
+    parser = SilnlpArgumentParser(description="Tests generated alignments against gold standard alignments")
     parser.add_argument("experiments", type=str, help="Experiment pattern")
     parser.add_argument("--combine-pattern", type=str, default="*", help="Combine pattern")
     parser.add_argument("--test-size", type=int, help="Test size")

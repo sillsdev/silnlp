@@ -1,6 +1,6 @@
-import argparse
 import logging
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.environment import SilNlpEnv
 from ..common.utils import get_git_revision_hash
 from .config_utils import load_config
@@ -9,7 +9,7 @@ LOGGER = logging.getLogger((__package__ or "") + ".preprocess")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Preprocesses the parallel corpus for an NMT model")
+    parser = SilnlpArgumentParser(description="Preprocesses the parallel corpus for an NMT model")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--stats", default=False, action="store_true", help="Compute tokenization statistics")
     parser.add_argument(

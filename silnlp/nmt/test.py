@@ -1,4 +1,3 @@
-import argparse
 import csv
 import logging
 import random
@@ -12,6 +11,7 @@ from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_i
 from sacrebleu.metrics import BLEUScore
 from scipy.stats import gmean
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.environment import SilNlpEnv
 from ..common.linear_regression import perform_enhanced_linear_regression
 from ..common.translator import CONFIDENCE_SUFFIX, TestConfidenceFile
@@ -955,7 +955,7 @@ def test(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Tests an NMT model")
+    parser = SilnlpArgumentParser(description="Tests an NMT model")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--checkpoint", type=str, help="Test checkpoint")
     parser.add_argument("--last", default=False, action="store_true", help="Test last checkpoint")

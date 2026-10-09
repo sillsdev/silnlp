@@ -1,4 +1,3 @@
-import argparse
 import json
 import os
 from pathlib import Path
@@ -10,6 +9,7 @@ from sklearn.model_selection import train_test_split
 from ..common.corpus import load_corpus, write_corpus
 from ..common.environment import SilNlpEnv
 from ..common.utils import get_git_revision_hash, merge_dict, set_seed
+from .argument_parser import SilnlpArgumentParser
 
 _DEFAULT_SPLIT_CONFIG: dict = {
     "split": {},
@@ -53,7 +53,7 @@ def keep_lines(src, trg):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Splitting a parallel corpus")
+    parser = SilnlpArgumentParser(description="Splitting a parallel corpus")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--config", type=str, default="config.yml", help="config file")
     args = parser.parse_args()

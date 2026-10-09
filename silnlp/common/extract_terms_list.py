@@ -1,11 +1,11 @@
-import argparse
 
+from .argument_parser import SilnlpArgumentParser
 from .environment import SilNlpEnv
 from .paratext import extract_terms_list
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Extracts a Paratext Biblical Terms list")
+    parser = SilnlpArgumentParser(description="Extracts a Paratext Biblical Terms list")
     parser.add_argument("list", type=str, help="Biblical Terms list")
     args = parser.parse_args()
 

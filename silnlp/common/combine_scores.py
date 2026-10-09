@@ -1,4 +1,3 @@
-import argparse
 import sys
 from pathlib import Path
 
@@ -6,6 +5,7 @@ import openpyxl
 import pandas as pd
 
 from ..common.environment import SilNlpEnv
+from .argument_parser import SilnlpArgumentParser
 
 # Canonical column set and order for the combined output. Series/Experiment/Steps
 # are synthesized by this script; the rest come from the input scores files.
@@ -193,7 +193,7 @@ def write_to_excel(df: pd.DataFrame, folder: Path, output_filename: str) -> None
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Aggregate CSV files in a folder.")
+    parser = SilnlpArgumentParser(description="Aggregate CSV files in a folder.")
     parser.add_argument("folder", type=Path, help="Path to the folder containing CSV files.")
     parser.add_argument(
         "--output_filename",

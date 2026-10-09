@@ -1,4 +1,3 @@
-import argparse
 import logging
 from concurrent.futures import ProcessPoolExecutor
 from datetime import timedelta
@@ -17,6 +16,8 @@ from machine.translation.thot import ThotSymmetrizedWordAlignmentModel, create_t
 from tqdm import tqdm
 
 from silnlp.common.environment import SilNlpEnv
+
+from .argument_parser import SilnlpArgumentParser
 
 LOGGER = logging.getLogger(__package__ + ".golden_path")
 
@@ -218,7 +219,7 @@ def beam_search(
 
 def main() -> None:
 
-    parser = argparse.ArgumentParser(description="Compute the golden path for a Bible translation")
+    parser = SilnlpArgumentParser(description="Compute the golden path for a Bible translation")
     parser.add_argument("--corpora", nargs="+", metavar="corpus", help="Corpora")
     parser.add_argument("--ref-corpus", type=str, default="grc-GRK", help="Reference corpus")
     parser.add_argument("--beam-width", type=int, default=5, help="Beam width")

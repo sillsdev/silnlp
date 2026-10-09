@@ -1,4 +1,3 @@
-import argparse
 import logging
 import re
 from statistics import mean
@@ -12,6 +11,7 @@ from ..alignment.config import get_aligner_name
 from ..alignment.utils import add_alignment_scores
 from ..nmt.clearml_connection import TAGS_LIST, SILClearML
 from ..nmt.config import Config, get_data_file_pairs
+from .argument_parser import SilnlpArgumentParser
 from .collect_verse_counts import DT_CANON, NT_CANON, OT_CANON, collect_verse_counts
 from .corpus import filter_parallel_corpus, get_scripture_parallel_corpus, include_chapters
 from .environment import SilNlpEnv
@@ -512,7 +512,7 @@ def analyze(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Collect verse counts and compute alignment scores")
+    parser = SilnlpArgumentParser(description="Collect verse counts and compute alignment scores")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--create-summaries", default=False, action="store_true", help="Create summary Excel files")
     parser.add_argument(

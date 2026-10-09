@@ -1,4 +1,3 @@
-import argparse
 import logging
 from io import BytesIO
 from pathlib import Path
@@ -10,6 +9,7 @@ from machine.scripture import ALL_BOOK_IDS
 
 from ..common.environment import SilNlpEnv
 from ..nmt.quality_estimation import CANONICAL_ORDER
+from .argument_parser import SilnlpArgumentParser
 
 LOGGER = logging.getLogger(__package__ + ".sample_usability")
 
@@ -112,7 +112,7 @@ def get_sample(df: pd.DataFrame, sample_size: int, random_seed: int) -> pd.DataF
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate a stratified sample from a usability verses file.")
+    parser = SilnlpArgumentParser(description="Generate a stratified sample from a usability verses file.")
     parser.add_argument(
         "usability_verses_file",
         type=Path,

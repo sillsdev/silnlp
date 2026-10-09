@@ -1,4 +1,3 @@
-import argparse
 import math
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
@@ -6,6 +5,7 @@ from typing import List, Optional, Set, Tuple
 import numpy as np
 from machine.scripture import get_books
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.environment import SilNlpEnv
 from ..common.utils import set_seed
 from .config import ALIGNERS, load_config
@@ -61,7 +61,7 @@ def compute_similarity(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Finds the optimal size for a gold standard")
+    parser = SilnlpArgumentParser(description="Finds the optimal size for a gold standard")
     parser.add_argument("experiments", help="Experiment pattern")
     parser.add_argument("--threshold", type=float, help="Similarity threshold")
     parser.add_argument("--test-size", type=int, help="Test size")

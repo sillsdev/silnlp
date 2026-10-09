@@ -1,4 +1,3 @@
-import argparse
 import logging
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -10,6 +9,7 @@ from machine.scripture import ALL_BOOK_IDS, book_id_to_number, is_nt, is_ot
 from tqdm import tqdm
 
 from ..nmt.seq2seq_config import Seq2SeqConfig
+from .argument_parser import SilnlpArgumentParser
 from .environment import SilNlpEnv
 
 LOGGER = logging.getLogger(__package__ + ".collect_verse_counts")
@@ -277,7 +277,7 @@ def collect_verse_counts(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Collect various counts from a corpus of Bible extracts")
+    parser = SilnlpArgumentParser(description="Collect various counts from a corpus of Bible extracts")
     parser.add_argument(
         "folder",
         help="An experiment folder (typically in MT/experiments) that contains a config.yml file."

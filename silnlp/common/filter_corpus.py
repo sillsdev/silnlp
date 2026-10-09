@@ -1,4 +1,3 @@
-import argparse
 import tempfile
 from pathlib import Path
 from typing import List
@@ -6,6 +5,7 @@ from typing import List
 import numpy as np
 
 from ..alignment.utils import compute_alignment_scores
+from .argument_parser import SilnlpArgumentParser
 
 
 def filterTsvFile(
@@ -85,7 +85,7 @@ def write_scores_file(scores_out_path: Path, scores: List[float], src_path: Path
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
+    parser = SilnlpArgumentParser(
         description="Filters sentence pairs from a parallel corpus using the provided scores"
     )
     parser.add_argument("--input", type=str, required=False, help="The tab-delimited input corpus file")

@@ -1,4 +1,3 @@
-import argparse
 import glob
 import os
 import re
@@ -9,6 +8,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.environment import SilNlpEnv
 
 
@@ -236,7 +236,7 @@ def create_xlsx(
 # python -m silnlp.nmt.exp_summary Catapult_Reloaded_Confidences
 # --trained-books MRK --target-book MAT --metrics chrf3 confidence --key-word conf --baseline Catapult_Reloaded/2nd_book/MRK
 def main() -> None:
-    parser = argparse.ArgumentParser(
+    parser = SilnlpArgumentParser(
         description="Pulling results from a single experiment and/or multiple experiment groups. "
         "A valid experiment should have the following format: "
         "baseline/lang_pair/exp_group/diff_predictions or baseline/lang_pair/diff_predictions for a single experiment "

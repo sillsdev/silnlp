@@ -1,4 +1,3 @@
-import argparse
 import logging
 import os
 import re
@@ -10,6 +9,7 @@ from typing import Dict, List, Optional
 import Levenshtein
 import pandas as pd
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.corpus import load_corpus
 from ..common.environment import SilNlpEnv
 from ..common.utils import get_git_revision_hash
@@ -225,7 +225,7 @@ def wordChecks(
 def main() -> None:
     writer: pd.ExcelWriter
 
-    parser = argparse.ArgumentParser(description="Checks the train/validate/test splits created for an NMT model")
+    parser = SilnlpArgumentParser(description="Checks the train/validate/test splits created for an NMT model")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--details", default=False, action="store_true", help="Show detailed word lists")
     parser.add_argument("--similar-words", default=False, action="store_true", help="Find similar words")

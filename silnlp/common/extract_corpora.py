@@ -1,4 +1,3 @@
-import argparse
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -6,6 +5,7 @@ from typing import Optional, Set
 
 from ..common.corpus import count_lines
 from ..common.environment import SilNlpEnv
+from .argument_parser import SilnlpArgumentParser
 from .paratext import (
     CheckVersificationOutput,
     check_versification,
@@ -26,7 +26,7 @@ class ExtractOutput:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Extracts text corpora from Paratext projects")
+    parser = SilnlpArgumentParser(description="Extracts text corpora from Paratext projects")
     parser.add_argument("projects", nargs="+", metavar="name", help="Paratext project")
     parser.add_argument("--parent-project", default=None, help="The parent Paratext project")
     parser.add_argument(

@@ -1,4 +1,3 @@
-import argparse
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -6,6 +5,7 @@ from typing import Optional, Set, Union
 
 import yaml
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.environment import SilNlpEnv
 from ..common.postprocessor import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
@@ -158,7 +158,7 @@ class SILExperiment:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run experiment - preprocess, train, and test")
+    parser = SilnlpArgumentParser(description="Run experiment - preprocess, train, and test")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--stats", default=False, action="store_true", help="Compute tokenization statistics")
     parser.add_argument(

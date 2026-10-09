@@ -1,8 +1,9 @@
-import argparse
 import logging
 from collections import Counter
 
 from hanzidentifier import SIMPLIFIED, TRADITIONAL, identify
+
+from .argument_parser import SilnlpArgumentParser
 
 LOGGER = logging.getLogger(__package__ + ".script_utils")
 
@@ -2068,7 +2069,7 @@ def is_represented(script_code: str, model: str) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    parser = SilnlpArgumentParser()
     parser.add_argument("input", help="The text file you want to determine the script of")
     args = parser.parse_args()
 

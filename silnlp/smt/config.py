@@ -1,4 +1,3 @@
-import argparse
 import logging
 
 import yaml
@@ -14,6 +13,7 @@ from machine.tokenization import (
 )
 from machine.translation.thot import ThotWordAlignmentModelType
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.environment import SilNlpEnv
 from ..common.utils import get_git_revision_hash, merge_dict
 
@@ -80,7 +80,7 @@ def create_word_detokenizer(tokenizer_type: str) -> Detokenizer[str, str]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Creates a NMT experiment config file")
+    parser = SilnlpArgumentParser(description="Creates a NMT experiment config file")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--src-lang", type=str, required=True, help="Source language")
     parser.add_argument("--trg-lang", type=str, required=True, help="Target language")

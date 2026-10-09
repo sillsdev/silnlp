@@ -6,6 +6,7 @@ from pathlib import Path
 from machine.corpora import FileParatextProjectSettingsParser, UsfmFileText
 from machine.scripture import book_number_to_id, get_chapters
 
+from .argument_parser import SilnlpArgumentParser
 from .collect_verse_counts import DT_CANON, NT_CANON, OT_CANON
 from .environment import SilNlpEnv
 
@@ -79,7 +80,7 @@ def parse_book(project_dir: str, book: str):
 
 def main() -> None:
 
-    parser = argparse.ArgumentParser(
+    parser = SilnlpArgumentParser(
         prog="check_books",
         description="Checks sfm files for a project with the same parser as translate.py",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -1,4 +1,3 @@
-import argparse
 from contextlib import ExitStack
 from typing import List
 
@@ -8,6 +7,7 @@ from machine.translation import MAX_SEGMENT_LENGTH
 from machine.translation.thot import ThotSmtModel
 from tqdm import tqdm
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.corpus import load_corpus
 from ..common.environment import SilNlpEnv
 from ..common.utils import get_git_revision_hash
@@ -26,7 +26,7 @@ def is_valid(row: TextRow) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Tests an SMT model using the Machine library")
+    parser = SilnlpArgumentParser(description="Tests an SMT model using the Machine library")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument(
         "--scorers",

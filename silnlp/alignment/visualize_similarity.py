@@ -1,4 +1,3 @@
-import argparse
 import csv
 import logging
 from math import sqrt
@@ -18,6 +17,7 @@ from scipy.cluster.hierarchy import dendrogram, linkage
 from scipy.spatial.distance import squareform
 from sortedcontainers import SortedSet
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.corpus import get_scripture_parallel_corpus
 from ..common.environment import SilNlpEnv
 from .config import get_aligner
@@ -70,7 +70,7 @@ def tokenize_verses(verses: Iterable[str], output_path: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Visualize similarity of languages/projects")
+    parser = SilnlpArgumentParser(description="Visualize similarity of languages/projects")
     parser.add_argument("--corpus", type=str, required=True, help="The corpus folder")
     parser.add_argument("--metadata", type=str, required=True, help="The metadata file")
     parser.add_argument("--scores", type=str, required=True, help="The similarity scores file")

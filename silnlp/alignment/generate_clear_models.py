@@ -1,8 +1,8 @@
-import argparse
 import logging
 from pathlib import Path
 from typing import Set
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.environment import SilNlpEnv
 from .config import get_aligner
 from .lexicon import Lexicon
@@ -11,7 +11,7 @@ LOGGER = logging.getLogger(__package__ + ".generate_clear_models")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generates translation model for Clear from an alignment model")
+    parser = SilnlpArgumentParser(description="Generates translation model for Clear from an alignment model")
     parser.add_argument("experiments", type=str, help="Experiment pattern")
     parser.add_argument("--aligner", type=str, help="Aligner")
     parser.add_argument("--output", type=str, help="The output directory")

@@ -16,12 +16,13 @@ Monolingual data filtering hard rules, including:
 10. sentences with html address and html tags
 11. optional: non english characters > 0.25
 """
-import argparse
 import re
 import time
 from string import punctuation
 
-parser = argparse.ArgumentParser()
+from .argument_parser import SilnlpArgumentParser
+
+parser = SilnlpArgumentParser()
 parser.add_argument("src", help="source file")
 parser.add_argument(
     "--soft_html",

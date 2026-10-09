@@ -1,4 +1,3 @@
-import argparse
 from pathlib import Path
 from typing import List, Optional
 
@@ -7,6 +6,8 @@ from machine.scripture import VerseRef
 
 from silnlp.common.corpus import load_corpus
 from silnlp.common.environment import SilNlpEnv
+
+from ...common.argument_parser import SilnlpArgumentParser
 
 
 class Passage:
@@ -69,7 +70,7 @@ def assign_verses_to_passages(project_name: str, passage_file: Path, environment
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
+    parser = SilnlpArgumentParser(
         description="Collects text from a Paratext project and groups in into specified passages."
     )
     parser.add_argument("--project", help="Name of source Paratext project", required=True, type=str)

@@ -1,4 +1,3 @@
-import argparse
 import json
 import logging
 from contextlib import ExitStack
@@ -11,6 +10,7 @@ from machine.tokenization import LatinWordTokenizer, WhitespaceTokenizer
 
 from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.corpus import get_scripture_parallel_corpus, include_chapters
 from ..common.environment import SilNlpEnv
 from ..common.stemmer import Stemmer
@@ -138,7 +138,7 @@ def stem(src_stemmer: Stemmer, trg_stemmer: Stemmer, row: ParallelTextRow) -> Pa
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Preprocesses Clear gold standard alignments")
+    parser = SilnlpArgumentParser(description="Preprocesses Clear gold standard alignments")
     parser.add_argument("experiments", type=str, help="Experiment pattern")
     parser.add_argument(
         "--clearml-queue",

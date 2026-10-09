@@ -1,4 +1,3 @@
-import argparse
 import logging
 import shutil
 import time
@@ -6,6 +5,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from ..common.argument_parser import SilnlpArgumentParser
 from ..common.environment import SilNlpEnv
 from ..nmt.clearml_connection import TAGS_LIST, SILClearML
 from .config import ALIGNERS, get_aligner, get_aligner_name, get_all_book_paths, load_config
@@ -66,7 +66,7 @@ def extract_lexicons(aligner_ids: List[str], exp_dir: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Aligns the parallel corpus for an experiment")
+    parser = SilnlpArgumentParser(description="Aligns the parallel corpus for an experiment")
     parser.add_argument("experiments", type=str, help="Experiment pattern")
     parser.add_argument(
         "--aligners", nargs="*", metavar="aligner", default=[], help="Aligners", choices=list(ALIGNERS.keys())
