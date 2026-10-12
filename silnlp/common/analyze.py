@@ -82,7 +82,7 @@ def get_corpus_stats(
             if src_file == trg_file:
                 continue
 
-            src_project, trg_project = src_file.corpus_name, trg_file.corpus_name
+            src_project, trg_project = src_file.path.stem, trg_file.path.stem
             if force_align:
                 (config.exp_dir / f"{src_project}_{trg_project}.csv").unlink(missing_ok=True)
                 (config.exp_dir / f"{trg_project}_{src_project}.csv").unlink(missing_ok=True)
@@ -90,8 +90,8 @@ def get_corpus_stats(
             pairs_to_process.append((src_file, trg_file, pair.corpus_books, pair.score_threshold))
 
     for src_file, trg_file, corpus_books, score_threshold in pairs_to_process:
-        source = src_file.corpus_name
-        target = trg_file.corpus_name
+        source = src_file.path.stem
+        target = trg_file.path.stem
         project_pair = (source, target)
         if project_pair not in stats_df.index:
             corpus = get_corpus_with_text(src_file, trg_file, corpus_books, deutero, environment)
@@ -390,10 +390,9 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
             scores_path = config.exp_dir / f"{trg_project}_{src_project}.csv"
 
         # Get verse alignment scores for pair
-        align_scores_df = pd.read_csv(scores_path)
-        if "vref" not in align_scores_df.columns:
+        if "vref" not in pd.read_csv(scores_path, nrows=0).columns:
             continue
-        align_scores_df = align_scores_df.set_index("vref").drop(columns=["source", "target"])
+        align_scores_df = pd.read_csv(scores_path).set_index("vref").drop(columns=["source", "target"])
         align_scores_df.index = pd.MultiIndex.from_tuples(
             [split_index(vref) for vref in align_scores_df.index], names=["book", "chapter", "verse"]
         )

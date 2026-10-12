@@ -47,7 +47,7 @@ from .corpora import (
     get_terms_glosses_file_paths,
     parse_corpus_pairs,
 )
-from .data_set_files import DataSetFile, SplitFiles
+from .data_set_files import DataSetFile, DataSetFileOpener, SplitFiles
 from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger((__package__ or "") + ".config")
@@ -612,6 +612,8 @@ class Config(ABC):
     def _delete_previous_data_files(self) -> None:
         self._delete_files("train.*.txt")
         self._delete_files("val.*.txt")
+        self._delete_files("val.trg.txt.*")
+        self._delete_files("val.trg.detok.txt.*")
         self._delete_files("test.*.txt")
         self._delete_files("dict.*.txt")
 
@@ -666,7 +668,7 @@ class Config(ABC):
             corpus_count = len(cur_train)
 
             if pair.is_train and pair.score_threshold > 0:
-                alignment_scores.add_to(cur_train, src_file.corpus_name, trg_file.corpus_name)
+                alignment_scores.add_to(cur_train, src_file.path.stem, trg_file.path.stem)
 
             if pair.is_test:
                 if len(pair.test_books) > 0:
@@ -1086,7 +1088,12 @@ class Config(ABC):
                     for index in pair_val.index:
                         for ci in range(val_project_count):
                             if len(ref_files) == ci:
-                                ref_files.append(stack.enter_context(self._open_append(self.val_trg_filename(ci))))
+                                ref_fn = (
+                                    self.val_trg_filename(ci)
+                                    if tokenizer is not None
+                                    else self.val_trg_detok_filename(ci)
+                                )
+                                ref_files.append(stack.enter_context(self._open_append(ref_fn)))
                             if ci < len(columns):
                                 col = columns[ci]
                                 if tokenizer is not None:
@@ -1145,6 +1152,7 @@ class Config(ABC):
         test_count = 0
         dict_count = 0
         with ExitStack() as stack:
+            files = DataSetFileOpener(self.exp_dir, stack)
             test_indices: Optional[Set[int]] = set()
             if pair.is_test:
                 test_size = pair.size if pair.test_size is None else pair.test_size
@@ -1153,7 +1161,7 @@ class Config(ABC):
             poorly_aligned_indices: Set[int] = set()
             if pair.is_train and pair.score_threshold > 0 and test_indices is not None:
                 scored_corpus = corpus.to_data_frame()
-                alignment_scores.add_to(scored_corpus, src_file.corpus_name, trg_file.corpus_name)
+                alignment_scores.add_to(scored_corpus, src_file.path.stem, trg_file.path.stem)
                 train_candidates = scored_corpus.drop(list(test_indices))
                 well_aligned = alignment_scores.filter(train_candidates, pair.score_threshold)
                 poorly_aligned_indices = set(train_candidates.index.difference(well_aligned.index))
@@ -1172,18 +1180,16 @@ class Config(ABC):
             val_blank_files: List[DataSetFile] = []
             test_blank_files: List[DataSetFile] = []
             if self.has_scripture_data:
-                train_blank_files = self._open_data_set_files(stack, self.train_vref_filename())
+                train_blank_files = files.open(self.train_vref_filename())
                 val_ref_count = self._get_val_ref_count(src_file.iso, trg_file.iso)
-                val_blank_files = self._open_data_set_files(
-                    stack,
+                val_blank_files = files.open(
                     self.val_vref_filename(),
                     *(self.val_trg_filename(index) for index in range(1, val_ref_count)),
                     *(self.val_trg_detok_filename(index) for index in range(1, val_ref_count)),
                 )
-                test_blank_files = self._open_data_set_files(stack, self.test_vref_filename(src_file.iso, trg_file.iso))
+                test_blank_files = files.open(self.test_vref_filename(src_file.iso, trg_file.iso))
                 if self._has_multiple_test_projects(src_file.iso, trg_file.iso):
-                    test_blank_files += self._open_data_set_files(
-                        stack,
+                    test_blank_files += files.open(
                         *(
                             self.test_trg_filename(src_file.iso, trg_file.iso, project)
                             for project in self._get_test_projects(src_file.iso, trg_file.iso)
@@ -1191,8 +1197,7 @@ class Config(ABC):
                         ),
                     )
             train_files = SplitFiles(
-                self._open_data_set_files(
-                    stack,
+                files.open(
                     self.train_src_filename(),
                     self.train_trg_filename(),
                     self.train_src_detok_filename(),
@@ -1201,8 +1206,7 @@ class Config(ABC):
                 train_blank_files,
             )
             val_files = SplitFiles(
-                self._open_data_set_files(
-                    stack,
+                files.open(
                     self.val_src_filename(),
                     self.val_src_detok_filename(),
                     self.val_trg_filename(),
@@ -1211,8 +1215,7 @@ class Config(ABC):
                 val_blank_files,
             )
             test_files = SplitFiles(
-                self._open_data_set_files(
-                    stack,
+                files.open(
                     self.test_src_filename(src_file.iso, trg_file.iso),
                     self.test_src_detok_filename(src_file.iso, trg_file.iso),
                     self.test_trg_filename(src_file.iso, trg_file.iso),
@@ -1220,8 +1223,8 @@ class Config(ABC):
                 test_blank_files,
             )
             dict_files = SplitFiles(
-                self._open_data_set_files(stack, self.dict_src_filename(), self.dict_trg_filename()),
-                self._open_data_set_files(stack, self.dict_vref_filename()),
+                files.open(self.dict_src_filename(), self.dict_trg_filename()),
+                files.open(self.dict_vref_filename()),
             )
 
             for index, (src_line, trg_line) in enumerate(tqdm(corpus)):
@@ -1284,9 +1287,6 @@ class Config(ABC):
             f"train size: {train_count}, val size: {val_count}, test size: {test_count}, dict size: {dict_count}"
         )
         return train_count
-
-    def _open_data_set_files(self, stack: ExitStack, *filenames: str) -> List[DataSetFile]:
-        return [stack.enter_context(DataSetFile(self.exp_dir / filename)) for filename in filenames]
 
     def _write_train_sentence_pair(
         self,

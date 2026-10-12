@@ -51,11 +51,6 @@ class DataFile:
     def is_scripture(self) -> bool:
         return self.project != BASIC_DATA_PROJECT
 
-    @property
-    def corpus_name(self) -> str:
-        # Every basic corpus shares the BASIC project, so only its file name tells it apart.
-        return f"{self.iso}-{self.project}" if self.is_scripture else self.path.stem
-
 
 @dataclass
 class CorpusPair:

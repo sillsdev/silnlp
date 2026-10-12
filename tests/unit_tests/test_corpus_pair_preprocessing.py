@@ -40,12 +40,16 @@ class PreprocessingExperiment:
         self.preprocess_pairs([{"src": "en-AAA", "trg": "es-BBB", **pair_settings}], force_align, data_settings)
 
     def preprocess_pairs(
-        self, pairs: List[dict], force_align: bool = False, data_settings: Optional[dict] = None
+        self,
+        pairs: List[dict],
+        force_align: bool = False,
+        data_settings: Optional[dict] = None,
+        eval_settings: Optional[dict] = None,
     ) -> None:
         # Parsing a corpus pair consumes parts of its settings, and the comparisons reuse them.
         data = {"corpus_pairs": deepcopy(pairs), "tokenize": False, **(data_settings or {})}
         environment = SilNlpEnv.create_environment_with_mt_dir(self._mt_dir)
-        config = Seq2SeqConfig(self._exp_dir, {"data": data}, environment)
+        config = Seq2SeqConfig(self._exp_dir, {"data": data, "eval": eval_settings or {}}, environment)
         config.set_seed()
         config.preprocess(stats=False, force_align=force_align)
 
@@ -167,6 +171,24 @@ def test_mixed_experiment_keeps_the_files_of_each_split_aligned(tmp_path: Path):
     assert experiment.count_lines_by_split() == {"train": {12}, "val": {6}, "test": {6}, "dict": {6}}
 
 
+def test_multi_reference_val_files_stay_aligned_when_preprocessed_again(tmp_path: Path):
+    experiment = PreprocessingExperiment(tmp_path, "scripture")
+    experiment.write_corpus(8)
+    experiment.add_corpus("scripture", "es-EEE", 8)
+    experiment.add_corpus("corpora", "en-CCC", 6)
+    experiment.add_corpus("corpora", "es-DDD", 6)
+    pairs = [
+        {"src": "en-AAA", "trg": "es-BBB", "test_size": 2, "val_size": 2},
+        {"src": "en-AAA", "trg": "es-EEE", "test_size": 2, "val_size": 2},
+        {"src": "en-CCC", "trg": "es-DDD", "test_size": 2, "val_size": 2},
+    ]
+
+    for _ in range(2):
+        experiment.preprocess_pairs(pairs, eval_settings={"multi_ref_eval": True})
+
+    assert experiment.count_lines_by_split()["val"] == {6}
+
+
 @pytest.fixture(params=["corpora", "scripture"])
 def experiment(request, tmp_path: Path) -> PreprocessingExperiment:
     return PreprocessingExperiment(tmp_path, request.param)
@@ -218,6 +240,15 @@ def test_score_threshold_is_ignored_for_pairs_not_used_for_training(experiment: 
 
 def test_scores_are_computed_and_cached_when_no_cache_exists(experiment: PreprocessingExperiment):
     experiment.write_corpus(8)
+
+    experiment.preprocess({"score_threshold": 0.01, "test_size": 0, "val_size": 0})
+
+    assert len(experiment.read_cached_scores()) == 8
+
+
+def test_cached_scores_for_a_different_corpus_are_recomputed(experiment: PreprocessingExperiment):
+    experiment.write_corpus(8)
+    experiment.cache_scores([0.9] * 5)
 
     experiment.preprocess({"score_threshold": 0.01, "test_size": 0, "val_size": 0})
 

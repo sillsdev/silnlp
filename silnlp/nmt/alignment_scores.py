@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 
@@ -20,9 +21,11 @@ class AlignmentScores:
 
     def add_to(self, corpus: pd.DataFrame, source_name: str, target_name: str) -> None:
         cache_path = self._exp_dir / f"{source_name}_{target_name}.csv"
-        if cache_path.is_file() and not self._force:
+        cached_scores = None if self._force else self._read_cached_scores(cache_path, len(corpus))
+        if cached_scores is not None:
             LOGGER.info(f"Using pre-existing alignment scores from {cache_path}")
-            self._apply_cached(corpus, cache_path)
+            # The cached rows are matched to the corpus by position, not by key.
+            corpus["score"] = cached_scores.to_numpy()
             return
         LOGGER.info(f"Computing alignment scores using {get_aligner_name(self._aligner_id)}")
         add_alignment_scores(corpus, self._aligner_id)
@@ -34,9 +37,11 @@ class AlignmentScores:
         LOGGER.info(f"Filtered out {unfiltered_count - len(filtered)} pairs with alignment below {threshold}.")
         return filtered.drop("score", axis=1, errors="ignore")
 
-    def _apply_cached(self, corpus: pd.DataFrame, cache_path: Path) -> None:
-        # The cached rows are matched to the corpus by position, not by key.
-        cached = pd.read_csv(cache_path)
-        cached["idx"] = corpus.index
-        cached.set_index("idx", inplace=True)
-        corpus["score"] = cached["score"]
+    def _read_cached_scores(self, cache_path: Path, corpus_size: int) -> Optional[pd.Series]:
+        if not cache_path.is_file():
+            return None
+        scores = pd.read_csv(cache_path, usecols=["score"])["score"]
+        if len(scores) != corpus_size:
+            LOGGER.warning(f"Ignoring {cache_path}, which has {len(scores)} scores for {corpus_size} pairs.")
+            return None
+        return scores

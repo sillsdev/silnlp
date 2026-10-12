@@ -1,3 +1,4 @@
+from contextlib import ExitStack
 from pathlib import Path
 from typing import List, Optional, TextIO
 
@@ -19,6 +20,15 @@ class DataSetFile:
         if self._file is None:
             self._file = self._path.open("a", encoding="utf-8", newline="\n")
         self._file.write(line + "\n")
+
+
+class DataSetFileOpener:
+    def __init__(self, exp_dir: Path, stack: ExitStack) -> None:
+        self._exp_dir = exp_dir
+        self._stack = stack
+
+    def open(self, *filenames: str) -> List[DataSetFile]:
+        return [self._stack.enter_context(DataSetFile(self._exp_dir / filename)) for filename in filenames]
 
 
 class SplitFiles:

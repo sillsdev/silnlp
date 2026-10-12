@@ -42,10 +42,11 @@ def is_valid_encoding(file: Path, encoding: str = "utf-8") -> bool:
 def get_corpus_paths(corpus_pairs: List[dict], environment: SilNlpEnv) -> List[Path]:
     names = []
     for corpus_pair in corpus_pairs:
-        src_list = corpus_pair["src"] if isinstance(corpus_pair["src"], list) else [corpus_pair["src"]]
-        trg_list = corpus_pair["trg"] if isinstance(corpus_pair["trg"], list) else [corpus_pair["trg"]]
-        names.extend(src_list)
-        names.extend(trg_list)
+        for side in ("src", "trg"):
+            corpora = corpus_pair[side]
+            if isinstance(corpora, str):
+                corpora = corpora.split(",")
+            names.extend(corpus.strip() if isinstance(corpus, str) else corpus["name"] for corpus in corpora)
     return sorted(set(environment.get_mt_corpus_path(name) for name in names))
 
 
