@@ -14,29 +14,53 @@ def _create_environment(tmp_path: Path, src_dir_name: str, trg_dir_name: str) ->
     return SilNlpEnv.create_environment_with_mt_dir(tmp_path / "MT")
 
 
-@pytest.mark.parametrize("src_dir_name,trg_dir_name", [("scripture", "corpora"), ("corpora", "scripture")])
-def test_pairs_of_a_scripture_and_a_basic_corpus_are_rejected(tmp_path: Path, src_dir_name: str, trg_dir_name: str):
-    environment = _create_environment(tmp_path, src_dir_name, trg_dir_name)
+def test_a_scripture_source_paired_with_a_basic_corpus_target_is_rejected(tmp_path: Path):
+    environment = _create_environment(tmp_path, "scripture", "corpora")
 
     with pytest.raises(RuntimeError, match="same type of data"):
         load_parallel_corpus({"src": "en-AAA", "trg": "es-BBB"}, environment)
 
 
-@pytest.mark.parametrize("settings", [{"corpus_books": "GEN"}, {"by_book": True}])
-def test_basic_corpora_reject_settings_that_select_verses(tmp_path: Path, settings: dict):
+def test_a_basic_corpus_source_paired_with_a_scripture_target_is_rejected(tmp_path: Path):
+    environment = _create_environment(tmp_path, "corpora", "scripture")
+
+    with pytest.raises(RuntimeError, match="same type of data"):
+        load_parallel_corpus({"src": "en-AAA", "trg": "es-BBB"}, environment)
+
+
+def test_basic_corpora_reject_corpus_books(tmp_path: Path):
     environment = _create_environment(tmp_path, "corpora", "corpora")
 
     with pytest.raises(RuntimeError, match="no verse references"):
-        load_parallel_corpus({"src": "en-AAA", "trg": "es-BBB", "by_book": False, **settings}, environment)
+        load_parallel_corpus({"src": "en-AAA", "trg": "es-BBB", "by_book": False, "corpus_books": "GEN"}, environment)
 
 
-@pytest.mark.parametrize("dir_name,expected_is_scripture", [("corpora", False), ("scripture", True)])
-def test_pairs_of_one_kind_load_as_that_kind(tmp_path: Path, dir_name: str, expected_is_scripture: bool):
-    environment = _create_environment(tmp_path, dir_name, dir_name)
+def test_basic_corpora_reject_by_book(tmp_path: Path):
+    environment = _create_environment(tmp_path, "corpora", "corpora")
+
+    with pytest.raises(RuntimeError, match="no verse references"):
+        load_parallel_corpus({"src": "en-AAA", "trg": "es-BBB", "by_book": True}, environment)
+
+
+def test_a_pair_of_basic_corpora_loads_as_line_pairs(tmp_path: Path):
+    environment = _create_environment(tmp_path, "corpora", "corpora")
 
     corpus, is_scripture = load_parallel_corpus({"src": "en-AAA", "trg": "es-BBB", "by_book": False}, environment)
 
-    assert is_scripture == expected_is_scripture
+    assert not is_scripture
+    with corpus.get_rows() as rows:
+        assert [(row.source_text, row.target_text) for row in rows] == [
+            ("source 0", "objetivo 0"),
+            ("source 1", "objetivo 1"),
+        ]
+
+
+def test_a_pair_of_scripture_files_loads_as_scripture(tmp_path: Path):
+    environment = _create_environment(tmp_path, "scripture", "scripture")
+
+    corpus, is_scripture = load_parallel_corpus({"src": "en-AAA", "trg": "es-BBB", "by_book": False}, environment)
+
+    assert is_scripture
     with corpus.get_rows() as rows:
         assert [(row.source_text, row.target_text) for row in rows] == [
             ("source 0", "objetivo 0"),

@@ -102,23 +102,74 @@ def preprocess_both_kinds(
     return data_sets
 
 
-@pytest.mark.parametrize(
-    "pair_settings",
-    [
-        {"test_size": 2, "val_size": 2},
-        {"type": "train"},
-        {"type": "test", "test_size": 3},
-        {"type": "train,val", "val_size": 3},
-        {"test_size": 2, "val_size": 2, "tags": "tag"},
-        {"test_size": 2, "val_size": 2, "score_threshold": 0.5},
-        {"test_size": 2, "val_size": 2, "score_threshold": 2},
-        {"src": [{"name": "en-AAA", "include_test": False}], "test_size": 2, "val_size": 2},
-        {"test_size": 2, "val_size": 2, "src_noise": [{"replacement": [1.0, "<blank>"]}]},
-        {"test_size": 2, "val_size": 2, "size": 0.5},
-    ],
-)
-def test_corpora_and_scripture_pairs_write_the_same_data_sets(tmp_path: Path, pair_settings: dict):
-    corpora_data_sets, scripture_data_sets = preprocess_both_kinds(tmp_path, pair_settings)
+def test_corpora_and_scripture_pairs_write_the_same_train_test_and_val_sets(tmp_path: Path):
+    corpora_data_sets, scripture_data_sets = preprocess_both_kinds(tmp_path, {"test_size": 2, "val_size": 2})
+
+    assert corpora_data_sets == scripture_data_sets
+
+
+def test_corpora_and_scripture_pairs_write_the_same_train_only_data_sets(tmp_path: Path):
+    corpora_data_sets, scripture_data_sets = preprocess_both_kinds(tmp_path, {"type": "train"})
+
+    assert corpora_data_sets == scripture_data_sets
+
+
+def test_corpora_and_scripture_pairs_write_the_same_test_only_data_sets(tmp_path: Path):
+    corpora_data_sets, scripture_data_sets = preprocess_both_kinds(tmp_path, {"type": "test", "test_size": 3})
+
+    assert corpora_data_sets == scripture_data_sets
+
+
+def test_corpora_and_scripture_pairs_write_the_same_data_sets_without_a_test_set(tmp_path: Path):
+    corpora_data_sets, scripture_data_sets = preprocess_both_kinds(tmp_path, {"type": "train,val", "val_size": 3})
+
+    assert corpora_data_sets == scripture_data_sets
+
+
+def test_corpora_and_scripture_pairs_write_the_same_tagged_data_sets(tmp_path: Path):
+    corpora_data_sets, scripture_data_sets = preprocess_both_kinds(
+        tmp_path, {"test_size": 2, "val_size": 2, "tags": "tag"}
+    )
+
+    assert corpora_data_sets == scripture_data_sets
+
+
+def test_corpora_and_scripture_pairs_write_the_same_data_sets_under_a_score_threshold_below_one(tmp_path: Path):
+    corpora_data_sets, scripture_data_sets = preprocess_both_kinds(
+        tmp_path, {"test_size": 2, "val_size": 2, "score_threshold": 0.5}
+    )
+
+    assert corpora_data_sets == scripture_data_sets
+
+
+def test_corpora_and_scripture_pairs_write_the_same_data_sets_under_a_score_threshold_of_one_or_more(tmp_path: Path):
+    corpora_data_sets, scripture_data_sets = preprocess_both_kinds(
+        tmp_path, {"test_size": 2, "val_size": 2, "score_threshold": 2}
+    )
+
+    assert corpora_data_sets == scripture_data_sets
+
+
+def test_corpora_and_scripture_pairs_write_the_same_data_sets_for_a_source_left_out_of_the_test_set(tmp_path: Path):
+    corpora_data_sets, scripture_data_sets = preprocess_both_kinds(
+        tmp_path, {"src": [{"name": "en-AAA", "include_test": False}], "test_size": 2, "val_size": 2}
+    )
+
+    assert corpora_data_sets == scripture_data_sets
+
+
+def test_corpora_and_scripture_pairs_write_the_same_noised_data_sets(tmp_path: Path):
+    corpora_data_sets, scripture_data_sets = preprocess_both_kinds(
+        tmp_path, {"test_size": 2, "val_size": 2, "src_noise": [{"replacement": [1.0, "<blank>"]}]}
+    )
+
+    assert corpora_data_sets == scripture_data_sets
+
+
+def test_corpora_and_scripture_pairs_write_the_same_data_sets_with_a_fractional_size(tmp_path: Path):
+    corpora_data_sets, scripture_data_sets = preprocess_both_kinds(
+        tmp_path, {"test_size": 2, "val_size": 2, "size": 0.5}
+    )
 
     assert corpora_data_sets == scripture_data_sets
 
@@ -189,114 +240,232 @@ def test_multi_reference_val_files_stay_aligned_when_preprocessed_again(tmp_path
     assert experiment.count_lines_by_split()["val"] == {6}
 
 
-@pytest.fixture(params=["corpora", "scripture"])
-def experiment(request, tmp_path: Path) -> PreprocessingExperiment:
-    return PreprocessingExperiment(tmp_path, request.param)
+@pytest.fixture
+def basic_experiment(tmp_path: Path) -> PreprocessingExperiment:
+    return PreprocessingExperiment(tmp_path, "corpora")
 
 
-def test_score_threshold_below_one_drops_train_pairs_at_or_below_it(experiment: PreprocessingExperiment):
-    experiment.write_corpus(8)
-    experiment.cache_scores([0.9, 0.2, 0.8, 0.1, 0.7, 0.5, 0.6, 0.95])
-
-    experiment.preprocess({"score_threshold": 0.5, "test_size": 0, "val_size": 0})
-
-    assert sorted(experiment.read_sources("train")) == experiment.sources([0, 2, 4, 6, 7])
+@pytest.fixture
+def scripture_experiment(tmp_path: Path) -> PreprocessingExperiment:
+    return PreprocessingExperiment(tmp_path, "scripture")
 
 
-def test_score_threshold_of_one_or_more_drops_that_many_lowest_scoring_train_pairs(
-    experiment: PreprocessingExperiment,
+def test_score_threshold_below_one_drops_basic_train_pairs_at_or_below_it(
+    basic_experiment: PreprocessingExperiment,
 ):
-    experiment.write_corpus(8)
-    experiment.cache_scores([0.9, 0.2, 0.8, 0.1, 0.7, 0.3, 0.6, 0.95])
+    basic_experiment.write_corpus(8)
+    basic_experiment.cache_scores([0.9, 0.2, 0.8, 0.1, 0.7, 0.5, 0.6, 0.95])
 
-    experiment.preprocess({"score_threshold": 2, "test_size": 0, "val_size": 0})
+    basic_experiment.preprocess({"score_threshold": 0.5, "test_size": 0, "val_size": 0})
 
-    assert sorted(experiment.read_sources("train")) == experiment.sources([0, 2, 4, 5, 6, 7])
+    assert sorted(basic_experiment.read_sources("train")) == basic_experiment.sources([0, 2, 4, 6, 7])
 
 
-def test_score_threshold_leaves_test_set_unfiltered_and_draws_val_set_from_filtered_pairs(
-    experiment: PreprocessingExperiment,
+def test_score_threshold_below_one_drops_scripture_train_pairs_at_or_below_it(
+    scripture_experiment: PreprocessingExperiment,
 ):
-    experiment.write_corpus(8)
-    experiment.cache_scores([0.9, 0.2, 0.8, 0.1, 0.7, 0.3, 0.6, 0.95])
+    scripture_experiment.write_corpus(8)
+    scripture_experiment.cache_scores([0.9, 0.2, 0.8, 0.1, 0.7, 0.5, 0.6, 0.95])
 
-    experiment.preprocess({"score_threshold": 0.5, "test_size": 2, "val_size": 2})
+    scripture_experiment.preprocess({"score_threshold": 0.5, "test_size": 0, "val_size": 0})
 
-    test, val, train = (experiment.read_sources(split) for split in ("test", "val", "train"))
-    low_scoring = set(experiment.sources([1, 3, 5]))
+    assert sorted(scripture_experiment.read_sources("train")) == scripture_experiment.sources([0, 2, 4, 6, 7])
+
+
+def test_score_threshold_of_one_or_more_drops_that_many_lowest_scoring_basic_train_pairs(
+    basic_experiment: PreprocessingExperiment,
+):
+    basic_experiment.write_corpus(8)
+    basic_experiment.cache_scores([0.9, 0.2, 0.8, 0.1, 0.7, 0.3, 0.6, 0.95])
+
+    basic_experiment.preprocess({"score_threshold": 2, "test_size": 0, "val_size": 0})
+
+    assert sorted(basic_experiment.read_sources("train")) == basic_experiment.sources([0, 2, 4, 5, 6, 7])
+
+
+def test_score_threshold_of_one_or_more_drops_that_many_lowest_scoring_scripture_train_pairs(
+    scripture_experiment: PreprocessingExperiment,
+):
+    scripture_experiment.write_corpus(8)
+    scripture_experiment.cache_scores([0.9, 0.2, 0.8, 0.1, 0.7, 0.3, 0.6, 0.95])
+
+    scripture_experiment.preprocess({"score_threshold": 2, "test_size": 0, "val_size": 0})
+
+    assert sorted(scripture_experiment.read_sources("train")) == scripture_experiment.sources([0, 2, 4, 5, 6, 7])
+
+
+def test_score_threshold_leaves_basic_test_set_unfiltered_and_draws_val_set_from_filtered_pairs(
+    basic_experiment: PreprocessingExperiment,
+):
+    basic_experiment.write_corpus(8)
+    basic_experiment.cache_scores([0.9, 0.2, 0.8, 0.1, 0.7, 0.3, 0.6, 0.95])
+
+    basic_experiment.preprocess({"score_threshold": 0.5, "test_size": 2, "val_size": 2})
+
+    test, val, train = (basic_experiment.read_sources(split) for split in ("test", "val", "train"))
+    low_scoring = set(basic_experiment.sources([1, 3, 5]))
     assert len(test) == 2 and len(val) == 2
     assert low_scoring.isdisjoint(val + train)
-    assert set(experiment.sources([0, 2, 4, 6, 7])) <= set(test + val + train)
+    assert set(basic_experiment.sources([0, 2, 4, 6, 7])) <= set(test + val + train)
 
 
-def test_score_threshold_is_ignored_for_pairs_not_used_for_training(experiment: PreprocessingExperiment):
-    experiment.write_corpus(4)
-    experiment.cache_scores([0.9, 0.1, 0.1, 0.1])
+def test_score_threshold_leaves_scripture_test_set_unfiltered_and_draws_val_set_from_filtered_pairs(
+    scripture_experiment: PreprocessingExperiment,
+):
+    scripture_experiment.write_corpus(8)
+    scripture_experiment.cache_scores([0.9, 0.2, 0.8, 0.1, 0.7, 0.3, 0.6, 0.95])
 
-    experiment.preprocess({"type": "test", "score_threshold": 0.5, "test_size": 4})
+    scripture_experiment.preprocess({"score_threshold": 0.5, "test_size": 2, "val_size": 2})
 
-    assert sorted(experiment.read_sources("test")) == experiment.sources(range(4))
-
-
-def test_scores_are_computed_and_cached_when_no_cache_exists(experiment: PreprocessingExperiment):
-    experiment.write_corpus(8)
-
-    experiment.preprocess({"score_threshold": 0.01, "test_size": 0, "val_size": 0})
-
-    assert len(experiment.read_cached_scores()) == 8
+    test, val, train = (scripture_experiment.read_sources(split) for split in ("test", "val", "train"))
+    low_scoring = set(scripture_experiment.sources([1, 3, 5]))
+    assert len(test) == 2 and len(val) == 2
+    assert low_scoring.isdisjoint(val + train)
+    assert set(scripture_experiment.sources([0, 2, 4, 6, 7])) <= set(test + val + train)
 
 
-def test_cached_scores_for_a_different_corpus_are_recomputed(experiment: PreprocessingExperiment):
-    experiment.write_corpus(8)
-    experiment.cache_scores([0.9] * 5)
+def test_score_threshold_is_ignored_for_basic_pairs_not_used_for_training(basic_experiment: PreprocessingExperiment):
+    basic_experiment.write_corpus(4)
+    basic_experiment.cache_scores([0.9, 0.1, 0.1, 0.1])
 
-    experiment.preprocess({"score_threshold": 0.01, "test_size": 0, "val_size": 0})
+    basic_experiment.preprocess({"type": "test", "score_threshold": 0.5, "test_size": 4})
 
-    assert len(experiment.read_cached_scores()) == 8
-
-
-def test_force_align_recomputes_cached_scores(experiment: PreprocessingExperiment):
-    experiment.write_corpus(8)
-    experiment.cache_scores([0.0] * 8)
-
-    experiment.preprocess({"score_threshold": 0.01, "test_size": 0, "val_size": 0}, force_align=True)
-
-    assert experiment.read_cached_scores() != [0.0] * 8
-    assert len(experiment.read_sources("train")) > 0
+    assert sorted(basic_experiment.read_sources("test")) == basic_experiment.sources(range(4))
 
 
-def test_src_noise_is_only_added_to_training_sources(experiment: PreprocessingExperiment):
-    experiment.write_corpus(8)
+def test_score_threshold_is_ignored_for_scripture_pairs_not_used_for_training(
+    scripture_experiment: PreprocessingExperiment,
+):
+    scripture_experiment.write_corpus(4)
+    scripture_experiment.cache_scores([0.9, 0.1, 0.1, 0.1])
 
-    experiment.preprocess({"test_size": 2, "val_size": 2, "src_noise": [{"replacement": [1.0, "<blank>"]}]})
+    scripture_experiment.preprocess({"type": "test", "score_threshold": 0.5, "test_size": 4})
 
-    assert set(experiment.read_sources("train")) == {"<blank> <blank>"}
-    assert set(experiment.read_sources("test") + experiment.read_sources("val")) <= set(experiment.sources(range(8)))
-
-
-def test_fractional_size_is_a_fraction_of_the_pairs_left_for_training(experiment: PreprocessingExperiment):
-    experiment.write_corpus(8)
-
-    experiment.preprocess({"test_size": 2, "val_size": 2, "size": 0.5})
-
-    assert len(experiment.read_sources("train")) == 2
+    assert sorted(scripture_experiment.read_sources("test")) == scripture_experiment.sources(range(4))
 
 
-@pytest.mark.parametrize(
-    "pair_settings", [{"corpus_books": "GEN"}, {"test_books": "GEN"}, {"use_test_set_from": "other"}]
-)
-def test_basic_pairs_reject_settings_that_select_verses(tmp_path: Path, pair_settings: dict):
-    experiment = PreprocessingExperiment(tmp_path, "corpora")
-    experiment.write_corpus(8)
+def test_basic_scores_are_computed_and_cached_when_no_cache_exists(basic_experiment: PreprocessingExperiment):
+    basic_experiment.write_corpus(8)
+
+    basic_experiment.preprocess({"score_threshold": 0.01, "test_size": 0, "val_size": 0})
+
+    assert len(basic_experiment.read_cached_scores()) == 8
+
+
+def test_scripture_scores_are_computed_and_cached_when_no_cache_exists(scripture_experiment: PreprocessingExperiment):
+    scripture_experiment.write_corpus(8)
+
+    scripture_experiment.preprocess({"score_threshold": 0.01, "test_size": 0, "val_size": 0})
+
+    assert len(scripture_experiment.read_cached_scores()) == 8
+
+
+def test_cached_basic_scores_for_a_different_corpus_are_recomputed(basic_experiment: PreprocessingExperiment):
+    basic_experiment.write_corpus(8)
+    basic_experiment.cache_scores([0.9] * 5)
+
+    basic_experiment.preprocess({"score_threshold": 0.01, "test_size": 0, "val_size": 0})
+
+    assert len(basic_experiment.read_cached_scores()) == 8
+
+
+def test_cached_scripture_scores_for_a_different_corpus_are_recomputed(scripture_experiment: PreprocessingExperiment):
+    scripture_experiment.write_corpus(8)
+    scripture_experiment.cache_scores([0.9] * 5)
+
+    scripture_experiment.preprocess({"score_threshold": 0.01, "test_size": 0, "val_size": 0})
+
+    assert len(scripture_experiment.read_cached_scores()) == 8
+
+
+def test_force_align_recomputes_cached_basic_scores(basic_experiment: PreprocessingExperiment):
+    basic_experiment.write_corpus(8)
+    basic_experiment.cache_scores([0.0] * 8)
+
+    basic_experiment.preprocess({"score_threshold": 0.01, "test_size": 0, "val_size": 0}, force_align=True)
+
+    assert basic_experiment.read_cached_scores() != [0.0] * 8
+    assert len(basic_experiment.read_sources("train")) > 0
+
+
+def test_force_align_recomputes_cached_scripture_scores(scripture_experiment: PreprocessingExperiment):
+    scripture_experiment.write_corpus(8)
+    scripture_experiment.cache_scores([0.0] * 8)
+
+    scripture_experiment.preprocess({"score_threshold": 0.01, "test_size": 0, "val_size": 0}, force_align=True)
+
+    assert scripture_experiment.read_cached_scores() != [0.0] * 8
+    assert len(scripture_experiment.read_sources("train")) > 0
+
+
+def test_src_noise_is_only_added_to_basic_training_sources(basic_experiment: PreprocessingExperiment):
+    basic_experiment.write_corpus(8)
+
+    basic_experiment.preprocess({"test_size": 2, "val_size": 2, "src_noise": [{"replacement": [1.0, "<blank>"]}]})
+
+    assert set(basic_experiment.read_sources("train")) == {"<blank> <blank>"}
+    held_out_sources = basic_experiment.read_sources("test") + basic_experiment.read_sources("val")
+    assert set(held_out_sources) <= set(basic_experiment.sources(range(8)))
+
+
+def test_src_noise_is_only_added_to_scripture_training_sources(scripture_experiment: PreprocessingExperiment):
+    scripture_experiment.write_corpus(8)
+
+    scripture_experiment.preprocess({"test_size": 2, "val_size": 2, "src_noise": [{"replacement": [1.0, "<blank>"]}]})
+
+    assert set(scripture_experiment.read_sources("train")) == {"<blank> <blank>"}
+    held_out_sources = scripture_experiment.read_sources("test") + scripture_experiment.read_sources("val")
+    assert set(held_out_sources) <= set(scripture_experiment.sources(range(8)))
+
+
+def test_fractional_size_is_a_fraction_of_the_basic_pairs_left_for_training(basic_experiment: PreprocessingExperiment):
+    basic_experiment.write_corpus(8)
+
+    basic_experiment.preprocess({"test_size": 2, "val_size": 2, "size": 0.5})
+
+    assert len(basic_experiment.read_sources("train")) == 2
+
+
+def test_fractional_size_is_a_fraction_of_the_scripture_pairs_left_for_training(
+    scripture_experiment: PreprocessingExperiment,
+):
+    scripture_experiment.write_corpus(8)
+
+    scripture_experiment.preprocess({"test_size": 2, "val_size": 2, "size": 0.5})
+
+    assert len(scripture_experiment.read_sources("train")) == 2
+
+
+def test_basic_pairs_reject_corpus_books(basic_experiment: PreprocessingExperiment):
+    basic_experiment.write_corpus(8)
 
     with pytest.raises(RuntimeError, match="no verse references"):
-        experiment.preprocess(pair_settings)
+        basic_experiment.preprocess({"corpus_books": "GEN"})
 
 
-@pytest.mark.parametrize("pair_settings", [{"type": "train,dict"}, {"lexical": True}])
-def test_scripture_pairs_reject_dictionary_and_lexical_data(tmp_path: Path, pair_settings: dict):
-    experiment = PreprocessingExperiment(tmp_path, "scripture")
-    experiment.write_corpus(8)
+def test_basic_pairs_reject_test_books(basic_experiment: PreprocessingExperiment):
+    basic_experiment.write_corpus(8)
+
+    with pytest.raises(RuntimeError, match="no verse references"):
+        basic_experiment.preprocess({"test_books": "GEN"})
+
+
+def test_basic_pairs_reject_use_test_set_from(basic_experiment: PreprocessingExperiment):
+    basic_experiment.write_corpus(8)
+
+    with pytest.raises(RuntimeError, match="no verse references"):
+        basic_experiment.preprocess({"use_test_set_from": "other"})
+
+
+def test_scripture_pairs_reject_dictionary_data(scripture_experiment: PreprocessingExperiment):
+    scripture_experiment.write_corpus(8)
 
     with pytest.raises(RuntimeError, match="dictionary or lexical"):
-        experiment.preprocess(pair_settings)
+        scripture_experiment.preprocess({"type": "train,dict"})
+
+
+def test_scripture_pairs_reject_lexical_data(scripture_experiment: PreprocessingExperiment):
+    scripture_experiment.write_corpus(8)
+
+    with pytest.raises(RuntimeError, match="dictionary or lexical"):
+        scripture_experiment.preprocess({"lexical": True})
