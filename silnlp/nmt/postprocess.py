@@ -278,8 +278,8 @@ def postprocess_experiment(
                 out_dir=out_dir,
                 training_corpus_pairs=config.corpus_pairs,
                 environment=environment,
-                train_src_filepath=config.exp_dir / config.train_src_detok_filename(),
-                train_trg_filepath=config.exp_dir / config.train_trg_detok_filename()
+                train_src_filepath=config.files.train_source_detokenized(),
+                train_trg_filepath=config.files.train_target_detokenized(),
             )
 
 

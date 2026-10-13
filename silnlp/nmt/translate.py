@@ -145,8 +145,8 @@ class TranslationTask:
                 output_dir = output_dir / trg_project
             output_dir.mkdir(exist_ok=True, parents=True)
 
-            src_training_rows = list(load_corpus(config.exp_dir / config.train_src_detok_filename()))
-            trg_training_rows = list(load_corpus(config.exp_dir / config.train_trg_detok_filename()))
+            src_training_rows = list(load_corpus(config.files.train_source_detokenized()))
+            trg_training_rows = list(load_corpus(config.files.train_target_detokenized()))
 
             translation_failed: List[str] = []
             for book_num, chapters in book_nums.items():
@@ -269,8 +269,8 @@ class TranslationTask:
                     )
                 elif ext == ".usfm" or ext == ".sfm":
                     if src_training_rows is None or trg_training_rows is None:
-                        src_training_rows = list(load_corpus(config.exp_dir / config.train_src_detok_filename()))
-                        trg_training_rows = list(load_corpus(config.exp_dir / config.train_trg_detok_filename()))
+                        src_training_rows = list(load_corpus(config.files.train_source_detokenized()))
+                        trg_training_rows = list(load_corpus(config.files.train_target_detokenized()))
                     translator.translate_usfm(
                         src_file_path,
                         trg_file_path,

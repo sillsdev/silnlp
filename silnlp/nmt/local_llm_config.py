@@ -470,7 +470,7 @@ class LocalLLMConfig(LLMConfig[LocalLLMPromptMessages]):
         base_share, remainder = divmod(self.get_instruction_data_size(), len(dataset_paths))
 
         count = 0
-        with self._open_append(self.instruction_jsonl_filename()) as out_file:
+        with self.files.open_for_append(self.exp_dir / self.instruction_jsonl_filename()) as out_file:
             for i, dataset_path in enumerate(dataset_paths):
                 if not dataset_path.is_file():
                     raise RuntimeError(

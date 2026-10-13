@@ -673,9 +673,9 @@ def test_train_writes_a_checkpoint_so_the_last_checkpoint_resolves(tmp_path: Pat
 
     model.train()
 
-    path, step = model.get_checkpoint_path("last")
-    assert step == 1
-    assert path == tmp_path / "run" / "checkpoint-1"
+    checkpoint = model.resolve_checkpoint("last")
+    assert checkpoint.step == 1
+    assert checkpoint.path == tmp_path / "run" / "checkpoint-1"
 
 
 def test_train_in_full_corpus_mode_writes_a_checkpoint_but_no_index(tmp_path: Path):

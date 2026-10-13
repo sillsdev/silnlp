@@ -802,8 +802,8 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
     def _create_corpus_pair_provider(self) -> CorpusPairProvider:
         """An experiment preprocessed for a tokenized model has readable text only in the detok files."""
         detokenized = CorpusPair(
-            self.exp_dir / self.train_src_detok_filename(),
-            self.exp_dir / self.train_trg_detok_filename(),
+            self.files.train_source_detokenized(),
+            self.files.train_target_detokenized(),
         )
         return PreferredCorpusPairProvider(detokenized, self._train_corpus_pair())
 
