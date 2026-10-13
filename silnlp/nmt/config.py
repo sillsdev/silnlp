@@ -218,12 +218,10 @@ class NMTModel(ABC):
         self._inference_model_params: Optional[InferenceModelParams] = None
 
     @abstractmethod
-    def train(self) -> None:
-        ...
+    def train(self) -> None: ...
 
     @abstractmethod
-    def save_effective_config(self, path: Path) -> None:
-        ...
+    def save_effective_config(self, path: Path) -> None: ...
 
     @abstractmethod
     def translate_test_files(
@@ -233,8 +231,7 @@ class NMTModel(ABC):
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @abstractmethod
     def translate(
@@ -244,8 +241,13 @@ class NMTModel(ABC):
         trg_iso: str,
         produce_multiple_translations: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> Generator[SentenceTranslationGroup, None, None]:
-        ...
+    ) -> Generator[SentenceTranslationGroup, None, None]: ...
+
+    def has_completed_translation(self, input_path: Path, translation_path: Path) -> bool:
+        return translation_path.is_file()
+
+    def discard_saved_inference(self) -> None:
+        """Only a model that saves its inference, so that a rerun resumes, has anything to discard."""
 
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         return resolve_checkpoint_path(self._config.model_dir, ckpt)
@@ -440,12 +442,10 @@ class Config(ABC):
     @abstractmethod
     def create_model(
         self, mixed_precision: bool = True, num_devices: int = 1, clearml_queue: Optional[str] = None
-    ) -> NMTModel:
-        ...
+    ) -> NMTModel: ...
 
     @abstractmethod
-    def create_tokenizer(self) -> Tokenizer:
-        ...
+    def create_tokenizer(self) -> Tokenizer: ...
 
     def is_train_project(self, ref_file_path: Path) -> bool:
         trg_iso, trg_project = self._parse_ref_file_path(ref_file_path)
@@ -1400,8 +1400,7 @@ class Config(ABC):
         return self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
 
     @abstractmethod
-    def _build_vocabs(self, stats: bool = False) -> None:
-        ...
+    def _build_vocabs(self, stats: bool = False) -> None: ...
 
     @abstractmethod
     def _write_dictionary(
@@ -1409,5 +1408,4 @@ class Config(ABC):
         tokenizer: Tokenizer,
         src_terms_files: List[Tuple[DataFile, List[str]]],
         trg_terms_files: List[Tuple[DataFile, List[str]]],
-    ) -> int:
-        ...
+    ) -> int: ...

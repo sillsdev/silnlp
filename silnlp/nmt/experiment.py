@@ -93,6 +93,9 @@ class SILExperiment:
         with (self.config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
             translate_configs = yaml.safe_load(file)
 
+        if self.force_infer:
+            self.model.discard_saved_inference()
+
         postprocess_configs = translate_configs.get("postprocess", [])
         postprocess_handler = PostprocessHandler(
             [PostprocessConfig(pc, self.environment) for pc in postprocess_configs], environment=self.environment
@@ -218,7 +221,7 @@ def main() -> None:
         "--force-infer",
         default=False,
         action="store_true",
-        help="Force inferencing for test step even if files already exist",
+        help="Infer again even where test predictions exist, without reusing replies an earlier run saved",
     )
     parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")
     parser.add_argument(

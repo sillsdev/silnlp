@@ -4,6 +4,7 @@
 
 import json
 import logging
+import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,8 @@ from .example_retrieval import (
     ExampleRetriever,
     ExampleRetrieverFactory,
     FixedCorpusPairProvider,
+    TargetLanguageProfile,
+    TranslationMemory,
 )
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -124,7 +127,7 @@ class PromptTemplate:
         formatted_instruction = self.instruction_template.format(
             src_lang=src_lang.name,
             trg_lang=trg_lang.name,
-            source=source_text,
+            source=self.formatter.format_source(source_text),
             examples=examples_str,
             num_segments=num_segments,
         )
@@ -281,6 +284,16 @@ class PromptBuilder(Generic[TPromptMessages]):
             return ""
         return self._templates.template_for(None).render_examples(self._pool.all_examples(), src_lang, trg_lang)
 
+    def create_target_language_profile(self) -> TargetLanguageProfile:
+        if self._pool is None:
+            return TargetLanguageProfile([])
+        return self._pool.create_target_language_profile()
+
+    def create_translation_memory(self, rng: random.Random) -> TranslationMemory:
+        if self._pool is None:
+            return TranslationMemory([], rng)
+        return self._pool.create_translation_memory(rng)
+
 
 @dataclass(frozen=True)
 class PromptDefaults:
@@ -317,9 +330,11 @@ class PromptConfig:
             selection = {"method": selection}
         return ExampleRetrieverFactory.create(str(selection["method"]), selection.get("model"))
 
-    def create_template(self, instruction_template: Optional[str] = None) -> PromptTemplate:
+    def create_template(
+        self, instruction_template: Optional[str] = None, system_message: Optional[str] = None
+    ) -> PromptTemplate:
         return PromptTemplate(
-            system_message=self._settings["system_message"],
+            system_message=self._settings["system_message"] if system_message is None else system_message,
             instruction_template=instruction_template or self._settings["instruction_template"],
             formatter=ExampleFormatterFactory.create(self._settings["example_format"]),
         )

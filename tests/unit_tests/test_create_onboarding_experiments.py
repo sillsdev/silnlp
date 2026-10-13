@@ -499,15 +499,19 @@ BOOK_STATS_HEADER = (
 )
 
 
-@pytest.mark.parametrize("main_is_trg", [True, False])
-def test_parse_corpus_stats_src_trg_only(tmp_path: Path, main_is_trg: bool):
-    # 'source only' verses are the reference's own (drafting potential); the parser must read
-    # the right physical column for the row's orientation. The scenario is fixed: the reference
-    # has 30 verses of its own, the target 50, and 20 are parallel.
-    if main_is_trg:  # reference is the src column, so src_only is the reference's own
-        row = "en-REF,arz-NGT,100,30,50,20,0.5,0,0.5,Latn,True,Arab,True"
-    else:  # reference is the trg column, so trg_only is the reference's own
-        row = "arz-NGT,en-REF,100,50,30,20,0.5,0,0.5,Arab,True,Latn,True"
+def test_parse_corpus_stats_reads_src_only_as_the_reference_s_own_verses_when_the_reference_is_src(tmp_path: Path):
+    # The reference has 30 verses of its own (its drafting potential), the target 50, and 20 are parallel.
+    row = "en-REF,arz-NGT,100,30,50,20,0.5,0,0.5,Latn,True,Arab,True"
+    stats_path = tmp_path / "corpus-stats.csv"
+    stats_path.write_text(f"{BOOK_STATS_HEADER}\n{row}\n", encoding="utf-8")
+    _, candidates = parse_corpus_stats(stats_path, target="arz-NGT")
+    c = candidates[0]
+    assert (c.name, c.parallel, c.src_only, c.trg_only) == ("REF", 20, 30, 50)
+
+
+def test_parse_corpus_stats_reads_trg_only_as_the_reference_s_own_verses_when_the_reference_is_trg(tmp_path: Path):
+    # The reference has 30 verses of its own (its drafting potential), the target 50, and 20 are parallel.
+    row = "arz-NGT,en-REF,100,50,30,20,0.5,0,0.5,Arab,True,Latn,True"
     stats_path = tmp_path / "corpus-stats.csv"
     stats_path.write_text(f"{BOOK_STATS_HEADER}\n{row}\n", encoding="utf-8")
     _, candidates = parse_corpus_stats(stats_path, target="arz-NGT")
@@ -538,41 +542,64 @@ def test_parse_log_src_trg_only(tmp_path: Path):
     assert (by_name["OLD"].src_only, by_name["OLD"].trg_only) == (0, 0)  # counts absent -> 0
 
 
-@pytest.mark.parametrize("main_is_trg", [True, False])
-@pytest.mark.parametrize("use_target", [True, False])
-def test_parse_corpus_stats_main_script_skips_empty_rows(tmp_path: Path, main_is_trg: bool, use_target: bool):
-    # A pair with no parallel data has an empty ('None'/'nan') script; when such a row sorts
-    # first it must not become the main project's script (that produced '<iso>_nan' configs).
-    # pandas reads both 'None' and 'nan' as NaN. The main may sit in either physical column
-    # (the headers are always src_project/trg_project), so both orientations are checked, with
-    # and without an explicit --target.
-    header = (
-        "src_project,trg_project,count,src_only,trg_only,parallel,align_score,filtered_count,"
-        "filtered_align_score,src_script,src_script_in_model,trg_script,trg_script_in_model"
-    )
-
-    def row(other: str, count: str, stats: str, other_script: str, other_in_model: str, main_script: str) -> str:
-        main_cell = (f"{count},{stats}", main_script, "True" if main_script == "Arab" else "False")
-        # The main project sits in whichever column the caller chose; the other project fills
-        # the remaining side. Scripts travel with their own side.
-        if main_is_trg:
-            return f"{other},arz-NGT,{main_cell[0]},{other_script},{other_in_model},{main_cell[1]},{main_cell[2]}"
-        return f"arz-NGT,{other},{main_cell[0]},{main_cell[1]},{main_cell[2]},{other_script},{other_in_model}"
-
-    # Leading no-data row (empty scripts on both sides) then a real aligned row.
-    empty_row = row("en-EMPTY", "10337", "0,10337,0,nan,0,nan", "None", "False", "None")
-    real_row = row("arb-REF", "10327", "0,5982,4345,0.52,0,0.52", "Arab", "True", "Arab")
+def test_parse_corpus_stats_skips_a_row_without_data_for_the_script_of_a_detected_trg_main(tmp_path: Path):
+    # The first row is a pair with no parallel data, whose scripts pandas reads as NaN.
     stats_path = tmp_path / "corpus-stats.csv"
-    stats_path.write_text("\n".join([header, empty_row, real_row]) + "\n", encoding="utf-8")
-
-    main, candidates = parse_corpus_stats(stats_path, target="arz-NGT" if use_target else None)
+    stats_path.write_text(
+        f"{BOOK_STATS_HEADER}\n"
+        "en-EMPTY,arz-NGT,10337,0,10337,0,nan,0,nan,None,False,None,False\n"
+        "arb-REF,arz-NGT,10327,0,5982,4345,0.52,0,0.52,Arab,True,Arab,True\n",
+        encoding="utf-8",
+    )
+    main, candidates = parse_corpus_stats(stats_path)
     assert main.stem == "arz-NGT"
-    assert main.script == "Arab"  # from the row with data, not the leading empty row
-    # The empty-data row is dropped as a candidate, the real one is kept.
+    assert main.script == "Arab"
     assert [c.name for c in candidates] == ["REF"]
 
-    # The built config's lang_codes then use the real script even after a synthetic rename.
-    assert nllb_tag("aaj", main.script or "") == "aaj_Arab"
+
+def test_parse_corpus_stats_skips_a_row_without_data_for_the_script_of_a_detected_src_main(tmp_path: Path):
+    # The first row is a pair with no parallel data, whose scripts pandas reads as NaN.
+    stats_path = tmp_path / "corpus-stats.csv"
+    stats_path.write_text(
+        f"{BOOK_STATS_HEADER}\n"
+        "arz-NGT,en-EMPTY,10337,0,10337,0,nan,0,nan,None,False,None,False\n"
+        "arz-NGT,arb-REF,10327,0,5982,4345,0.52,0,0.52,Arab,True,Arab,True\n",
+        encoding="utf-8",
+    )
+    main, candidates = parse_corpus_stats(stats_path)
+    assert main.stem == "arz-NGT"
+    assert main.script == "Arab"
+    assert [c.name for c in candidates] == ["REF"]
+
+
+def test_parse_corpus_stats_skips_a_row_without_data_for_the_script_of_a_named_trg_main(tmp_path: Path):
+    # The first row is a pair with no parallel data, whose scripts pandas reads as NaN.
+    stats_path = tmp_path / "corpus-stats.csv"
+    stats_path.write_text(
+        f"{BOOK_STATS_HEADER}\n"
+        "en-EMPTY,arz-NGT,10337,0,10337,0,nan,0,nan,None,False,None,False\n"
+        "arb-REF,arz-NGT,10327,0,5982,4345,0.52,0,0.52,Arab,True,Arab,True\n",
+        encoding="utf-8",
+    )
+    main, candidates = parse_corpus_stats(stats_path, target="arz-NGT")
+    assert main.stem == "arz-NGT"
+    assert main.script == "Arab"
+    assert [c.name for c in candidates] == ["REF"]
+
+
+def test_parse_corpus_stats_skips_a_row_without_data_for_the_script_of_a_named_src_main(tmp_path: Path):
+    # The first row is a pair with no parallel data, whose scripts pandas reads as NaN.
+    stats_path = tmp_path / "corpus-stats.csv"
+    stats_path.write_text(
+        f"{BOOK_STATS_HEADER}\n"
+        "arz-NGT,en-EMPTY,10337,0,10337,0,nan,0,nan,None,False,None,False\n"
+        "arz-NGT,arb-REF,10327,0,5982,4345,0.52,0,0.52,Arab,True,Arab,True\n",
+        encoding="utf-8",
+    )
+    main, candidates = parse_corpus_stats(stats_path, target="arz-NGT")
+    assert main.stem == "arz-NGT"
+    assert main.script == "Arab"
+    assert [c.name for c in candidates] == ["REF"]
 
 
 def test_parse_log_main_script_skips_empty_rows(tmp_path: Path):

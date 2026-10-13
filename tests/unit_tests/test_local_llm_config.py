@@ -917,11 +917,28 @@ def test_rotating_train_prompt_requires_a_template_file(tmp_path):
         _construct_llm_config(tmp_path, {"type": "rotating"})
 
 
-@pytest.mark.parametrize("key", ["system_message", "instruction_template", "example_format"])
-def test_rotating_train_prompt_rejects_the_fixed_only_keys(tmp_path, key):
+def test_rotating_train_prompt_rejects_a_system_message(tmp_path):
     _write_templates(tmp_path / "templates.jsonl", [{"instruction_template": "A: {source}"}])
     with pytest.raises(ValueError, match='only valid with train.prompt.type: "fixed"'):
-        _construct_llm_config(tmp_path, {"type": "rotating", "template_file": "templates.jsonl", key: "anything"})
+        _construct_llm_config(
+            tmp_path, {"type": "rotating", "template_file": "templates.jsonl", "system_message": "anything"}
+        )
+
+
+def test_rotating_train_prompt_rejects_an_instruction_template(tmp_path):
+    _write_templates(tmp_path / "templates.jsonl", [{"instruction_template": "A: {source}"}])
+    with pytest.raises(ValueError, match='only valid with train.prompt.type: "fixed"'):
+        _construct_llm_config(
+            tmp_path, {"type": "rotating", "template_file": "templates.jsonl", "instruction_template": "anything"}
+        )
+
+
+def test_rotating_train_prompt_rejects_an_example_format(tmp_path):
+    _write_templates(tmp_path / "templates.jsonl", [{"instruction_template": "A: {source}"}])
+    with pytest.raises(ValueError, match='only valid with train.prompt.type: "fixed"'):
+        _construct_llm_config(
+            tmp_path, {"type": "rotating", "template_file": "templates.jsonl", "example_format": "anything"}
+        )
 
 
 def test_rotating_train_prompt_reads_its_templates_from_the_file(tmp_path):
@@ -1003,15 +1020,20 @@ def test_infer_prompt_rejects_translate_gemma_with_examples(tmp_path):
         )
 
 
-@pytest.mark.parametrize("prompt_type", ["fixed", "rotating"])
-def test_prompts_can_always_be_rendered_through_the_chat_template(tmp_path, prompt_type):
+def test_fixed_prompts_can_always_be_rendered_through_the_chat_template(tmp_path):
     # Every local prompt reaches tokenizer.apply_chat_template, so a plain PromptMessages here
     # would fail only once training started.
-    overrides = {"type": prompt_type}
-    if prompt_type == "rotating":
-        _write_templates(tmp_path / "templates.jsonl", [{"instruction_template": "A: {source}"}])
-        overrides["template_file"] = "templates.jsonl"
-    config = _construct_llm_config(tmp_path, overrides)
+    config = _construct_llm_config(tmp_path, {"type": "fixed"})
+    for training in (True, False):
+        prompt = config.build_prompt_messages("hello", config.language("en"), config.language("fr"), training=training)
+        assert isinstance(prompt, LocalLLMPromptMessages)
+
+
+def test_rotating_prompts_can_always_be_rendered_through_the_chat_template(tmp_path):
+    # Every local prompt reaches tokenizer.apply_chat_template, so a plain PromptMessages here
+    # would fail only once training started.
+    _write_templates(tmp_path / "templates.jsonl", [{"instruction_template": "A: {source}"}])
+    config = _construct_llm_config(tmp_path, {"type": "rotating", "template_file": "templates.jsonl"})
     for training in (True, False):
         prompt = config.build_prompt_messages("hello", config.language("en"), config.language("fr"), training=training)
         assert isinstance(prompt, LocalLLMPromptMessages)
