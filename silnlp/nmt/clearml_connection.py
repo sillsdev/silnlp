@@ -49,7 +49,7 @@ class SILClearML:
                 tags=[f"silnlp-{self.tag}"] if self.tag else None,
             )
 
-            self._determine_clearml_project_name()
+            self.clearml_project_folder = project
             if not self.skip_config:
                 self._load_config()
 
@@ -100,26 +100,6 @@ class SILClearML:
                 )
                 exit()
             self.task = None
-
-    def _determine_clearml_project_name(self) -> None:
-        if self.task is None:
-            self.clearml_project_folder = ""
-            return
-        # after init, "project name" and "task name" could be different. Read them again and update.
-        self.clearml_project_folder = self.task.get_project_name()
-        assert self.clearml_project_folder is not None
-        if (self.clearml_project_folder.startswith(self.project_prefix)) and (
-            self.clearml_project_folder.endswith(self.project_suffix)
-        ):
-            if len(self.project_suffix) > 0:
-                self.clearml_project_folder = self.clearml_project_folder[
-                    len(self.project_prefix) : -len(self.project_suffix)
-                ]
-            else:
-                self.clearml_project_folder = self.clearml_project_folder[len(self.project_prefix) :]
-        self.name = self.clearml_project_folder + "/" + self.task.name
-        if len(self.experiment_suffix) > 0 and self.name.endswith(self.experiment_suffix):
-            self.name = self.name[: -len(self.experiment_suffix)]
 
     def _load_config(self) -> None:
         # if the project/experiment yaml file already exists, use it to re-read the config.  If not, write it.
