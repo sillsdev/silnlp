@@ -1,7 +1,5 @@
 import random
 
-import pytest
-
 from silnlp.nmt.scripture_data_set_writer import SplitIndices
 
 
@@ -48,15 +46,29 @@ def test_the_first_file_pair_fixes_the_validation_verses_for_the_rest():
     assert second == first
 
 
-@pytest.mark.parametrize(
-    "size,expected",
-    [(0.5, 5), (0.25, 2), (2.0, 2), (3, 3), (1.0, 10)],
-)
-def test_the_size_may_be_a_share_of_the_corpus_or_a_number_of_verses(size, expected):
-    # A fraction at or below one is a share of the corpus; anything above one is a count of verses.
+def size_of_test_set(size) -> int:
     split = SplitIndices(disjoint_test=True, disjoint_val=True, test_size=size, val_size=size)
+    return len(split.for_test(indices_of(10), 10))
 
-    assert len(split.for_test(indices_of(10), 10)) == expected
+
+def test_half_of_the_corpus_is_taken_as_a_share():
+    assert size_of_test_set(0.5) == 5
+
+
+def test_a_quarter_of_the_corpus_is_taken_as_a_share():
+    assert size_of_test_set(0.25) == 2
+
+
+def test_all_of_the_corpus_is_taken_when_the_share_is_one():
+    assert size_of_test_set(1.0) == 10
+
+
+def test_a_float_above_one_counts_verses_rather_than_a_share():
+    assert size_of_test_set(2.0) == 2
+
+
+def test_an_integer_counts_verses():
+    assert size_of_test_set(3) == 3
 
 
 def test_asking_for_more_verses_than_are_available_takes_them_all():

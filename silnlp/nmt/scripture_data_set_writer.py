@@ -68,7 +68,7 @@ class SplitIndices:
     def _sample(self, remaining: Set[int], size: Union[float, int], corpus_count: int) -> Set[int]:
         if isinstance(size, float):
             size = int(size if size > 1 else corpus_count * size)
-        return set(random.sample(remaining, min(size, len(remaining))))
+        return set(random.sample(sorted(remaining), min(size, len(remaining))))
 
 
 class ScriptureDataSetWriter:
