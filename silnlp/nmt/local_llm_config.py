@@ -49,14 +49,8 @@ from ..common.translation_data_structures import DraftGroup, SentenceTranslation
 from ..common.translator import generate_confidence_files
 from ..common.utils import merge_dict
 from .checkpoints import CheckpointDirectory, CheckpointType
-from .config import (
-    InferenceModelParams,
-    Language,
-    NMTModel,
-    collect_training_args,
-    warn_about_renamed_keys,
-    write_effective_config,
-)
+from .config import InferenceModelParams, Language, NMTModel
+from .config_keys import RenamedConfigKeys
 from .corpora import read_parallel_text_pairs
 from .example_retrieval import ExamplePool, ExampleRetrieverFactory
 from .llm_config import (
@@ -70,6 +64,7 @@ from .llm_config import (
 )
 from .seq2seq_config import batch_sentences, find_executable_batch_size
 from .tokenizer import Tokenizer
+from .training_arguments import TrainingArgumentsMapping
 
 LOGGER = logging.getLogger(__name__)
 
@@ -398,7 +393,7 @@ class LocalLLMConfig(LLMConfig[LocalLLMPromptMessages]):
         if isinstance(params, dict) and "lora" in params and "adapter" not in params:
             LOGGER.warning("params.lora is deprecated; rename it to params.adapter.")
             params["adapter"] = params.pop("lora")
-        warn_about_renamed_keys(config, LocalLLMConfig._RENAMED_CONFIG_KEYS)
+        RenamedConfigKeys.of_llm().warn_about(config)
 
     def get_finetune_method(self) -> str:
         method = self.params["finetune_method"].lower()
@@ -1057,9 +1052,8 @@ class LocalLLMModel(NMTModel):
 
     def _create_training_arguments(self) -> TrainingArguments:
         dtype = self._config.params["torch_dtype"]
-        args = collect_training_args(
+        args = TrainingArgumentsMapping(self._TRAINING_ARGS_CONFIG_MAPPING).collect(
             self._config.root,
-            self._TRAINING_ARGS_CONFIG_MAPPING,
             {
                 "bf16": self._mixed_precision and dtype == "bfloat16",
                 "fp16": self._mixed_precision and dtype == "float16",
@@ -1069,8 +1063,8 @@ class LocalLLMModel(NMTModel):
         return HfArgumentParser(TrainingArguments).parse_dict(args)[0]
 
     def save_effective_config(self, path: Path) -> None:
-        write_effective_config(
-            path, self._config.root, self._create_training_arguments(), self._TRAINING_ARGS_CONFIG_MAPPING
+        TrainingArgumentsMapping(self._TRAINING_ARGS_CONFIG_MAPPING).write_effective_config(
+            path, self._config.root, self._create_training_arguments()
         )
 
     # --- inference ----------------------------------------------------------------
