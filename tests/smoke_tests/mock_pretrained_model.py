@@ -4,7 +4,7 @@ from typing import Iterator, List, Optional, Union, cast
 
 import torch
 from transformers import M2M100ForConditionalGeneration, PretrainedConfig, PreTrainedModel
-from transformers.generation.utils import GenerateBeamEncoderDecoderOutput
+from transformers.generation.utils import GenerateBeamEncoderDecoderOutput, GenerateEncoderDecoderOutput
 from transformers.modeling_outputs import Seq2SeqLMOutput
 
 from silnlp.nmt.seq2seq_config import PreTrainedModelProvider, PreTrainedModelProviderFactory, Seq2SeqConfig
@@ -37,11 +37,15 @@ class ScriptedGeneration(ABC):
     """What a stand-in model generates, decided by the test rather than by its weights."""
 
     @abstractmethod
-    def outputs_for(self, input_ids: Optional[torch.Tensor]) -> GenerateBeamEncoderDecoderOutput: ...
+    def outputs_for(
+        self, input_ids: Optional[torch.Tensor], num_return_sequences: int = 1, sampled: bool = False
+    ) -> Union[GenerateBeamEncoderDecoderOutput, GenerateEncoderDecoderOutput]: ...
 
 
 class NoGeneration(ScriptedGeneration):
-    def outputs_for(self, input_ids: Optional[torch.Tensor]) -> GenerateBeamEncoderDecoderOutput:
+    def outputs_for(
+        self, input_ids: Optional[torch.Tensor], num_return_sequences: int = 1, sampled: bool = False
+    ) -> Union[GenerateBeamEncoderDecoderOutput, GenerateEncoderDecoderOutput]:
         raise AssertionError("The model was asked to generate translations, but no mock output was provided.")
 
 
@@ -49,7 +53,9 @@ class RecordedGeneration(ScriptedGeneration):
     def __init__(self, outputs: Iterator[GenerateBeamEncoderDecoderOutput]) -> None:
         self._outputs = outputs
 
-    def outputs_for(self, input_ids: Optional[torch.Tensor]) -> GenerateBeamEncoderDecoderOutput:
+    def outputs_for(
+        self, input_ids: Optional[torch.Tensor], num_return_sequences: int = 1, sampled: bool = False
+    ) -> Union[GenerateBeamEncoderDecoderOutput, GenerateEncoderDecoderOutput]:
         return next(self._outputs)
 
 
@@ -60,21 +66,34 @@ class FixedTranslationGeneration(ScriptedGeneration):
         self._translation_token_ids = translation_token_ids
         self._num_translated_sentences = 0
 
-    def outputs_for(self, input_ids: Optional[torch.Tensor]) -> GenerateBeamEncoderDecoderOutput:
+    def outputs_for(
+        self, input_ids: Optional[torch.Tensor], num_return_sequences: int = 1, sampled: bool = False
+    ) -> Union[GenerateBeamEncoderDecoderOutput, GenerateEncoderDecoderOutput]:
         assert input_ids is not None
         batch_size = input_ids.shape[0]
         device = input_ids.device
 
         sequences = torch.tensor(self._translation_token_ids.resolve(), dtype=torch.long, device=device).repeat(
-            batch_size, 1
+            batch_size * num_return_sequences, 1
         )
         scores = torch.full(tuple(sequences.shape), MOCK_TOKEN_LOG_PROB, dtype=torch.float32, device=device)
+        # Sequences are grouped by the sentence they came from, so each sentence's score repeats.
         sequences_scores = torch.tensor(
-            [mock_sequence_log_prob(self._num_translated_sentences + i) for i in range(batch_size)],
+            [
+                mock_sequence_log_prob(self._num_translated_sentences + i)
+                for i in range(batch_size)
+                for _ in range(num_return_sequences)
+            ],
             dtype=torch.float32,
             device=device,
         )
         self._num_translated_sentences += batch_size
+        # Sampling produces no sequences_scores, which is how a sampled draft is told from a beam one.
+        if sampled:
+            return GenerateEncoderDecoderOutput(
+                sequences=cast(torch.LongTensor, sequences),
+                scores=(cast(torch.FloatTensor, scores),),
+            )
         return GenerateBeamEncoderDecoderOutput(
             sequences=cast(torch.LongTensor, sequences),
             beam_indices=cast(torch.LongTensor, torch.zeros_like(sequences)),
@@ -95,9 +114,9 @@ class ModelScript:
         self._stats.record_training_batch(input_ids)
 
     def generate(
-        self, input_ids: Optional[torch.Tensor], return_dict: bool
-    ) -> Union[GenerateBeamEncoderDecoderOutput, torch.Tensor]:
-        output = self._generation.outputs_for(input_ids)
+        self, input_ids: Optional[torch.Tensor], return_dict: bool, num_return_sequences: int = 1, sampled: bool = False
+    ) -> Union[GenerateBeamEncoderDecoderOutput, GenerateEncoderDecoderOutput, torch.Tensor]:
+        output = self._generation.outputs_for(input_ids, num_return_sequences, sampled)
         # The evaluation pass during training asks for token ids alone, not the scored output.
         if not return_dict:
             return output.sequences
@@ -130,9 +149,16 @@ class StandInSeq2SeqModel(M2M100ForConditionalGeneration):
         kwargs.pop("num_items_in_batch", None)
         return super().forward(input_ids=input_ids, labels=labels, *args, **kwargs)
 
-    def generate(self, *args, **kwargs) -> Union[GenerateBeamEncoderDecoderOutput, torch.Tensor]:
+    def generate(
+        self, *args, **kwargs
+    ) -> Union[GenerateBeamEncoderDecoderOutput, GenerateEncoderDecoderOutput, torch.Tensor]:
         input_ids = kwargs.get("input_ids", args[0] if len(args) > 0 else None)
-        return self.script.generate(input_ids, return_dict=bool(kwargs.get("return_dict_in_generate", False)))
+        return self.script.generate(
+            input_ids,
+            return_dict=bool(kwargs.get("return_dict_in_generate", False)),
+            num_return_sequences=int(kwargs.get("num_return_sequences", 1) or 1),
+            sampled=bool(kwargs.get("do_sample", False)),
+        )
 
     def compute_transition_scores(self, sequences: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         return self.script.transition_scores_for(sequences)

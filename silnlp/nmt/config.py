@@ -271,6 +271,9 @@ class Config(ABC):
     @abstractmethod
     def create_tokenizer(self) -> Tokenizer: ...
 
+    def _delete_previous_data_files(self) -> None:
+        self.files.delete_data_sets()
+
     def _build_corpora(self, tokenizer: Tokenizer, stats: bool, force_align: bool) -> int:
         self._delete_previous_data_files()
 
