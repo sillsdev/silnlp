@@ -1,8 +1,9 @@
 from dataclasses import dataclass, field
 from enum import Enum, Flag, auto
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
 
+import pandas as pd
 from machine.corpora import TextFileTextCorpus
 from machine.scripture import get_chapters
 
@@ -153,6 +154,13 @@ def parse_corpus_pairs(corpus_pairs: List[dict], environment: SilNlpEnv) -> List
         is_scripture = src_files[0].is_scripture
         if not all(df.is_scripture == is_scripture for df in (src_files + trg_files)):
             raise RuntimeError("All corpora in a corpus pair must contain the same type of data.")
+        verse_settings = [key for key in ("corpus_books", "test_books", "use_test_set_from") if key in pair]
+        if not is_scripture and len(verse_settings) > 0:
+            raise RuntimeError(
+                f"Basic corpus pairs have no verse references, so they do not support {', '.join(verse_settings)}."
+            )
+        if is_scripture and (is_set(type, DataFileType.DICT) or pair.get("lexical", False)):
+            raise RuntimeError("Scripture corpus pairs cannot be used as dictionary or lexical data.")
 
         tags: Union[str, List[str]] = pair.get("tags", [])
         if isinstance(tags, str):
@@ -247,15 +255,37 @@ def get_terms_glosses_file_paths(terms_files: List[DataFile], environment: SilNl
     return glosses_file_paths
 
 
-def get_parallel_corpus_size(src_file_path: Path, trg_file_path: Path) -> int:
-    count = 0
-    with src_file_path.open("r", encoding="utf-8") as src_file, trg_file_path.open("r", encoding="utf-8") as trg_file:
-        for src_line, trg_line in zip(src_file, trg_file):
-            src_line = src_line.strip()
-            trg_line = trg_line.strip()
-            if len(src_line) > 0 and len(trg_line) > 0:
-                count += 1
-    return count
+class BasicParallelCorpus:
+    """A parallel corpus from MT/corpora, whose two files are aligned line by line."""
+
+    def __init__(self, src_file_path: Path, trg_file_path: Path) -> None:
+        self._src_file_path = src_file_path
+        self._trg_file_path = trg_file_path
+
+    def __iter__(self) -> Iterator[Tuple[str, str]]:
+        for src_sentence, trg_sentence in self._read_line_pairs():
+            if len(src_sentence) > 0 and len(trg_sentence) > 0:
+                yield src_sentence, trg_sentence
+
+    def count(self) -> int:
+        return sum(1 for _ in self)
+
+    def to_data_frame(self, remove_empty_sentences: bool = True) -> pd.DataFrame:
+        rows = self if remove_empty_sentences else (row for row in self._read_line_pairs() if row != ("", ""))
+        return pd.DataFrame(list(rows), columns=["source", "target"])
+
+    def _read_line_pairs(self) -> Iterator[Tuple[str, str]]:
+        with (
+            self._src_file_path.open("r", encoding="utf-8") as src_file,
+            self._trg_file_path.open("r", encoding="utf-8") as trg_file,
+        ):
+            for src_line, trg_line in zip(src_file, trg_file):
+                yield self._clean(src_line), self._clean(trg_line)
+
+    def _clean(self, line: str) -> str:
+        line = line.strip()
+        # Scripture extracts mark a verse with no text this way, and both kinds of corpus must drop the same rows.
+        return "" if line == "..." else line
 
 
 def read_parallel_text_pairs(src_path: Path, trg_path: Path) -> Optional[Tuple[List[str], List[str]]]:

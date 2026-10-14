@@ -1,6 +1,7 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import List
 
 import yaml
 from tqdm import tqdm
@@ -38,6 +39,17 @@ def is_valid_encoding(file: Path, encoding: str = "utf-8") -> bool:
         return False
 
 
+def get_corpus_paths(corpus_pairs: List[dict], environment: SilNlpEnv) -> List[Path]:
+    names = []
+    for corpus_pair in corpus_pairs:
+        for side in ("src", "trg"):
+            corpora = corpus_pair[side]
+            if isinstance(corpora, str):
+                corpora = corpora.split(",")
+            names.extend(corpus.strip() if isinstance(corpus, str) else corpus["name"] for corpus in corpora)
+    return sorted(set(environment.get_mt_corpus_path(name) for name in names))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Find files referred to in config file and check that they exist.")
     parser.add_argument(
@@ -53,15 +65,7 @@ def main() -> None:
         print("Config file is empty.")
         return
 
-    files = list()
-    corpus_pairs = config["data"]["corpus_pairs"]
-    for corpus_pair in corpus_pairs:
-        src_list = corpus_pair["src"] if isinstance(corpus_pair["src"], list) else [corpus_pair["src"]]
-        trg_list = corpus_pair["trg"] if isinstance(corpus_pair["trg"], list) else [corpus_pair["trg"]]
-        files.extend([f"{s}.txt" for s in src_list])
-        files.extend([f"{t}.txt" for t in trg_list])
-
-    files = sorted(set([environment.mt_scripture_dir / file for file in files]))
+    files = get_corpus_paths(config["data"]["corpus_pairs"], environment)
     existing_files = [file for file in files if file.is_file()]
     missing_files = [file for file in files if file not in existing_files]
     if not missing_files:
