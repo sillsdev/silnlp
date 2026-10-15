@@ -47,6 +47,7 @@ from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
 from ..common.utils import merge_dict
+from .batch_size import find_executable_batch_size
 from .checkpoints import CheckpointDirectory, CheckpointType
 from .config import InferenceModelParams, Language, NMTModel
 from .config_keys import RenamedConfigKeys
@@ -63,7 +64,7 @@ from .llm_config import (
     PromptMessagesFactory,
     PromptTemplateCollection,
 )
-from .seq2seq_config import batch_sentences, find_executable_batch_size
+from .seq2seq_config import batch_sentences
 from .training_arguments import TrainingArgumentsMapping
 
 LOGGER = logging.getLogger(__name__)
