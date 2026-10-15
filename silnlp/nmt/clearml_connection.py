@@ -1,7 +1,7 @@
 import logging
 import shutil
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 import yaml
 from clearml import Task
@@ -14,6 +14,30 @@ from .config_utils import create_config
 LOGGER = logging.getLogger(__name__)
 
 TAGS_LIST = ["research", "dev", "eitl", "onboarding"]
+
+
+class TaskIdentity:
+    """The project, name and tags silnlp gives a task, however and wherever the task was created."""
+
+    def __init__(self, project_name: str, task_name: str, tags: List[str]) -> None:
+        self._project_name = project_name
+        self._task_name = task_name
+        self._tags = tags
+
+    def init_task(self) -> Task:
+        task = Task.init(project_name=self._project_name, task_name=self._task_name, tags=self._tags or None)
+        # On an agent, Task.init adopts the queued task and ignores the project, name and tags it is given.
+        self.apply_to(task)
+        return task
+
+    def apply_to(self, task: Task) -> None:
+        if task.get_project_name() != self._project_name:
+            task.move_to_project(new_project_name=self._project_name)
+        if task.name != self._task_name:
+            task.set_name(self._task_name)
+        missing = [tag for tag in self._tags if tag not in task.get_tags()]
+        if len(missing) > 0:
+            task.add_tags(missing)
 
 
 @dataclass
@@ -43,11 +67,12 @@ class SILClearML:
             return
 
         try:
-            self.task: Task = Task.init(
-                project_name=self.project_prefix + project + self.project_suffix,
-                task_name=exp_name + self.experiment_suffix,
-                tags=[f"silnlp-{self.tag}"] if self.tag else None,
+            identity = TaskIdentity(
+                self.project_prefix + project + self.project_suffix,
+                exp_name + self.experiment_suffix,
+                [f"silnlp-{self.tag}"] if self.tag else [],
             )
+            self.task: Task = identity.init_task()
 
             self.clearml_project_folder = project
             if not self.skip_config:
