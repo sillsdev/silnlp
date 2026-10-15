@@ -15,6 +15,7 @@ from scipy.stats import gmean
 
 from ..common.environment import SilNlpEnv
 from ..common.linear_regression import perform_enhanced_linear_regression
+from ..common.translator import TestConfidenceFile
 from ..common.utils import get_git_revision_hash, set_seed
 from .checkpoints import CheckpointType
 from .clearml_connection import TAGS_LIST, SILClearML
@@ -221,18 +222,7 @@ def score_pair(
             other_scores["TER"] = ter_score.score
 
     if "confidence" in scorers:
-        if pair_confs is not None:
-            confidences = pair_confs
-        else:
-            try:
-                with files.confidences().open("r", encoding="utf-8") as f:
-                    confidences = [float(line.split("\t")[0]) for line in list(f)[3::2]]
-            except FileNotFoundError as e:
-                raise FileNotFoundError(
-                    "Cannot use confidence as a scorer because the confidences file is missing. "
-                    "Include the --save-confidences option to generate the file and enable confidence scoring."
-                ) from e
-        other_scores["Confidence"] = gmean(confidences)
+        other_scores["Confidence"] = None if pair_confs is None else gmean(pair_confs)
 
     if book == "ALL":
         write_pair_verse_scores(
@@ -242,7 +232,7 @@ def score_pair(
             scorers,
             other_scores,
             scoring,
-            confidences if "confidence" in scorers else None,
+            pair_confs if "confidence" in scorers else None,
             write_linear_regression,
         )
 
@@ -398,6 +388,7 @@ def score_individual_books(
                 scoring,
                 ref_projects,
                 draft_index,
+                pair_confs=pair_confs,
             )
         )
     return book_scores
@@ -476,9 +467,12 @@ def load_test_data(
 ]:
     sys: List[str] = []
     refs: List[List[str]] = []
+    kept_line_indices: List[int] = []
     book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]] = {}
     pred_file_path = files.predictions()
     conf_file_path = files.confidences()
+    # A run that did not save confidences leaves no file to read them from.
+    confidence_file = TestConfidenceFile(conf_file_path) if conf_file_path.is_file() else None
     with ExitStack() as stack:
         pred_file = stack.enter_context(pred_file_path.open("r", encoding="utf-8"))
         out_file = stack.enter_context(files.predictions_detokenized().open("w", encoding="utf-8"))
@@ -603,7 +597,7 @@ class TestRun:
         overall_sys: List[str] = []
         overall_refs: List[List[str]] = []
         for test_set in test_sets:
-            pair_sys, pair_refs, book_dict = load_test_data(
+            pair_sys, pair_refs, pair_confs, book_dict = load_test_data(
                 self._tokenizer,
                 test_set,
                 self._request.ref_projects,
@@ -631,6 +625,7 @@ class TestRun:
                     self._scoring,
                     self._request.ref_projects,
                     test_set.draft_index(),
+                    pair_confs=pair_confs,
                     write_linear_regression=True,
                 )
             )
@@ -638,7 +633,12 @@ class TestRun:
             if self._request.by_book:
                 if len(book_dict) != 0:
                     book_scores = score_individual_books(
-                        book_dict, test_set, self._request.scorers, self._scoring, self._request.ref_projects
+                        book_dict,
+                        test_set,
+                        self._request.scorers,
+                        self._scoring,
+                        self._request.ref_projects,
+                        test_set.draft_index(),
                     )
                     scores.extend(book_scores)
                 else:
