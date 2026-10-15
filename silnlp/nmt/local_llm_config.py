@@ -817,7 +817,7 @@ class LocalLLMModel(NMTModel):
         clearml_queue: Optional[str] = None,
         pretrained_model_provider_factory: CausalLMProviderFactory = FileCausalLMProviderFactory(),
     ) -> None:
-        super().__init__(config)
+        super().__init__(CheckpointDirectory(config.model_dir), config.infer.get("num_drafts", 1))
         self._config: LocalLLMConfig = config
         self._mixed_precision = mixed_precision
         self._num_devices = num_devices
@@ -1011,8 +1011,7 @@ class LocalLLMModel(NMTModel):
 
     def _create_training_arguments(self) -> TrainingArguments:
         dtype = self._config.params["torch_dtype"]
-        args = TrainingArgumentsMapping(self._TRAINING_ARGS_CONFIG_MAPPING).collect(
-            self._config.root,
+        args = TrainingArgumentsMapping(self._TRAINING_ARGS_CONFIG_MAPPING, self._config.root).collect(
             {
                 "bf16": self._mixed_precision and dtype == "bfloat16",
                 "fp16": self._mixed_precision and dtype == "float16",
@@ -1022,8 +1021,8 @@ class LocalLLMModel(NMTModel):
         return HfArgumentParser(TrainingArguments).parse_dict(args)[0]
 
     def save_effective_config(self, path: Path) -> None:
-        TrainingArgumentsMapping(self._TRAINING_ARGS_CONFIG_MAPPING).write_effective_config(
-            path, self._config.root, self._create_training_arguments()
+        TrainingArgumentsMapping(self._TRAINING_ARGS_CONFIG_MAPPING, self._config.root).write_effective_config(
+            path, self._create_training_arguments()
         )
 
     # --- inference ----------------------------------------------------------------
