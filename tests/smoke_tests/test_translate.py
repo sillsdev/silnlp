@@ -99,7 +99,7 @@ def test_translate_usfm_file():
     translation_task = create_translation_task(environment, model_provider_factory)
 
     # Placing the paragraph markers aligns the draft together with the experiment's training data
-    place_markers_config = PostprocessConfig({"paragraph_behavior": "place"}, environment)
+    place_markers_config = PostprocessConfig({"paragraph_behavior": "place"})
     translation_task.translate_files(
         src=SOURCE_USFM_FILE_NAME,
         trg=None,

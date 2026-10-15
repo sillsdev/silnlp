@@ -22,7 +22,7 @@ from transformers.trainer_utils import get_last_checkpoint
 from ..common.corpus import load_corpus
 from ..common.environment import SilNlpEnv
 from ..common.paratext import get_book_path
-from ..common.postprocesser import (
+from ..common.postprocessor import (
     NoDetectedQuoteConventionException,
     PostprocessConfig,
     PostprocessHandler,

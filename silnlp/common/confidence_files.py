@@ -243,6 +243,10 @@ class TestConfidenceFile(ConfidenceFile[int]):
     ) -> None:
         translated_draft.write_confidence_scores_to_file(self._path)
 
+    def get_sequence_confidences(self) -> List[float]:
+        with self._path.open("r", encoding="utf-8") as confidences_file:
+            return [float(line.split("\t")[0]) for line in list(confidences_file)[3::2]]
+
 
 def generate_confidence_files(
     translated_draft: TranslatedDraft,

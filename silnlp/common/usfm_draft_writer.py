@@ -21,7 +21,7 @@ from silnlp.nmt.corpora import CorpusPair
 from .confidence_files import generate_confidence_files
 from .environment import SilNlpEnv
 from .paratext import get_parent_project_dir
-from .postprocesser import (
+from .postprocessor import (
     DocumentUpdate,
     NoDetectedQuoteConventionException,
     PostprocessHandler,
@@ -65,7 +65,11 @@ class UsfmDraftWriter:
         environment: SilNlpEnv,
         trg_project: Optional[str] = None,
         training_corpus_pairs: List[CorpusPair] = [],
+        source_training_rows: Optional[List[str]] = None,
+        target_training_rows: Optional[List[str]] = None,
     ) -> None:
+        self._source_training_rows = source_training_rows or []
+        self._target_training_rows = target_training_rows or []
         self._translated = translated
         self._source = translated.source
         self._chapters = translated.chapters
@@ -85,7 +89,7 @@ class UsfmDraftWriter:
         drafts = translated_text_rows.get_translated_drafts()
         for draft_index, translated_draft in enumerate(drafts, 1):
             updates = translated_text_rows.construct_postprocessing_rows_for_draft_index(
-                postprocess_handler, draft_index
+                postprocess_handler, draft_index, self._source_training_rows, self._target_training_rows
             )
 
             for update in updates:
