@@ -262,16 +262,21 @@ class Term:
 
 
 def get_terms(
-    terms_renderings_path: Path,
+    terms_renderings_path: Optional[Path],
     iso: Optional[str] = None,
     environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+    list_name: Optional[str] = None,
 ) -> Dict[str, Term]:
-    list_name = get_terms_list(terms_renderings_path)
+    """A term list with a project's renderings, or, given only list_name, the list without renderings."""
+    if list_name is None:
+        if terms_renderings_path is None:
+            raise ValueError("get_terms needs a renderings file or a list name.")
+        list_name = get_terms_list(terms_renderings_path)
     terms_metadata_path = get_terms_metadata_path(list_name, environment=environment)
     terms_vrefs_path = get_terms_vrefs_path(list_name, environment=environment)
     terms: Dict[str, Term] = {}
     terms_metadata = load_corpus(terms_metadata_path)
-    terms_renderings = load_corpus(terms_renderings_path)
+    terms_renderings = load_corpus(terms_renderings_path) if terms_renderings_path is not None else iter([])
     terms_vrefs = load_corpus(terms_vrefs_path) if terms_vrefs_path.is_file() else iter([])
     terms_glosses = iter([])
     if iso is not None:
@@ -286,7 +291,7 @@ def get_terms(
         term_id, cat, domain = metadata_line.split("\t", maxsplit=3)
         term_id = f"{list_name}:{term_id}"  # term is identified both by list type (e.g. Major, SilNt, etc.) and term id (e.g. Ἀδάμ)
         glosses = [] if glosses_line is None or len(glosses_line) == 0 else glosses_line.split("\t")
-        renderings = [] if len(renderings_line) == 0 else renderings_line.split("\t")
+        renderings = [] if renderings_line is None or len(renderings_line) == 0 else renderings_line.split("\t")
         vrefs = (
             set()
             if vrefs_line is None or len(vrefs_line) == 0
