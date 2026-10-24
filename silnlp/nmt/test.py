@@ -2,16 +2,20 @@ import argparse
 import csv
 import logging
 import random
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
+from functools import partial
 from io import StringIO
 from pathlib import Path
-from typing import Dict, List, Optional, Set, TextIO, Tuple
+from typing import Callable, Dict, List, Optional, Set, TextIO, Tuple
 
+import pandas as pd
 import sacrebleu
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_id, get_chapters
 from sacrebleu.metrics import BLEUScore
 from scipy.stats import gmean
 
+from ..common.chrf_b import ChrFB
+from ..common.corpus import get_scripture_parallel_corpus, get_terms
 from ..common.environment import SilNlpEnv
 from ..common.linear_regression import perform_enhanced_linear_regression
 from ..common.translator import CONFIDENCE_SUFFIX, TestConfidenceFile
@@ -37,6 +41,7 @@ SUPPORTED_SCORERS = [
     "m-chrf3++",
     "ter",
     "confidence",
+    "chrf-b",
 ]
 
 SUPPORTED_SENTENCE_SCORERS = [
@@ -48,6 +53,10 @@ SUPPORTED_SENTENCE_SCORERS = [
     "ter",
     "confidence",
 ]
+
+# Scores a whole test set from its sources, hypotheses and references, for scorers that need the source text or a
+# model trained for the language pair.
+CorpusScorer = Callable[[List[str], List[str], List[List[str]]], float]
 
 TEST_TRG_PREDICTIONS_PREFIX = "test.trg-predictions"
 VERSE_SCORES_SUFFIX = ".scores.tsv"
@@ -111,6 +120,67 @@ class PairScore:
         file.write("\n")
 
 
+class ChrFBMetrics:
+    """chrF-B for each language pair of an experiment's test set, trained once and reused for every checkpoint."""
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+        self._metrics: Dict[Tuple[str, str], ChrFB] = {}
+
+    def __enter__(self) -> "ChrFBMetrics":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        for metric in self._metrics.values():
+            metric.close()
+
+    def corpus_scorers(self, src_iso: str, trg_iso: str) -> Dict[str, CorpusScorer]:
+        return {"chrF-B": self.for_pair(src_iso, trg_iso).corpus_score}
+
+    def for_pair(self, src_iso: str, trg_iso: str) -> ChrFB:
+        if (src_iso, trg_iso) not in self._metrics:
+            self._metrics[(src_iso, trg_iso)] = self._train(src_iso, trg_iso)
+        return self._metrics[(src_iso, trg_iso)]
+
+    def _train(self, src_iso: str, trg_iso: str) -> ChrFB:
+        extracts = next(
+            (
+                (src_file.path, trg_file.path)
+                for pair in self._config.corpus_pairs
+                if pair.is_test and pair.is_scripture
+                for src_file in pair.src_files
+                for trg_file in pair.trg_files
+                if src_file.iso == src_iso and trg_file.iso == trg_iso
+            ),
+            None,
+        )
+        if extracts is None:
+            LOGGER.warning(f"chrF-B for {src_iso}-{trg_iso} is chrF3 alone: its test data is not Scripture.")
+            return ChrFB(None, None)
+        # The scored verses are left out of the text the aligners train on.
+        excluded = {
+            line.strip()
+            for vref_path in self._config.exp_dir.glob("test*.vref.txt")
+            for line in vref_path.read_text(encoding="utf-8").splitlines()
+        }
+        source_path, target_path = extracts
+        # Key-term renderings are inferred by aligning the target with the English BSB, which is public domain.
+        english_path = SilNlpEnv.create_standard_environment().assets_dir / "en-BSB.txt"
+        return ChrFB.train(
+            training_corpus(source_path, target_path, excluded),
+            training_corpus(english_path, target_path, excluded),
+            get_terms(None, iso="en", list_name="Major").values(),
+        )
+
+
+def training_corpus(src_path: Path, trg_path: Path, excluded: Set[str]) -> pd.DataFrame:
+    """The verses both extracts have, less any that overlap the excluded verses (a verse range counts if any of its
+    verses is excluded)."""
+    corpus = get_scripture_parallel_corpus(src_path, trg_path)
+    scored = corpus["vref"].map(lambda vref: any(str(verse) in excluded for verse in vref.all_verses()))
+    return corpus[~scored]
+
+
 def score_pair(
     pair_sys: List[str],
     pair_refs: List[List[str]],
@@ -124,6 +194,8 @@ def score_pair(
     ref_projects: Set[str],
     draft_index: int = 1,
     linregress_file_name: Optional[str] = None,
+    pair_srcs: Optional[List[str]] = None,
+    corpus_scorers: Optional[Dict[str, CorpusScorer]] = None,
 ) -> PairScore:
     bleu_score = None
     if "bleu" in scorers:
@@ -224,6 +296,9 @@ def score_pair(
 
     if "confidence" in scorers:
         other_scores["Confidence"] = None if pair_confs is None else gmean(pair_confs)
+
+    for name, corpus_scorer in (corpus_scorers or {}).items():
+        other_scores[name] = corpus_scorer(pair_srcs, pair_sys, pair_refs)
 
     if book == "ALL":
         write_pair_verse_scores(
@@ -380,7 +455,7 @@ def get_linregress_file_name(
 
 
 def score_individual_books(
-    book_dict: Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]]]],
+    book_dict: Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]], List[str]]],
     src_iso: str,
     trg_iso: str,
     predictions_detok_file_name: str,
@@ -388,6 +463,7 @@ def score_individual_books(
     config: Config,
     ref_projects: Set[str],
     draft_index: int,
+    corpus_scorers: Optional[Dict[str, CorpusScorer]] = None,
 ):
     overall_sys: List[str] = []
     book_scores: List[PairScore] = []
@@ -396,6 +472,7 @@ def score_individual_books(
         pair_sys = book_tuple[0]
         pair_refs = book_tuple[1]
         pair_confs = book_tuple[2]
+        pair_srcs = book_tuple[3]
         overall_sys.extend(pair_sys)
         book_scores.append(
             score_pair(
@@ -410,6 +487,8 @@ def score_individual_books(
                 config,
                 ref_projects,
                 draft_index,
+                pair_srcs=pair_srcs,
+                corpus_scorers=corpus_scorers,
             )
         )
     return book_scores
@@ -420,12 +499,13 @@ def process_individual_books(
     pred_file_path: Path,
     ref_file_paths: List[Path],
     vref_file_path: Path,
+    src_file_path: Optional[Path],
     confidences: Optional[List[float]],
     select_rand_ref_line: bool,
     books: Dict[int, List[int]],
-) -> Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]]]]:
+) -> Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]], List[str]]]:
     # Output data structure
-    book_dict: Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]]]] = {}
+    book_dict: Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]], List[str]]] = {}
     with ExitStack() as stack:
         # Get all references
         ref_files: List[TextIO] = []
@@ -434,6 +514,7 @@ def process_individual_books(
 
         vref_file = stack.enter_context(vref_file_path.open("r", encoding="utf-8"))
         pred_file = stack.enter_context(pred_file_path.open("r", encoding="utf-8"))
+        src_lines = [] if src_file_path is None else src_file_path.read_text(encoding="utf-8").splitlines()
 
         for line_index, lines in enumerate(zip(pred_file, vref_file, *ref_files)):
             # Get file lines
@@ -449,8 +530,9 @@ def process_individual_books(
                 continue
             # If book not in dictionary add the book
             if vref.book not in book_dict:
-                book_dict[vref.book] = ([], [], None if confidences is None else [])
-            book_pred, book_refs, book_conf = book_dict[vref.book]
+                book_dict[vref.book] = ([], [], None if confidences is None else [], [])
+            book_pred, book_refs, book_conf, book_srcs = book_dict[vref.book]
+            book_srcs.append(src_lines[line_index] if line_index < len(src_lines) else "")
 
             # Add detokenized prediction and confidence to nested dictionary
             book_pred.append(detok_pred)
@@ -485,16 +567,21 @@ def load_test_data(
     config: Config,
     books: Dict[int, List[int]],
     by_book: bool,
+    src_file_name: Optional[str] = None,
 ) -> Tuple[
     List[str],
     List[List[str]],
+    List[str],
     Optional[List[float]],
-    Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]]]],
+    Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]], List[str]]],
 ]:
     sys: List[str] = []
     refs: List[List[str]] = []
-    book_dict: Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]]]] = {}
+    srcs: List[str] = []
+    book_dict: Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]], List[str]]] = {}
     pred_file_path = config.exp_dir / pred_file_name
+    src_file_path = None if src_file_name is None else config.exp_dir / src_file_name
+    src_lines = [] if src_file_path is None else src_file_path.read_text(encoding="utf-8").splitlines()
     kept_line_indices: List[int] = []
     with ExitStack() as stack:
         pred_file = stack.enter_context(pred_file_path.open("r", encoding="utf-8"))
@@ -527,6 +614,7 @@ def load_test_data(
             pred_line = lines[0].strip()
             detok_pred_line = tokenizer.detokenize(pred_line)
             sys.append(detok_pred_line)
+            srcs.append(src_lines[line_index] if line_index < len(src_lines) else "")
             kept_line_indices.append(line_index)
             if select_rand_ref_line:
                 ref_lines: List[str] = [line.strip() for line in lines[1:] if len(line.strip()) > 0]
@@ -549,12 +637,13 @@ def load_test_data(
                 pred_file_path,
                 ref_file_paths,
                 vref_file_path,
+                src_file_path,
                 all_confidences,
                 select_rand_ref_line,
                 books,
             )
     confidences = None if all_confidences is None else [all_confidences[i] for i in kept_line_indices]
-    return sys, refs, confidences, book_dict
+    return sys, refs, srcs, confidences, book_dict
 
 
 def test_checkpoint(
@@ -570,6 +659,7 @@ def test_checkpoint(
     books: Dict[int, List[int]],
     produce_multiple_translations: bool = False,
     save_confidences: bool = False,
+    corpus_scorers_for: Optional[Callable[[str, str], Dict[str, CorpusScorer]]] = None,
 ) -> List[PairScore]:
     config.set_seed()
     vref_file_names: List[str] = []
@@ -701,7 +791,17 @@ def test_checkpoint(
             step_token, split_by_pair, src_iso, trg_iso, produce_multiple_translations, draft_index
         )
 
-        pair_sys, pair_refs, pair_confs, book_dict = load_test_data(
+        src_detok_file_name = features_file_name.replace(".src.txt", ".src.detok.txt")
+        corpus_scorers: Dict[str, CorpusScorer] = {}
+        if corpus_scorers_for is not None:
+            if (config.exp_dir / src_detok_file_name).is_file():
+                corpus_scorers = corpus_scorers_for(src_iso, trg_iso)
+            else:
+                LOGGER.warning(
+                    f"Not scoring with scorers that need the detokenized test source: {src_detok_file_name} is missing."
+                )
+
+        pair_sys, pair_refs, pair_srcs, pair_confs, book_dict = load_test_data(
             tokenizer,
             vref_file_name,
             predictions_file_name,
@@ -712,6 +812,7 @@ def test_checkpoint(
             config,
             books,
             by_book,
+            src_file_name=src_detok_file_name if corpus_scorers else None,
         )
 
         start_index = len(overall_sys)
@@ -738,6 +839,8 @@ def test_checkpoint(
                 ref_projects,
                 draft_index,
                 linregress_file_name=linregress_file_name,
+                pair_srcs=pair_srcs,
+                corpus_scorers=corpus_scorers,
             )
         )
 
@@ -752,6 +855,7 @@ def test_checkpoint(
                     config,
                     ref_projects,
                     draft_index,
+                    corpus_scorers=corpus_scorers,
                 )
                 scores.extend(book_scores)
             else:
@@ -803,124 +907,61 @@ def test(
         scorers.add("bleu")
     scorers.intersection_update(set(SUPPORTED_SCORERS))
 
-    tokenizer = config.create_tokenizer()
-    if model is None:
-        model = config.create_model(clearml_queue=clearml_queue)
-    if force_infer:
-        model.discard_saved_inference()
-    results: Dict[int, List[PairScore]] = {}
-    step: int
-    if checkpoint is not None:
-        step = int(checkpoint)
-        results[step] = test_checkpoint(
+    with ChrFBMetrics(config) if "chrf-b" in scorers else nullcontext() as chrf_b_metrics:
+        tokenizer = config.create_tokenizer()
+        if model is None:
+            model = config.create_model(clearml_queue=clearml_queue)
+        if force_infer:
+            model.discard_saved_inference()
+        score_checkpoint = partial(
+            test_checkpoint,
             config,
             model,
             tokenizer,
             force_infer,
             by_book,
             ref_projects,
-            CheckpointType.OTHER,
-            step,
-            scorers,
-            books_nums,
-            produce_multiple_translations,
-            save_confidences,
+            scorers=scorers,
+            books=books_nums,
+            produce_multiple_translations=produce_multiple_translations,
+            save_confidences=save_confidences,
+            corpus_scorers_for=None if chrf_b_metrics is None else chrf_b_metrics.corpus_scorers,
         )
+        results: Dict[int, List[PairScore]] = {}
+        step: int
+        if checkpoint is not None:
+            step = int(checkpoint)
+            results[step] = score_checkpoint(CheckpointType.OTHER, step)
 
-    if all_checkpoints:
-        all_steps = find_all_checkpoints(config.model_dir)
-        if len(all_steps) == 0:
-            LOGGER.warning("No checkpoints found to test.")
-        for step in all_steps:
+        if all_checkpoints:
+            all_steps = find_all_checkpoints(config.model_dir)
+            if len(all_steps) == 0:
+                LOGGER.warning("No checkpoints found to test.")
+            for step in all_steps:
+                if step not in results:
+                    results[step] = score_checkpoint(CheckpointType.OTHER, step)
+
+        if avg:
+            try:
+                step = -1
+                results[step] = score_checkpoint(CheckpointType.AVERAGE, step)
+            except ValueError:
+                LOGGER.warning("No average checkpoint available.")
+
+        best_step = 0
+        if best and config.has_best_checkpoint:
+            _, best_step = model.get_checkpoint_path(CheckpointType.BEST)
+            step = best_step
             if step not in results:
-                results[step] = test_checkpoint(
-                    config,
-                    model,
-                    tokenizer,
-                    force_infer,
-                    by_book,
-                    ref_projects,
-                    CheckpointType.OTHER,
-                    step,
-                    scorers,
-                    books_nums,
-                    produce_multiple_translations,
-                    save_confidences,
-                )
+                results[step] = score_checkpoint(CheckpointType.BEST, step)
 
-    if avg:
-        try:
-            step = -1
-            results[step] = test_checkpoint(
-                config,
-                model,
-                tokenizer,
-                force_infer,
-                by_book,
-                ref_projects,
-                CheckpointType.AVERAGE,
-                step,
-                scorers,
-                books_nums,
-                produce_multiple_translations,
-                save_confidences,
-            )
-        except ValueError:
-            LOGGER.warning("No average checkpoint available.")
+        if last or (not best and checkpoint is None and not avg and config.model_dir.exists()):
+            _, step = model.get_checkpoint_path(CheckpointType.LAST)
+            if step not in results:
+                results[step] = score_checkpoint(CheckpointType.LAST, step)
 
-    best_step = 0
-    if best and config.has_best_checkpoint:
-        _, best_step = model.get_checkpoint_path(CheckpointType.BEST)
-        step = best_step
-        if step not in results:
-            results[step] = test_checkpoint(
-                config,
-                model,
-                tokenizer,
-                force_infer,
-                by_book,
-                ref_projects,
-                CheckpointType.BEST,
-                step,
-                scorers,
-                books_nums,
-                produce_multiple_translations,
-                save_confidences,
-            )
-
-    if last or (not best and checkpoint is None and not avg and config.model_dir.exists()):
-        _, step = model.get_checkpoint_path(CheckpointType.LAST)
-        if step not in results:
-            results[step] = test_checkpoint(
-                config,
-                model,
-                tokenizer,
-                force_infer,
-                by_book,
-                ref_projects,
-                CheckpointType.LAST,
-                step,
-                scorers,
-                books_nums,
-                produce_multiple_translations,
-                save_confidences,
-            )
-
-    if not config.model_dir.exists():
-        results[0] = test_checkpoint(
-            config,
-            model,
-            tokenizer,
-            force_infer,
-            by_book,
-            ref_projects,
-            CheckpointType.OTHER,
-            0,
-            scorers,
-            books_nums,
-            produce_multiple_translations,
-            save_confidences,
-        )
+        if not config.model_dir.exists():
+            results[0] = score_checkpoint(CheckpointType.OTHER, 0)
 
     for step in sorted(results.keys()):
         num_refs = results[step][0].num_refs

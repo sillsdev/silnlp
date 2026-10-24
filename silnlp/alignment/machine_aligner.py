@@ -103,18 +103,16 @@ class MachineAligner(Aligner):
             parallel_corpus = parallel_corpus.lowercase()
 
         direct_params = ThotWordAlignmentParameters()
-        direct_params.ibm1_iteration_count = 5
-        direct_params.ibm2_iteration_count = 5 if self.model_type is ThotWordAlignmentModelType.IBM2 else 0
-        direct_params.hmm_iteration_count = 5
-        direct_params.ibm3_iteration_count = 5
-        direct_params.ibm4_iteration_count = 5
-
         inverse_params = ThotWordAlignmentParameters()
-        inverse_params.ibm1_iteration_count = 5
-        inverse_params.ibm2_iteration_count = 5 if self.model_type is ThotWordAlignmentModelType.IBM2 else 0
-        inverse_params.hmm_iteration_count = 5
-        inverse_params.ibm3_iteration_count = 5
-        inverse_params.ibm4_iteration_count = 5
+        # Eflomal reads the IBM-1, HMM and IBM-3 counts as its own schedule, so setting them would replace its
+        # default (8/8/32).
+        if self.model_type is not ThotWordAlignmentModelType.EFLOMAL:
+            for params in (direct_params, inverse_params):
+                params.ibm1_iteration_count = 5
+                params.ibm2_iteration_count = 5 if self.model_type is ThotWordAlignmentModelType.IBM2 else 0
+                params.hmm_iteration_count = 5
+                params.ibm3_iteration_count = 5
+                params.ibm4_iteration_count = 5
         if self.model_type is ThotWordAlignmentModelType.IBM4:
             direct_params.source_word_classes = self._load_word_classes("src")
             direct_params.target_word_classes = self._load_word_classes("trg")
@@ -156,7 +154,7 @@ class MachineAligner(Aligner):
         trg_corpus = TextFileTextCorpus(trg_file_path)
         parallel_corpus = src_corpus.align_rows(trg_corpus).tokenize(WhitespaceTokenizer())
         LOGGER.info("Loading model")
-        with self._create_symmetrized_model(sym_heuristic) as model:
+        with self.create_symmetrized_model(sym_heuristic) as model:
             if self.lowercase:
                 parallel_corpus = parallel_corpus.lowercase()
 
@@ -195,7 +193,7 @@ class MachineAligner(Aligner):
                                 f"Target Index: {trg_word_index}, Probability: {prob}"
                             )
 
-    def _create_symmetrized_model(self, sym_heuristic: str) -> SymmetrizedWordAlignmentModel:
+    def create_symmetrized_model(self, sym_heuristic: str = "grow-diag-final-and") -> SymmetrizedWordAlignmentModel:
         model = ThotSymmetrizedWordAlignmentModel(self._create_model(direct=True), self._create_model(direct=False))
         model.heuristic = SymmetrizationHeuristic[sym_heuristic.upper().replace("-", "_")]
         return model
@@ -269,6 +267,7 @@ class Ibm3MachineAligner(MachineAligner):
 class Ibm4MachineAligner(MachineAligner):
     def __init__(self, model_dir: Path) -> None:
         super().__init__("ibm4", ThotWordAlignmentModelType.IBM4, model_dir)
+
 
 class EflomalAligner(MachineAligner):
     def __init__(self, model_dir: Path) -> None:
