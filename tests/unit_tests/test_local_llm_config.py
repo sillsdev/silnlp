@@ -478,7 +478,6 @@ def test_instruction_datasets_defaults_to_empty():
     assert stub.get_instruction_datasets() == []
     assert stub.get_instruction_data_size() == 100000
     assert stub.instruction_data_paths() == []
-    assert stub._write_instruction_data() == 0
 
 
 def test_instruction_data_paths_resolved_under_mt_dir_instructions(tmp_path):
@@ -712,102 +711,6 @@ def test_an_epoch_budget_sizes_the_dataset_for_one_pass_plus_the_instruction_sha
 def test_an_unset_step_budget_is_treated_as_an_epoch_budget():
     # Neither the epoch count nor the device count belongs here; the Trainer applies both itself.
     assert _length(num_devices=4, max_steps=0, num_train_epochs=10.0) == 1100
-
-
-def _write_jsonl_fixture(path: Path, examples: list) -> None:
-    with path.open("w", encoding="utf-8") as f:
-        for turns, output in examples:
-            f.write(json.dumps({"turns": turns, "output": output}) + "\n")
-
-
-def test_write_instruction_data_mixes_evenly_and_uses_undersized_datasets_whole(tmp_path):
-    mt_dir = tmp_path / "mt"
-    instructions_dir = mt_dir / "instructions"
-    instructions_dir.mkdir(parents=True)
-    exp_dir = tmp_path / "exp"
-    exp_dir.mkdir()
-
-    _write_jsonl_fixture(
-        instructions_dir / "a.jsonl",
-        [([{"role": "user", "content": f"a-in-{i}"}], f"a-out-{i}") for i in range(10)],
-    )
-    # "b" has fewer lines than its even share of the requested size (4), so all of it is used.
-    _write_jsonl_fixture(
-        instructions_dir / "b.jsonl",
-        [([{"role": "user", "content": f"b-in-{i}"}], f"b-out-{i}") for i in range(3)],
-    )
-
-    stub = _InstructionDataStub(
-        train={"instruction_data": {"datasets": ["a", "b"], "size": 8}},
-        _environment=SilNlpEnv.create_environment_with_mt_dir(mt_dir),
-        exp_dir=exp_dir,
-    )
-
-    count = stub._write_instruction_data()
-    assert count == 4 + 3
-
-    lines = (exp_dir / "instruction.jsonl").read_text(encoding="utf-8").splitlines()
-    assert len(lines) == count
-    examples = [json.loads(line) for line in lines]
-
-    a_selected = {e["output"] for e in examples if e["output"].startswith("a-out-")}
-    b_selected = {e["output"] for e in examples if e["output"].startswith("b-out-")}
-    assert len(a_selected) == 4
-    assert a_selected.issubset({f"a-out-{i}" for i in range(10)})
-    assert b_selected == {f"b-out-{i}" for i in range(3)}
-
-    # inputs and outputs stay aligned within each example
-    for e in examples:
-        assert e["turns"][0]["content"].split("-in-")[1] == e["output"].split("-out-")[1]
-
-
-def _instruction_data_stub_with_sizes(tmp_path: Path, sizes: dict, size: int) -> _InstructionDataStub:
-    mt_dir = tmp_path / "mt"
-    instructions_dir = mt_dir / "instructions"
-    instructions_dir.mkdir(parents=True)
-    exp_dir = tmp_path / "exp"
-    exp_dir.mkdir()
-    for name, num_lines in sizes.items():
-        _write_jsonl_fixture(
-            instructions_dir / f"{name}.jsonl",
-            [([{"role": "user", "content": f"{name}-in-{i}"}], f"{name}-out-{i}") for i in range(num_lines)],
-        )
-    return _InstructionDataStub(
-        train={"instruction_data": {"datasets": list(sizes), "size": size}},
-        _environment=SilNlpEnv.create_environment_with_mt_dir(mt_dir),
-        exp_dir=exp_dir,
-    )
-
-
-def test_write_instruction_data_warns_about_a_dataset_smaller_than_its_share(tmp_path, caplog):
-    stub = _instruction_data_stub_with_sizes(tmp_path, {"a": 10, "b": 3}, size=8)
-    with caplog.at_level(logging.WARNING):
-        stub._write_instruction_data()
-    warnings = [record.message for record in caplog.records if "even share" in record.message]
-    assert len(warnings) == 1
-    assert "b has 3 examples" in warnings[0]
-    assert "share of 4" in warnings[0]
-
-
-def test_write_instruction_data_does_not_warn_when_a_dataset_exactly_fills_its_share(tmp_path, caplog):
-    stub = _instruction_data_stub_with_sizes(tmp_path, {"a": 10, "b": 4}, size=8)
-    with caplog.at_level(logging.WARNING):
-        stub._write_instruction_data()
-    assert not any("even share" in record.message for record in caplog.records)
-
-
-def test_write_instruction_data_missing_file_raises(tmp_path):
-    mt_dir = tmp_path / "mt"
-    (mt_dir / "instructions").mkdir(parents=True)
-    exp_dir = tmp_path / "exp"
-    exp_dir.mkdir()
-    stub = _InstructionDataStub(
-        train={"instruction_data": {"datasets": ["missing"], "size": 10}},
-        _environment=SilNlpEnv.create_environment_with_mt_dir(mt_dir),
-        exp_dir=exp_dir,
-    )
-    with pytest.raises(RuntimeError, match="does not exist"):
-        stub._write_instruction_data()
 
 
 class _StubInferenceModel:

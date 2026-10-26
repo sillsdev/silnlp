@@ -16,7 +16,7 @@ from .corpora import parse_corpus_pairs
 from .corpus_inventory import CorpusInventory
 from .dictionary_writer import DictionaryWriter
 from .experiment_files import ExperimentFiles
-from .experiment_preprocessor import ExperimentPreprocessor, ScriptureDataSetWriters, TermsSettings
+from .experiment_preprocessor import DataSetWriter, ExperimentPreprocessor, ScriptureDataSetWriters, TermsSettings
 from .experiment_settings import EvaluationSettings
 from .terms import GlossLanguage, TermCategories
 from .terms_data_set import TermsDataSet
@@ -175,7 +175,7 @@ class Config(ABC):
     @abstractmethod
     def create_tokenizer(self) -> Tokenizer: ...
 
-    def create_data_set_writer(self, force_align: bool) -> ExperimentPreprocessor:
+    def create_data_set_writer(self, force_align: bool) -> DataSetWriter:
         tokenizer = self.create_tokenizer()
         alignment_scores = AlignmentScores(self.exp_dir, self.data["aligner"], force=force_align)
         return ExperimentPreprocessor(

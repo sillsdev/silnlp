@@ -43,7 +43,6 @@ from transformers import (
     set_seed,
 )
 
-from ..common.corpus import split_corpus
 from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
@@ -53,6 +52,8 @@ from .config import InferenceModelParams, Language, NMTModel
 from .config_keys import RenamedConfigKeys
 from .corpora import read_parallel_text_pairs
 from .example_retrieval import ExamplePool, ExampleRetrieverFactory
+from .experiment_preprocessor import DataSetWriter
+from .instruction_data import InstructionData, InstructionDataSetWriter
 from .llm_config import (
     LLMConfig,
     PromptBuilder,
@@ -63,7 +64,6 @@ from .llm_config import (
     PromptTemplateCollection,
 )
 from .seq2seq_config import batch_sentences, find_executable_batch_size
-from .tokenizer import Tokenizer
 from .training_arguments import TrainingArgumentsMapping
 
 LOGGER = logging.getLogger(__name__)
@@ -444,58 +444,17 @@ class LocalLLMConfig(LLMConfig[LocalLLMPromptMessages]):
     def instruction_jsonl_filename(self) -> str:
         return "instruction.jsonl"
 
-    def _count_nonblank_lines(self, path: Path) -> int:
-        with path.open("r", encoding="utf-8") as f:
-            return sum(1 for line in f if line.strip())
-
-    def _delete_previous_data_files(self) -> None:
-        super()._delete_previous_data_files()
-        for path in self.exp_dir.glob("instruction.*"):
-            path.unlink()
-
-    def _build_corpora(self, tokenizer: Tokenizer, stats: bool, force_align: bool) -> int:
-        return super()._build_corpora(tokenizer, stats, force_align) + self._write_instruction_data()
-
-    def _write_instruction_data(self) -> int:
-        """Writes instruction data from one or more instruction datasets into a single file."""
+    def create_data_set_writer(self, force_align: bool) -> DataSetWriter:
         dataset_paths = self.instruction_data_paths()
-        if not dataset_paths:
-            return 0
-
-        base_share, remainder = divmod(self.get_instruction_data_size(), len(dataset_paths))
-
-        count = 0
-        with self.files.open_for_append(self.exp_dir / self.instruction_jsonl_filename()) as out_file:
-            for i, dataset_path in enumerate(dataset_paths):
-                if not dataset_path.is_file():
-                    raise RuntimeError(
-                        f"Instruction data file {dataset_path} does not exist. Run "
-                        "scripts/prepare_instruction_data.py to generate it."
-                    )
-                # A dataset smaller than its even share is used in full, without repetition (see split_corpus).
-                share = base_share + (1 if i < remainder else 0)
-                corpus_size = self._count_nonblank_lines(dataset_path)
-                if corpus_size < share:
-                    LOGGER.warning(
-                        f"Instruction dataset {dataset_path.stem} has {corpus_size} examples, fewer than its "
-                        f"even share of {share}; all of it is used, and the shortfall is not made up by the "
-                        "other datasets, so the mix will not be even."
-                    )
-                selected_indices = split_corpus(corpus_size, share)
-
-                index = 0
-                with dataset_path.open("r", encoding="utf-8") as in_file:
-                    for raw_line in in_file:
-                        line = raw_line.strip()
-                        if not line:
-                            continue
-                        if selected_indices is None or index in selected_indices:
-                            out_file.write(line + "\n")
-                            count += 1
-                        index += 1
-
-        LOGGER.info(f"instruction data size: {count}")
-        return count
+        return InstructionDataSetWriter(
+            super().create_data_set_writer(force_align),
+            InstructionData(
+                self.files,
+                self.exp_dir / self.instruction_jsonl_filename(),
+                dataset_paths,
+                self.get_instruction_data_size() if len(dataset_paths) > 0 else 0,
+            ),
+        )
 
     def create_model(
         self,
