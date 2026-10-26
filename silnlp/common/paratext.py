@@ -263,7 +263,7 @@ def extract_term_renderings(
     settings = FileParatextProjectSettingsParser(project_dir).parse()
     list_type = settings.biblical_terms_list_type
     list_name = list_type
-    if list_type == "Project":
+    if list_type == "Project" or list_type == "OtherProject":
         LOGGER.info(
             'Project-specific key terms lists are not supported. Supported lists are "Major", "All", "SilNt", and "Pt6".'
         )
@@ -445,7 +445,7 @@ class CheckVersificationOutput:
         matching: bool,
         detected_versification: List[VersificationType],
         versification_error_count: int,
-        number_of_affected_verses: int
+        number_of_affected_verses: int,
     ):
         self.matching = matching
         self.detected_versification = detected_versification
@@ -536,7 +536,9 @@ def check_versification(
         if book_file_path.exists() and book_file_path.is_file() and book_file_path.stat().st_size > 100:
             existing_non_empty_books.append(book_id)
 
-    analysis = FileUsfmVersificationAnalyzer(project_dir).analyze_usfm_versification({book_id: None for book_id in existing_non_empty_books})
+    analysis = FileUsfmVersificationAnalyzer(project_dir).analyze_usfm_versification(
+        {book_id: None for book_id in existing_non_empty_books}
+    )
     if len(analysis.diagnostics) > 0:
         LOGGER.warning(
             f"Detected {len(analysis.diagnostics)} versification errors affecting {analysis.total_num_affected_verses} verses. See {versification_error_output_path} for more details."
@@ -546,9 +548,7 @@ def check_versification(
                 diagnostic_location = f"in project {analysis.project_settings.name} at {Path(project_dir) / diagnostic.filename}:{str(diagnostic.line_numbers[0]) + ('-' + str(diagnostic.line_numbers[-1]) if len(diagnostic.line_numbers) > 1 else '')}"
                 diagnostic_references = [str(r) for r in diagnostic.references]
                 if diagnostic.type == UsfmVersificationDiagnosticType.INVALID:
-                    f.write(
-                        f"Invalid reference {diagnostic_references[0]} {diagnostic_location}.\n"
-                    )
+                    f.write(f"Invalid reference {diagnostic_references[0]} {diagnostic_location}.\n")
                 elif diagnostic.type == UsfmVersificationDiagnosticType.EXTRA:
                     f.write(
                         f"Extra {diagnostic.num_affected_verses} verse{'s' if diagnostic.num_affected_verses > 1 else ''} {diagnostic_location}, references {diagnostic_references}.\n"
@@ -560,11 +560,11 @@ def check_versification(
                 elif diagnostic.type == UsfmVersificationDiagnosticType.UNSUPPORTED_VERSE_RANGE:
                     f.write(
                         f"Unsupported verse range {diagnostic_references[0]} {diagnostic_location}. This verse range would cross a chapter boundary in Original versification and thus may not be properly handled. \n"
-                    )  
+                    )
                 elif diagnostic.type == UsfmVersificationDiagnosticType.INCORRECT_VERSE_SEGMENT:
-                    f.write(
-                        f"Incorrect verse segment {diagnostic_references[0]} {diagnostic_location}.\n"
-                    )  
+                    f.write(f"Incorrect verse segment {diagnostic_references[0]} {diagnostic_location}.\n")
 
     matching = True
-    return CheckVersificationOutput(matching, detected_versification, len(analysis.diagnostics), analysis.total_num_affected_verses)
+    return CheckVersificationOutput(
+        matching, detected_versification, len(analysis.diagnostics), analysis.total_num_affected_verses
+    )
