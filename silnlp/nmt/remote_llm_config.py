@@ -620,6 +620,7 @@ class RemotePromptDefaults(PromptDefaults):
     batch_system_message: str
     batch_instruction_template: str
     few_shot_batch_instruction_template: str
+    back_translation_guidance: str
 
 
 class RemotePromptConfig(PromptConfig):
@@ -649,6 +650,16 @@ class RemotePromptConfig(PromptConfig):
                 if self.get_num_examples() > 0
                 else self._remote_defaults.batch_instruction_template
             )
+        if self._settings["back_translation"]:
+            for key in ("system_message", "batch_system_message"):
+                self._settings[key] = self._with_back_translation_guidance(self._settings[key])
+
+    def _with_back_translation_guidance(self, system_message: str) -> str:
+        guidance = self._remote_defaults.back_translation_guidance
+        # An effective config run again as a config already has it.
+        if guidance in system_message:
+            return system_message
+        return f"{system_message}\n{guidance}" if system_message else guidance
 
     def create_batch_template(self, instruction_template: str) -> PromptTemplate:
         return self.create_template(instruction_template, self._settings["batch_system_message"])
@@ -689,6 +700,13 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
         + _GUIDANCE
         + "\nReturn only the {trg_lang} translations, one numbered line per source passage, without labels, "
         "explanations or alternative translations."
+    )
+
+    _BACK_TRANSLATION_GUIDANCE = (
+        "A back-translation shows what the {src_lang} text ACTUALLY says, so a reviewer who does not read "
+        "{src_lang} can check it. Render the {src_lang} wording faithfully, including anything unexpected, "
+        "unusual, added, missing or apparently mistaken — do NOT smooth it toward a familiar or expected wording, "
+        "and do not supply content that is not in the {src_lang}."
     )
 
     _SINGLE_TASK = (
@@ -760,6 +778,7 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
                         "example_selection": {"method": CoverageExampleRetriever.method, "model": None},
                         "batch_system_message": None,
                         "batch_instruction_template": None,
+                        "back_translation": False,
                     },
                     "infer_batch_size": 1,
                     "num_drafts": 1,
@@ -800,6 +819,7 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
             batch_system_message=self._BATCH_SYSTEM_MESSAGE,
             batch_instruction_template=self._BATCH_INSTRUCTION,
             few_shot_batch_instruction_template=self._FEW_SHOT_BATCH_INSTRUCTION,
+            back_translation_guidance=self._BACK_TRANSLATION_GUIDANCE,
         )
 
     def _create_infer_prompt_config(self, settings: dict) -> RemotePromptConfig:
