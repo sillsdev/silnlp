@@ -42,6 +42,7 @@ SUPPORTED_SCORERS = [
     "ter",
     "confidence",
     "chrf-b",
+    "chrf-b-norm",
 ]
 
 SUPPORTED_SENTENCE_SCORERS = [
@@ -123,8 +124,9 @@ class PairScore:
 class ChrFBMetrics:
     """chrF-B for each language pair of an experiment's test set, trained once and reused for every checkpoint."""
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, scorers: Set[str]) -> None:
         self._config = config
+        self._scorers = scorers
         self._metrics: Dict[Tuple[str, str], ChrFB] = {}
 
     def __enter__(self) -> "ChrFBMetrics":
@@ -135,7 +137,13 @@ class ChrFBMetrics:
             metric.close()
 
     def corpus_scorers(self, src_iso: str, trg_iso: str) -> Dict[str, CorpusScorer]:
-        return {"chrF-B": self.for_pair(src_iso, trg_iso).corpus_score}
+        metric = self.for_pair(src_iso, trg_iso)
+        scorers: Dict[str, CorpusScorer] = {}
+        if "chrf-b" in self._scorers:
+            scorers["chrF-B"] = metric.corpus_score
+        if "chrf-b-norm" in self._scorers:
+            scorers["chrF-B-norm"] = metric.normalized_corpus_score
+        return scorers
 
     def for_pair(self, src_iso: str, trg_iso: str) -> ChrFB:
         if (src_iso, trg_iso) not in self._metrics:
@@ -907,7 +915,7 @@ def test(
         scorers.add("bleu")
     scorers.intersection_update(set(SUPPORTED_SCORERS))
 
-    with ChrFBMetrics(config) if "chrf-b" in scorers else nullcontext() as chrf_b_metrics:
+    with ChrFBMetrics(config, scorers) if scorers & {"chrf-b", "chrf-b-norm"} else nullcontext() as chrf_b_metrics:
         tokenizer = config.create_tokenizer()
         if model is None:
             model = config.create_model(clearml_queue=clearml_queue)

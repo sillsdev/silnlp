@@ -12,11 +12,17 @@ from .key_term_consistency import KeyTermConsistency
 class ChrFB:
     """chrF-B ("chirf-bee", B for Bible): chrF3 plus coverage of the hypothesis and key-term consistency, in chrF3
     points. It is for comparing systems on held-out Bible books, not for scoring single verses or general-domain text.
+
+    normalized_corpus_score rescales the chrF3 part between a floor and 100 so scores read alike across languages. The
+    floor is chrF3 of the references shuffled among themselves: what text in the right language but with the wrong
+    meaning gets for shared names, punctuation and common words (4 to 26 points across Bible test sets). Within one
+    test set the floor is a constant, so the two scores always rank systems the same way.
     """
 
     # Coverage rises when unaligned words are dropped, so a larger weight would let it excuse omissions.
     _COVERAGE_WEIGHT = 60.0
     _KEY_TERMS_WEIGHT = 20.0
+    _FLOOR_SHUFFLES = 3
 
     def __init__(self, coverage: Optional[HypothesisCoverage], key_terms: Optional[KeyTermConsistency]) -> None:
         self._coverage = coverage
@@ -36,13 +42,33 @@ class ChrFB:
         return cls(coverage, key_terms)
 
     def corpus_score(self, sources: Sequence[str], hypotheses: Sequence[str], references: List[List[str]]) -> float:
-        chrf3 = sacrebleu.corpus_chrf(list(hypotheses), references, char_order=6, beta=3, remove_whitespace=True)
-        return (
-            chrf3.score
-            + self._COVERAGE_WEIGHT * self._mean_over_references(self._coverage_scores, sources, hypotheses, references)
-            + self._KEY_TERMS_WEIGHT
-            * self._mean_over_references(self._key_term_scores, sources, hypotheses, references)
+        return _chrf3(hypotheses, references) + self._added_points(sources, hypotheses, references)
+
+    def normalized_corpus_score(
+        self, sources: Sequence[str], hypotheses: Sequence[str], references: List[List[str]]
+    ) -> float:
+        floor = self.floor(references)
+        return 100 * (_chrf3(hypotheses, references) - floor) / (100 - floor) + self._added_points(
+            sources, hypotheses, references
         )
+
+    @classmethod
+    def floor(cls, references: List[List[str]]) -> float:
+        """chrF3 of the first reference's lines rotated, so none stays in place, averaged over a few rotations."""
+        lines = references[0]
+        if len(lines) < 2:
+            return 0.0
+        rng = np.random.default_rng(0)
+        scores = []
+        for _ in range(cls._FLOOR_SHUFFLES):
+            shift = 1 + int(rng.integers(len(lines) - 1))
+            scores.append(_chrf3(lines[shift:] + lines[:shift], references))
+        return float(np.mean(scores))
+
+    def _added_points(self, sources: Sequence[str], hypotheses: Sequence[str], references: List[List[str]]) -> float:
+        return self._COVERAGE_WEIGHT * self._mean_over_references(
+            self._coverage_scores, sources, hypotheses, references
+        ) + self._KEY_TERMS_WEIGHT * self._mean_over_references(self._key_term_scores, sources, hypotheses, references)
 
     def _mean_over_references(
         self,
@@ -75,3 +101,7 @@ class ChrFB:
         if self._key_terms is None:
             return np.full(len(hypotheses), np.nan)
         return self._key_terms.verse_scores(hypotheses, references)
+
+
+def _chrf3(hypotheses: Sequence[str], references: List[List[str]]) -> float:
+    return sacrebleu.corpus_chrf(list(hypotheses), references, char_order=6, beta=3, remove_whitespace=True).score

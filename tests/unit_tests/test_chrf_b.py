@@ -34,6 +34,20 @@ def test_without_coverage_or_key_terms_chrf_b_is_chrf3() -> None:
     assert score == pytest.approx(_chrf3(hypotheses, references))
 
 
+def test_normalized_chrf_b_rescales_chrf3_above_the_shuffled_references_floor() -> None:
+    hypotheses = ["in the beginning god made the heavens", "and the earth was empty", "darkness was on the deep"]
+    references = [["in the beginning god created the heavens", "the earth was formless and empty", "darkness was over"]]
+    metric = ChrFB(None, None)
+
+    floor = ChrFB.floor(references)
+
+    assert 0 < floor < 50
+    assert metric.normalized_corpus_score(["s1", "s2", "s3"], hypotheses, references) == pytest.approx(
+        100 * (_chrf3(hypotheses, references) - floor) / (100 - floor)
+    )
+    assert metric.normalized_corpus_score(["s1", "s2", "s3"], references[0], references) == pytest.approx(100.0)
+
+
 def test_key_term_consistency_adds_twenty_points_per_share_of_reference_renderings_kept() -> None:
     key_terms = KeyTermConsistency({"yesu", "kristo"})
     hypotheses = ["yesu alisema", "kristo alikuja", "hakuna"]
