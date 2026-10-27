@@ -11,7 +11,7 @@ from .config_utils import load_config
 
 
 def get_corpus_path(project: str, environment: SilNlpEnv) -> Path:
-    return environment.mt_scripture_dir / f"{project}.txt"
+    return environment.get_mt_corpus_path(project)
 
 
 def computeSimilarity(projects: List[str], environment: SilNlpEnv) -> None:
@@ -23,11 +23,7 @@ def computeSimilarity(projects: List[str], environment: SilNlpEnv) -> None:
     for project in projects:
         with open(get_corpus_path(project, environment), "r", encoding="utf-8") as f:
             text = f.read()
-        thisCharSet = list()
-        for i in range(len(text)):
-            if text[i] not in thisCharSet:
-                thisCharSet.append(text[i])
-        thisCharSet.sort()
+        thisCharSet = sorted(set(text))
         print(f"Resource: {project}\t#chars: {len(thisCharSet)}")
         resourceDf.at[project, "CharCount"] = len(thisCharSet)
         charSets.append({"resource": project, "chars": thisCharSet})
@@ -97,11 +93,8 @@ def main() -> None:
 
     projects: Set[str] = set()
     for pair in config.corpus_pairs:
-        if pair.is_scripture:
-            for src_file in pair.src_files:
-                projects.add(f"{src_file.iso}-{src_file.project}")
-            for trg_file in pair.trg_files:
-                projects.add(f"{trg_file.iso}-{trg_file.project}")
+        for data_file in pair.src_files + pair.trg_files:
+            projects.add(data_file.path.stem)
 
     computeSimilarity(list(projects), environment)
 

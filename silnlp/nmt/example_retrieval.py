@@ -3,16 +3,18 @@
 
 import json
 import logging
+import random
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Protocol, Sequence, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Protocol, Sequence, Set, Tuple, Union
 from xml.sax.saxutils import escape as xml_escape
 
 import numpy as np
 from machine.tokenization import LatinWordTokenizer
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import linear_kernel
 
 from .corpora import read_parallel_text_pairs
 
@@ -55,12 +57,12 @@ class ExampleRetriever(ABC):
         top = np.argpartition(-scores, k - 1)[:k] if k < n else np.arange(n)
         return top[np.argsort(-scores[top])].tolist()
 
-    def fit(self, sources: Sequence[str]) -> None:
-        self._source_count = len(sources)
-        self._fit_index(list(sources))
+    def fit(self, examples: Sequence[Example]) -> None:
+        self._source_count = len(examples)
+        self._fit_index(list(examples))
 
     def rank(self, query: str, k: int) -> List[int]:
-        """Positions of the k best-matching sources, most relevant first."""
+        """Positions of the k best-matching examples, most relevant first."""
         if k <= 0 or self._source_count == 0:
             return []
         return self._top_indices_for_query(query, k)
@@ -72,7 +74,7 @@ class ExampleRetriever(ABC):
         return self._top_indices_excluding(source, index, k)
 
     @abstractmethod
-    def _fit_index(self, sources: List[str]) -> None: ...
+    def _fit_index(self, examples: List[Example]) -> None: ...
 
     @abstractmethod
     def _top_indices_for_query(self, query: str, k: int) -> List[int]: ...
@@ -118,7 +120,8 @@ class TfidfExampleRetriever(LexicalExampleRetriever):
         self._vectorizer: Optional[Any] = None
         self._matrix: Optional[Any] = None
 
-    def _fit_index(self, sources: List[str]) -> None:
+    def _fit_index(self, examples: List[Example]) -> None:
+        sources = [example.source for example in examples]
         # TfidfVectorizer rejects a corpus with nothing to put in its vocabulary.
         if not any(self._tokenizer.tokenize(source) for source in sources):
             self._vectorizer = None
@@ -148,10 +151,10 @@ class BM25ExampleRetriever(LexicalExampleRetriever):
         super().__init__()
         self._index: Optional[Any] = None
 
-    def _fit_index(self, sources: List[str]) -> None:
+    def _fit_index(self, examples: List[Example]) -> None:
         from rank_bm25 import BM25Okapi
 
-        tokenized = [self._tokenizer.tokenize(source) for source in sources]
+        tokenized = [self._tokenizer.tokenize(example.source) for example in examples]
         # BM25Okapi rejects an empty corpus and divides by zero on all-empty documents.
         if sum(len(tokens) for tokens in tokenized) == 0:
             self._index = None
@@ -197,7 +200,8 @@ class EmbeddingExampleRetriever(ExampleRetriever):
             texts, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False
         )
 
-    def _fit_index(self, sources: List[str]) -> None:
+    def _fit_index(self, examples: List[Example]) -> None:
+        sources = [example.source for example in examples]
         self._embeddings = self._encode(sources) if sources else np.zeros((0, 0), dtype=np.float32)
 
     def _top_indices_for_query(self, query: str, k: int) -> List[int]:
@@ -247,6 +251,97 @@ class EmbeddingExampleRetriever(ExampleRetriever):
         return None
 
 
+class CoverageExampleRetriever(ExampleRetriever):
+    """Chooses examples that between them demonstrate each part of the query, not only the closest few."""
+
+    method = "coverage"
+
+    # Benchmarked as a set; the measured gain says nothing about other values.
+    _ANCHORS = 20
+    _CANDIDATE_MULTIPLE = 4
+    _MIN_CANDIDATES = 100
+    _RELEVANCE_WEIGHT = 0.7
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._examples: List[Example] = []
+        self._vectorizer: Optional[Any] = None
+        self._matrix: Optional[Any] = None
+
+    def _fit_index(self, examples: List[Example]) -> None:
+        self._examples = examples
+        # TfidfVectorizer rejects a corpus with nothing to put in its vocabulary.
+        if not any(example.source.strip() for example in examples):
+            self._vectorizer = None
+            self._matrix = None
+            return
+        # Character n-grams need no tokenizer, so they work for scripts written without spaces.
+        self._vectorizer = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 5))
+        self._matrix = self._vectorizer.fit_transform([example.source for example in examples])
+
+    def _top_indices_for_query(self, query: str, k: int) -> List[int]:
+        return self._select(query, k, exclude=None)
+
+    def _top_indices_excluding(self, source: str, index: int, k: int) -> List[int]:
+        return self._select(source, k, exclude=index)
+
+    def _select(self, query: str, k: int, exclude: Optional[int]) -> List[int]:
+        if self._vectorizer is None or self._matrix is None:
+            return []
+        vector = self._vectorizer.transform([query])
+        similarities = linear_kernel(vector, self._matrix).ravel()
+        ranked = similarities.argsort()[::-1]
+        if exclude is not None:
+            ranked = ranked[ranked != exclude]
+        k = min(k, len(ranked))
+        if k == 0:
+            return []
+        if vector.nnz == 0:
+            return ranked[:k].tolist()
+        candidates = self._distinct_candidates(ranked, k, None if exclude is None else self._examples[exclude])
+        if len(candidates) == 0:
+            return []
+        chosen = self._choose_for_coverage(vector, self._matrix[candidates], similarities[candidates], k)
+        # Ties are broken by position so that the same corpus always yields the same prompt.
+        return sorted((int(candidates[i]) for i in chosen), key=lambda i: (similarities[i], i), reverse=True)
+
+    def _distinct_candidates(self, ranked: np.ndarray, k: int, excluded: Optional[Example]) -> np.ndarray:
+        limit = max(self._CANDIDATE_MULTIPLE * k, self._MIN_CANDIDATES)
+        candidates: List[int] = []
+        # A copy of the excluded example would show the answer to the row it is excluded for.
+        seen = set() if excluded is None else {excluded}
+        for index in ranked:
+            example = self._examples[index]
+            if example not in seen:
+                candidates.append(int(index))
+                seen.add(example)
+            if len(candidates) >= limit:
+                break
+        return np.asarray(candidates)
+
+    def _choose_for_coverage(self, vector, candidate_matrix, similarities: np.ndarray, k: int) -> List[int]:
+        features = candidate_matrix[:, vector.indices].toarray() > 0
+        weights = vector.data / vector.data.sum()
+        relevance = similarities / max(float(similarities.max()), 1e-12)
+        # The closest few are kept outright, so that strong whole-sentence analogues survive the balancing.
+        anchor_count = min(self._ANCHORS, max(1, k // 2), len(features))
+        chosen = list(range(anchor_count))
+        available = np.ones(len(features), dtype=bool)
+        available[chosen] = False
+        counts = features[chosen].sum(axis=0).astype(float)
+        while len(chosen) < min(k, len(features)):
+            # Each n-gram counts for less the more of the chosen examples already demonstrate it.
+            gain = features @ (weights / (1.0 + counts))
+            gain /= max(float(gain[available].max()), 1e-12)
+            utility = self._RELEVANCE_WEIGHT * relevance + (1 - self._RELEVANCE_WEIGHT) * gain
+            utility[~available] = -np.inf
+            best = int(np.argmax(utility))
+            chosen.append(best)
+            available[best] = False
+            counts += features[best]
+        return chosen
+
+
 class ExampleRetrieverFactory:
     """Creates the retriever named by a config's example_selection.method."""
 
@@ -254,7 +349,7 @@ class ExampleRetrieverFactory:
 
     @classmethod
     def create(cls, method: str, model_name: Optional[str] = None) -> ExampleRetriever:
-        """Creates it unfitted; ExamplePool fits it with its own sources."""
+        """Creates it unfitted; ExamplePool fits it with its own examples."""
         normalized = method.lower()
         if normalized == TfidfExampleRetriever.method:
             return TfidfExampleRetriever()
@@ -262,33 +357,59 @@ class ExampleRetrieverFactory:
             return BM25ExampleRetriever()
         if normalized == EmbeddingExampleRetriever.method:
             return EmbeddingExampleRetriever(model_name)
+        if normalized == CoverageExampleRetriever.method:
+            return CoverageExampleRetriever()
         raise ValueError(f"Unknown example_selection.method '{method}'. Valid options: {cls._method_names()}.")
 
     @classmethod
     def _method_names(cls) -> str:
-        return ", ".join((TfidfExampleRetriever.method, BM25ExampleRetriever.method, EmbeddingExampleRetriever.method))
+        return ", ".join(
+            (
+                TfidfExampleRetriever.method,
+                BM25ExampleRetriever.method,
+                EmbeddingExampleRetriever.method,
+                CoverageExampleRetriever.method,
+            )
+        )
 
 
 class ExampleFormatter(ABC):
-    """Renders retrieved examples into the text that fills {examples} in instruction_template."""
+    """Renders retrieved examples and the source into the text that fills instruction_template."""
 
     @abstractmethod
     def format(self, examples: Sequence[Example], src_lang_name: str, trg_lang_name: str) -> str: ...
 
+    def format_source(self, source: str) -> str:
+        return source
+
 
 class TextExampleFormatter(ExampleFormatter):
-    """Unlike JsonExampleFormatter/XmlExampleFormatter, does not escape the template output."""
+    """Unlike JsonExampleFormatter/XmlExampleFormatter, escapes nothing unless asked to."""
 
     DEFAULT_TEMPLATE = "Source ({src_lang}): {source}\nTranslation ({trg_lang}): {target}\n\n"
 
-    def __init__(self, template: str = DEFAULT_TEMPLATE) -> None:
+    def __init__(self, template: str = DEFAULT_TEMPLATE, separator: str = "", escape: bool = False) -> None:
         self._template = template
+        self._separator = separator
+        self._escape = escape
 
     def format(self, examples: Sequence[Example], src_lang_name: str, trg_lang_name: str) -> str:
-        return "".join(
-            self._template.format(src_lang=src_lang_name, trg_lang=trg_lang_name, source=ex.source, target=ex.target)
+        return self._separator.join(
+            self._template.format(
+                src_lang=src_lang_name,
+                trg_lang=trg_lang_name,
+                source=self._escaped(ex.source),
+                target=self._escaped(ex.target),
+            )
             for ex in examples
         )
+
+    def format_source(self, source: str) -> str:
+        return self._escaped(source)
+
+    def _escaped(self, text: str) -> str:
+        # Quotes are left alone because an apostrophe is a letter in some target orthographies.
+        return xml_escape(text) if self._escape else text
 
 
 class JsonExampleFormatter(ExampleFormatter):
@@ -316,7 +437,11 @@ class ExampleFormatterFactory:
             format_params = {"type": format_params}
         format_type = str(format_params.get("type", "text")).lower()
         if format_type == "text":
-            return TextExampleFormatter(format_params.get("template", TextExampleFormatter.DEFAULT_TEMPLATE))
+            return TextExampleFormatter(
+                format_params.get("template", TextExampleFormatter.DEFAULT_TEMPLATE),
+                format_params.get("separator", ""),
+                bool(format_params.get("escape", False)),
+            )
         if format_type == "json":
             return JsonExampleFormatter()
         if format_type == "xml":
@@ -328,6 +453,40 @@ class ExampleFormatterFactory:
 class ExamplePoolSummary:
     corpus_size: int
     selection_method: str
+
+
+class TargetLanguageProfile:
+    """The character trigrams a target corpus attests, which tell its text from an aside in the same script."""
+
+    def __init__(self, target_lines: Iterable[str]) -> None:
+        self._trigrams: Set[str] = set()
+        for line in target_lines:
+            self._trigrams.update(self._trigrams_of(line.strip()))
+
+    def resemblance(self, line: str) -> float:
+        """The fraction of the line's trigrams that the corpus attests."""
+        trigrams = self._trigrams_of(line.strip())
+        if len(trigrams) == 0:
+            return 0.0
+        return sum(1 for trigram in trigrams if trigram in self._trigrams) / len(trigrams)
+
+    def _trigrams_of(self, text: str) -> List[str]:
+        return [text[i : i + 3] for i in range(len(text) - 2)]
+
+
+class TranslationMemory:
+    """A record of existing team translations, used to avoid queries for already-translated text"""
+
+    def __init__(self, examples: Iterable[Example], rng: random.Random) -> None:
+        targets: Dict[str, List[str]] = {}
+        for example in examples:
+            if example.source.strip() != "" and example.target.strip() != "":
+                targets.setdefault(example.source.strip(), []).append(example.target.strip())
+        # Drawn from every occurrence, so that a more common translation is likelier to be picked.
+        self._translations = {source: rng.choice(found) for source, found in targets.items()}
+
+    def translate(self, source: str) -> Optional[str]:
+        return self._translations.get(source.strip())
 
 
 @dataclass(frozen=True)
@@ -426,10 +585,16 @@ class ExamplePool:
             ranked = retriever.rank_excluding(self.all_examples()[pool_index].source, pool_index, k)
         return [self.all_examples()[i] for i in reversed(ranked)]
 
+    def create_target_language_profile(self) -> "TargetLanguageProfile":
+        return TargetLanguageProfile(example.target for example in self.all_examples())
+
+    def create_translation_memory(self, rng: random.Random) -> "TranslationMemory":
+        return TranslationMemory(self.all_examples(), rng)
+
     def get_retriever(self) -> ExampleRetriever:
         with self._lock:
             if not self._fitted:
-                self._retriever.fit([example.source for example in self.all_examples()])
+                self._retriever.fit(self.all_examples())
                 self._fitted = True
             return self._retriever
 

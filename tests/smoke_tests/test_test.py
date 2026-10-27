@@ -60,6 +60,43 @@ def test_test_scores_the_last_checkpoint():
     delete_generated_paths(exp_dir, TEST_OUTPUT_PATTERNS)
 
 
+def test_test_scores_confidence_only_for_beam_search_drafts():
+    environment = set_up_environment()
+    exp_dir = environment.get_mt_exp_dir(EXPERIMENT_NAME)
+    delete_generated_paths(exp_dir, TEST_OUTPUT_PATTERNS)
+
+    # By default, multiple translations are made with the "hybrid" method, which translates the
+    # first draft with beam search and samples the others, so only the first draft has confidences.
+    config = load_config(EXPERIMENT_NAME, environment)
+    model = create_model_with_mock_pretrained_model(config, FixedTranslationPreTrainedModelProviderFactory())
+    num_drafts = config.infer["num_drafts"]
+
+    nmt_test.test(
+        config=config,
+        last=True,
+        by_book=True,
+        produce_multiple_translations=True,
+        save_confidences=True,
+        scorers={"bleu", "chrf3"},
+        model=model,
+    )
+
+    scores = read_scores(exp_dir / f"scores-{CHECKPOINT_STEP}.csv")
+    overall_scores = [score for score in scores if score["book"] == "ALL"]
+    assert [score["draft_index"] for score in overall_scores] == [str(i) for i in range(1, num_drafts + 1)]
+    for score in scores:
+        if score["draft_index"] == "1":
+            assert float(score["Confidence"]) > 0
+        else:
+            assert score["Confidence"] == ""
+
+    assert (exp_dir / f"linregress.{CHECKPOINT_STEP}.1.json").is_file()
+    for draft_index in range(2, num_drafts + 1):
+        assert not (exp_dir / f"linregress.{CHECKPOINT_STEP}.{draft_index}.json").exists()
+
+    delete_generated_paths(exp_dir, TEST_OUTPUT_PATTERNS)
+
+
 def check_last_checkpoint_was_used(
     model_provider_factory: FixedTranslationPreTrainedModelProviderFactory, exp_dir: Path
 ):

@@ -67,7 +67,7 @@ class SILClearML:
                     "apt install -y python3-venv",
                     "python3 -m pip install --user pipx",
                     "PATH=$PATH:/root/.local/bin",
-                    "pipx install poetry==1.7.1",
+                    "pipx install poetry==2.4.1",
                     # update config.toml and pyvenv.cfg to give poetry environment access to system site packages
                     "poetry config virtualenvs.options.system-site-packages true",
                     (

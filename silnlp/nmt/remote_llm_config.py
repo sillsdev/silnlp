@@ -1,16 +1,35 @@
 """In-context learning translation with a hosted LLM: a Config/NMTModel implementation that
 prompts with examples from the training corpus instead of fine-tuning, via LiteLLM."""
 
+import hashlib
 import json
 import logging
+import random
 import re
 import threading
+import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
+from itertools import zip_longest
 from pathlib import Path
-from typing import Any, Dict, Generator, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    ContextManager,
+    Dict,
+    Generator,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    TextIO,
+    Tuple,
+    Union,
+)
 
 import yaml
 
@@ -22,9 +41,11 @@ from .config import CheckpointType, Language, NMTModel
 from .example_retrieval import (
     CorpusPair,
     CorpusPairProvider,
+    CoverageExampleRetriever,
     Example,
-    ExampleRetrieverFactory,
     PreferredCorpusPairProvider,
+    TargetLanguageProfile,
+    TranslationMemory,
 )
 from .llm_config import (
     LLMConfig,
@@ -34,33 +55,74 @@ from .llm_config import (
     PromptDefaults,
     PromptMessages,
     PromptMessagesFactory,
+    PromptTemplate,
     PromptTemplateCollection,
 )
 
 LOGGER = logging.getLogger(__name__)
 
 
-class ModelReply:
-    """One reply from the model, which a batched request asks for as one numbered line per segment."""
+class CodeFenceRemover:
+    """Removes the ``` fence that a model may wrap a whole reply in."""
 
-    _CODE_FENCE = re.compile(r"^\s*```[^\n]*\n(.*?)\n?\s*```\s*$", re.DOTALL)
+    _PATTERN = re.compile(r"^\s*```[^\n]*\n(.*?)\n?\s*```\s*$", re.DOTALL)
+
+    def remove_from(self, text: str) -> str:
+        match = self._PATTERN.match(text.strip())
+        return match.group(1) if match is not None else text
+
+
+class TranslationLabelRemover:
+    """Removes a label such as "Spanish:" or "Translation:" that a model may put before its answer."""
+
+    _WORDS = ("target", "translation", "output", "answer")
+
+    def __init__(self, trg_lang_name: str) -> None:
+        words = "|".join(re.escape(word) for word in (trg_lang_name, *self._WORDS) if word != "")
+        self._pattern = re.compile(rf"^\s*({words})\s*[:\-]\s*", re.IGNORECASE)
+
+    def remove_from(self, line: str) -> str:
+        return self._pattern.sub("", line)
+
+
+class SingleReplyReader:
+    """Reads the reply to a request for one segment."""
+
+    def __init__(self, label_remover: TranslationLabelRemover, profile: TargetLanguageProfile) -> None:
+        self._fence = CodeFenceRemover()
+        self._label = label_remover
+        self._profile = profile
+
+    def read(self, text: str) -> str:
+        """One line per segment, so a reply with an aside keeps only its most target-like line."""
+        lines = []
+        for raw_line in self._fence.remove_from(text).strip().splitlines():
+            line = self._label.remove_from(raw_line.strip().strip("`").strip()).strip()
+            if line != "":
+                lines.append(line)
+        if len(lines) == 0:
+            return ""
+        # On a tie, as when there is no target corpus, the last line wins, since asides tend to come first.
+        return max(reversed(lines), key=self._profile.resemblance)
+
+
+class BatchReplyReader:
+    """Reads the reply to a batched request, which asks for one numbered line per segment."""
+
     _NUMBERED_LINE = re.compile(r"^\s*(\d{1,4})\s*[.):\]]\s*(.*)$")
 
-    def __init__(self, text: str) -> None:
-        self._text = text
+    def __init__(self, num_segments: int) -> None:
+        self._fence = CodeFenceRemover()
+        self._num_segments = num_segments
 
-    def strip_code_fence(self) -> str:
-        match = self._CODE_FENCE.match(self._text.strip())
-        return match.group(1) if match is not None else self._text
-
-    def parse(self, num_segments: int) -> Optional[List[str]]:
+    def read(self, text: str) -> Optional[List[str]]:
         """None when the reply is malformed, which is the signal for the caller's recovery ladder.
         Unnumbered lines continue the preceding translation, and any preamble is ignored."""
-        if num_segments <= 0:
+        if self._num_segments <= 0:
             return []
         parsed: Dict[int, List[str]] = {}
         current: Optional[int] = None
-        for line in self.strip_code_fence().splitlines():
+        for line in self._fence.remove_from(text).splitlines():
             match = self._NUMBERED_LINE.match(line)
             if match is not None:
                 index = int(match.group(1))
@@ -70,9 +132,12 @@ class ModelReply:
                 parsed[index] = [match.group(2).strip()]
             elif current is not None and line.strip() != "":
                 parsed[current].append(line.strip())
-        if set(parsed) != set(range(1, num_segments + 1)):
+        numbers = range(1, self._num_segments + 1)
+        if set(parsed) != set(numbers):
             return None
-        return [" ".join(part for part in parsed[i] if part != "").strip() for i in range(1, num_segments + 1)]
+        translations = [" ".join(part for part in parsed[i] if part != "").strip() for i in numbers]
+        # Only segments with a source are sent, so a blank entry is as unusable as a missing one.
+        return None if "" in translations else translations
 
 
 @dataclass(frozen=True)
@@ -91,6 +156,8 @@ class Completion:
     completion_tokens: int = 0
     # None when LiteLLM has no pricing for the model, which is not the same as free.
     cost: Optional[float] = None
+    # True for a reply saved by an earlier run, whose cost that run already paid.
+    reused: bool = False
 
     def to_sentence_translation(self) -> SentenceTranslation:
         """``tokens`` holds the whole translation, not the provider's subword tokens, because the
@@ -108,6 +175,19 @@ class Completion:
             return None
         return sum(entry.logprob for entry in self.token_logprobs) / len(self.token_logprobs)
 
+    def is_empty(self) -> bool:
+        return self.text.strip() == ""
+
+    def with_usage_of(self, earlier: "Completion") -> "Completion":
+        """This reply, also billed for an earlier attempt that was discarded."""
+        cost = None if self.cost is None or earlier.cost is None else self.cost + earlier.cost
+        return replace(
+            self,
+            prompt_tokens=self.prompt_tokens + earlier.prompt_tokens,
+            completion_tokens=self.completion_tokens + earlier.completion_tokens,
+            cost=cost,
+        )
+
 
 @dataclass
 class UsageTotals:
@@ -118,6 +198,8 @@ class UsageTotals:
     completion_tokens: int = 0
     cost: float = 0.0
     unpriced_requests: int = 0
+    reused_replies: int = 0
+    copied_translations: int = 0
 
     def __post_init__(self) -> None:
         # Requests are made from several threads.
@@ -125,6 +207,9 @@ class UsageTotals:
 
     def add(self, completion: Completion) -> None:
         with self._lock:
+            if completion.reused:
+                self.reused_replies += 1
+                return
             self.requests += 1
             self.prompt_tokens += completion.prompt_tokens
             self.completion_tokens += completion.completion_tokens
@@ -133,16 +218,26 @@ class UsageTotals:
             else:
                 self.cost += completion.cost
 
+    def add_copied_translation(self) -> None:
+        with self._lock:
+            self.copied_translations += 1
+
     def describe(self) -> str:
         summary = (
             f"{self.requests:,} requests, {self.prompt_tokens:,} prompt + "
             f"{self.completion_tokens:,} completion tokens"
         )
         if self.unpriced_requests == 0:
-            return f"{summary}, ${self.cost:.4f}"
-        if self.unpriced_requests == self.requests:
-            return f"{summary}; cost unavailable (no pricing for this model)"
-        return f"{summary}, ${self.cost:.4f} excluding {self.unpriced_requests:,} unpriced requests"
+            summary = f"{summary}, ${self.cost:.4f}"
+        elif self.unpriced_requests == self.requests:
+            summary = f"{summary}; cost unavailable (no pricing for this model)"
+        else:
+            summary = f"{summary}, ${self.cost:.4f} excluding {self.unpriced_requests:,} unpriced requests"
+        if self.reused_replies > 0:
+            summary = f"{summary}; replies reused from an earlier run: {self.reused_replies:,}"
+        if self.copied_translations > 0:
+            summary = f"{summary}; translations copied from the training corpus: {self.copied_translations:,}"
+        return summary
 
 
 @dataclass(frozen=True)
@@ -230,11 +325,14 @@ class CompletionClient(ABC):
 
 
 class LiteLLMCompletionClient(CompletionClient):
-    def __init__(self, model: str, settings: CompletionSettings, extra_kwargs: Optional[dict] = None) -> None:
+    def __init__(
+        self, model: str, settings: CompletionSettings, extra_kwargs: Optional[dict] = None, litellm: Any = None
+    ) -> None:
+        """`litellm` is the test injection seam; production leaves it to be imported."""
         self._model = model
         self._settings = settings
         self._extra_kwargs: Dict[str, Any] = dict(extra_kwargs or {})
-        self._litellm = self._import_litellm()
+        self._litellm = litellm if litellm is not None else self._import_litellm()
 
     def _import_litellm(self):
         # Deferred import, because the import is slow and the package is optional.
@@ -245,6 +343,8 @@ class LiteLLMCompletionClient(CompletionClient):
                 "Remote LLM experiments require the 'litellm' package, which is part of the "
                 "'llm' extra. Install it with `poetry install -E llm`."
             ) from e
+        # Its feedback banner, printed on every failure, buries the warnings that say what failed.
+        litellm.suppress_debug_info = True
         return litellm
 
     def count_tokens(self, text: str) -> Optional[int]:
@@ -265,7 +365,8 @@ class LiteLLMCompletionClient(CompletionClient):
             messages=messages,
             temperature=self._settings.temperature,
             max_tokens=self._settings.max_new_tokens,
-            num_retries=self._settings.num_retries,
+            # RetryingCompletionClient owns retries; LiteLLM's need tenacity and hide the error that caused them.
+            num_retries=0,
             timeout=self._settings.request_timeout,
             **extra_kwargs,
         )
@@ -280,6 +381,212 @@ class LiteLLMCompletionClient(CompletionClient):
         return "logprobs" in supported
 
 
+class RetryPolicy:
+    """Which failed requests are worth sending again, and how long to wait before each retry."""
+
+    _RETRYABLE_CLIENT_ERRORS = (408, 409, 429)
+    # Not "quota" or "billing": Gemini words its per-minute rate limits with both.
+    _BILLING_PHRASES = ("credit", "insufficient_quota", "spend", "key limit")
+
+    def __init__(self, max_retries: int, delay_seconds: float = 5.0) -> None:
+        self._max_retries = max_retries
+        self._delay_seconds = delay_seconds
+
+    def allows_retry(self, retry_number: int) -> bool:
+        return retry_number <= self._max_retries
+
+    def is_retryable(self, error: Exception) -> bool:
+        # Some providers report exhausted credit as a rate limit, and waiting never clears it.
+        if any(phrase in str(error).lower() for phrase in self._BILLING_PHRASES):
+            return False
+        status = getattr(error, "status_code", None)
+        if isinstance(status, int) and 400 <= status < 500:
+            return status in self._RETRYABLE_CLIENT_ERRORS
+        return True
+
+    def wait_before_retry(self, retry_number: int) -> None:
+        time.sleep(min(self._delay_seconds * retry_number, 8 * self._delay_seconds))
+
+
+class RetryingCompletionClient(CompletionClient):
+    """Retries a malformed or empty reply, which providers send intermittently and LiteLLM does not retry."""
+
+    def __init__(self, client: CompletionClient, policy: RetryPolicy) -> None:
+        self._client = client
+        self._policy = policy
+
+    def complete(self, messages: List[Dict[str, str]], logprobs: bool = False) -> Completion:
+        discarded: Optional[Completion] = None
+        retries = 0
+        while True:
+            try:
+                completion = self._client.complete(messages, logprobs)
+            except Exception as error:
+                if not (self._policy.is_retryable(error) and self._policy.allows_retry(retries + 1)):
+                    raise
+                LOGGER.warning("A request failed (%s); retrying it.", error)
+            else:
+                if discarded is not None:
+                    completion = completion.with_usage_of(discarded)
+                if not completion.is_empty() or not self._policy.allows_retry(retries + 1):
+                    return completion
+                discarded = completion
+                LOGGER.warning("The model returned an empty reply; retrying the request.")
+            retries += 1
+            self._policy.wait_before_retry(retries)
+
+    def supports_logprobs(self) -> bool:
+        return self._client.supports_logprobs()
+
+    def count_tokens(self, text: str) -> Optional[int]:
+        return self._client.count_tokens(text)
+
+
+class SavedReplies:
+    """Replies kept as they arrive, so that a run that stops partway can resume without paying for them again."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._replies: Dict[Tuple[str, int], Completion] = {}
+        self._loaded = False
+        self._discarded = False
+        self._claims: Dict[str, int] = {}
+        self._file: Optional[TextIO] = None
+        # Requests run on a thread pool.
+        self._lock = threading.Lock()
+
+    @contextmanager
+    def session(self) -> Iterator[None]:
+        # Read once, since save() keeps the replies in memory and a run opens a session per file or book.
+        if not self._loaded:
+            self._load()
+            self._loaded = True
+        ends_mid_line = self._ends_mid_line()
+        with self._path.open("a", encoding="utf-8") as file:
+            if ends_mid_line:
+                # Otherwise the first new reply would be appended to the partial line and lost with it.
+                file.write("\n")
+            self._file = file
+            try:
+                yield
+            finally:
+                self._file = None
+                self._claims = {}
+
+    def discard(self) -> None:
+        """Forgets the replies of earlier runs, once, so that replies saved since are kept."""
+        with self._lock:
+            if self._discarded:
+                return
+            self._discarded = True
+            self._replies = {}
+            self._loaded = True
+            self._path.unlink(missing_ok=True)
+
+    def claim(self, key: str) -> Tuple[int, Optional[Completion]]:
+        """Counts identical requests apart, so that several drafts of one segment each get their own reply."""
+        with self._lock:
+            if self._file is None:
+                return 0, None
+            occurrence = self._claims.get(key, 0)
+            self._claims[key] = occurrence + 1
+            return occurrence, self._replies.get((key, occurrence))
+
+    def save(self, key: str, occurrence: int, completion: Completion) -> None:
+        with self._lock:
+            if self._file is None:
+                return
+            self._replies[(key, occurrence)] = completion
+            self._file.write(json.dumps(self._to_record(key, occurrence, completion), ensure_ascii=False) + "\n")
+            self._file.flush()
+
+    def _load(self) -> None:
+        self._replies = {}
+        if not self._path.is_file():
+            return
+        # Split on newlines alone, since JSON leaves U+2028 and U+0085 unescaped and splitlines() breaks at them.
+        for line_number, line in enumerate(self._path.read_bytes().split(b"\n"), 1):
+            if line.strip() == b"":
+                continue
+            try:
+                key, occurrence, completion = self._from_record(json.loads(line.decode("utf-8")))
+            except (ValueError, KeyError, TypeError):
+                # A run killed mid-write leaves a partial last line, which can end inside a multibyte character.
+                LOGGER.warning("Skipping unreadable line %d of %s.", line_number, self._path)
+                continue
+            self._replies[(key, occurrence)] = completion
+        if len(self._replies) > 0:
+            LOGGER.info(
+                "%s holds %d replies from an earlier run; matching requests will reuse them.",
+                self._path,
+                len(self._replies),
+            )
+
+    def _ends_mid_line(self) -> bool:
+        if not self._path.is_file() or self._path.stat().st_size == 0:
+            return False
+        with self._path.open("rb") as file:
+            file.seek(-1, 2)
+            return file.read(1) != b"\n"
+
+    def _to_record(self, key: str, occurrence: int, completion: Completion) -> dict:
+        return {
+            "key": key,
+            "occurrence": occurrence,
+            "text": completion.text,
+            "token_logprobs": [[entry.token, entry.logprob] for entry in completion.token_logprobs],
+            "prompt_tokens": completion.prompt_tokens,
+            "completion_tokens": completion.completion_tokens,
+            "cost": completion.cost,
+        }
+
+    def _from_record(self, record: dict) -> Tuple[str, int, Completion]:
+        completion = Completion(
+            str(record["text"]),
+            [TokenLogprob(str(token), float(logprob)) for token, logprob in record["token_logprobs"]],
+            prompt_tokens=int(record["prompt_tokens"]),
+            completion_tokens=int(record["completion_tokens"]),
+            cost=None if record["cost"] is None else float(record["cost"]),
+        )
+        return str(record["key"]), int(record["occurrence"]), completion
+
+
+class ReplyReusingClient:
+    """Answers a request from a reply an earlier run saved, if there is one, and saves each new reply."""
+
+    def __init__(self, saved: SavedReplies, request_settings: str) -> None:
+        self._saved = saved
+        self._request_settings = request_settings
+
+    def session(self) -> ContextManager[None]:
+        return self._saved.session()
+
+    def discard_saved_replies(self) -> None:
+        self._saved.discard()
+
+    def complete(
+        self,
+        client: CompletionClient,
+        messages: List[Dict[str, str]],
+        logprobs: bool,
+        usable: Callable[[Completion], bool],
+    ) -> Completion:
+        key = self._key(messages, logprobs)
+        occurrence, saved = self._saved.claim(key)
+
+        if saved is not None and usable(saved):
+            return replace(saved, reused=True)
+        completion = client.complete(messages, logprobs)
+
+        if usable(completion):
+            self._saved.save(key, occurrence, completion)
+        return completion
+
+    def _key(self, messages: List[Dict[str, str]], logprobs: bool) -> str:
+        payload = json.dumps([self._request_settings, messages, logprobs], ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 class CompletionClientFactory(ABC):
     @abstractmethod
     def create(self, config: "RemoteLLMConfig") -> CompletionClient: ...
@@ -287,7 +594,11 @@ class CompletionClientFactory(ABC):
 
 class LiteLLMCompletionClientFactory(CompletionClientFactory):
     def create(self, config: "RemoteLLMConfig") -> CompletionClient:
-        return LiteLLMCompletionClient(config.model, config.create_completion_settings(), config.get_litellm_options())
+        settings = config.create_completion_settings()
+        return RetryingCompletionClient(
+            LiteLLMCompletionClient(config.model, settings, config.get_litellm_options()),
+            RetryPolicy(settings.num_retries),
+        )
 
 
 class BatchPromptBuilder(PromptBuilder[PromptMessages]):
@@ -304,30 +615,43 @@ class BatchPromptBuilder(PromptBuilder[PromptMessages]):
         return self._build(numbered, src_lang, trg_lang, len(sources), examples=examples)
 
 
-class RemotePromptConfig(PromptConfig):
-    """The infer.prompt section of a hosted-model experiment, which also has a batch instruction template."""
+@dataclass(frozen=True)
+class RemotePromptDefaults(PromptDefaults):
+    batch_system_message: str
+    batch_instruction_template: str
+    few_shot_batch_instruction_template: str
 
-    def __init__(
-        self,
-        settings: dict,
-        defaults: PromptDefaults,
-        single_default: str,
-        batch_default: str,
-        few_shot_batch_default: str,
-    ) -> None:
-        self._batch_default = batch_default
-        self._few_shot_batch_default = few_shot_batch_default
+
+class RemotePromptConfig(PromptConfig):
+    """The infer.prompt section of a hosted-model experiment, which also has a batch system message and template."""
+
+    def __init__(self, settings: dict, defaults: RemotePromptDefaults) -> None:
+        self._remote_defaults = defaults
         # Captured before the defaults land, since a whole-corpus prompt needs the plain default, not few-shot.
-        self._corpus_instruction_template = settings["instruction_template"] or single_default
-        self._corpus_batch_instruction_template = settings["batch_instruction_template"] or batch_default
+        self._corpus_instruction_template = settings["instruction_template"] or defaults.instruction_template
+        self._corpus_batch_instruction_template = (
+            settings["batch_instruction_template"] or defaults.batch_instruction_template
+        )
         super().__init__(settings, "infer.prompt", defaults)
 
     def _apply_defaults(self, defaults: PromptDefaults) -> None:
+        if self._is_unset("batch_system_message"):
+            # Decided before the base class fills in system_message, so that a custom one governs batches too.
+            self._settings["batch_system_message"] = (
+                self._remote_defaults.batch_system_message
+                if self._is_unset("system_message")
+                else self._settings["system_message"]
+            )
         super()._apply_defaults(defaults)
         if self._is_unset("batch_instruction_template"):
             self._settings["batch_instruction_template"] = (
-                self._few_shot_batch_default if self.get_num_examples() > 0 else self._batch_default
+                self._remote_defaults.few_shot_batch_instruction_template
+                if self.get_num_examples() > 0
+                else self._remote_defaults.batch_instruction_template
             )
+
+    def create_batch_template(self, instruction_template: str) -> PromptTemplate:
+        return self.create_template(instruction_template, self._settings["batch_system_message"])
 
     def get_batch_instruction_template(self) -> str:
         return self._settings["batch_instruction_template"]
@@ -340,61 +664,66 @@ class RemotePromptConfig(PromptConfig):
 
 
 class RemoteLLMConfig(LLMConfig[PromptMessages]):
+    _GUIDANCE = (
+        "Use the examples as evidence for {trg_lang} vocabulary, grammar, inflection, names, spelling and "
+        "punctuation. Retain shared words and established borrowings when the examples support them; use "
+        "natural target constructions instead of mechanically copying source wording.\n"
+        "Preserve the full meaning of the source: participants, actions, negation, relationships and "
+        "emphasis. Adapt an example's wording to the current sentence; similar examples may describe "
+        "different people or events."
+    )
+
+    # Word for word the benchmarked prompt, including its sentence about nearby verses, which are never sent.
     _SYSTEM_MESSAGE = (
-        "You are a member of a Bible translation team translating from {src_lang} into {trg_lang}. "
-        "Your job is to produce the translation this team would produce, not a translation of your "
-        "own.\n\n"
-        "Any examples you are given are the team's own completed work, and they are your authority. "
-        "Study them and follow what they show you about:\n"
-        "- Style: how closely the team follows the source wording rather than restructuring it into "
-        "natural {trg_lang}, their sentence length and register, and how much implicit information "
-        "they make explicit.\n"
-        "- Key terms: the rendering the team has settled on for recurring theological terms, and "
-        "their spelling of the names of people, places, and peoples. Reuse these exactly; never "
-        "substitute a synonym or a variant spelling.\n"
-        "- Exegesis: where the source is ambiguous, resolve it the way the team resolved comparable "
-        "passages.\n"
-        "- Orthography: their spelling conventions, punctuation, and the way they mark direct "
-        "speech.\n\n"
-        "Follow the examples in preference to any published {trg_lang} translation you may recall. "
-        "Where they do not settle a question, make the choice a careful member of this team would "
-        "make, and stay consistent with it. Translate what the source says: add nothing it does not "
-        "say, and leave out nothing it does.\n\n"
-        "Reply with only the translation itself - no commentary, notes, alternatives, explanations, "
-        "or verse numbers."
+        "Translate the final {src_lang} Bible verse into {trg_lang}, following the translation conventions "
+        "demonstrated by this project's parallel examples.\n"
+        + _GUIDANCE
+        + " Nearby translations provide context, not additional content to translate.\n"
+        "Return only the {trg_lang} translation of the final source verse on one line, without a label, "
+        "verse number, explanation or alternative translations."
     )
 
-    _SINGLE_INSTRUCTION = (
-        "Translate this {src_lang} passage into {trg_lang} as the team would translate it. Reply with "
-        "only the translation.\n\n{source}"
+    _BATCH_SYSTEM_MESSAGE = (
+        "Translate the numbered {src_lang} Bible passages at the end into {trg_lang}, following the "
+        "translation conventions demonstrated by this project's parallel examples.\n"
+        + _GUIDANCE
+        + "\nReturn only the {trg_lang} translations, one numbered line per source passage, without labels, "
+        "explanations or alternative translations."
     )
 
-    _BATCH_INSTRUCTION = (
-        "Translate the following {num_segments} consecutive {src_lang} passages into {trg_lang} as the "
-        "team would translate them. Some may be section headings rather than verses. Read them "
-        "together, so that participants, pronouns, and the flow of the passage stay consistent across "
-        "them, but translate each one on its own.\n"
-        "Reply with exactly {num_segments} lines, one per passage, in the same order, each formatted "
-        "as `<number>. <translation>`. Do not merge, split, reorder, or omit passages, and do not add "
-        "any other text.\n\n{source}"
+    _SINGLE_TASK = (
+        "only this {src_lang} verse into {trg_lang}.\n<source_to_translate>\n{source}\n</source_to_translate>\n"
+        "{trg_lang}:"
     )
 
-    _EXAMPLES_HEADING = (
-        "The team has already translated these passages. They are your model for this team's style, "
-        "terminology, and exegesis:\n\n{examples}"
+    _BATCH_TASK = (
+        "each of these {num_segments} consecutive {src_lang} passages into {trg_lang}. Some may be section "
+        "headings rather than verses. Read them together, so that participants, pronouns, and the flow of the "
+        "passage stay consistent across them, but translate each one on its own.\n"
+        "Reply with exactly {num_segments} lines, one per passage, in the same order, each formatted as "
+        "`<number>. <translation>`. Do not merge, split, reorder, or omit passages, and do not add any other "
+        "text.\n<source_to_translate>\n{source}\n</source_to_translate>"
     )
 
-    _CORPUS_HEADING = (
-        "This is everything the team has translated so far. It is your reference for this team's "
-        "style, terminology, exegesis, spelling, and punctuation:"
-    )
+    _EXAMPLES_BLOCK = "<translation_examples>\n{examples}\n</translation_examples>"
 
-    _FEW_SHOT_BATCH_INSTRUCTION = _EXAMPLES_HEADING + _BATCH_INSTRUCTION
+    _FOLLOWING_THE_EXAMPLES = _EXAMPLES_BLOCK + "\n\nFollowing the project's examples above, translate "
+
+    _SINGLE_INSTRUCTION = "Translate " + _SINGLE_TASK
+
+    _BATCH_INSTRUCTION = "Translate " + _BATCH_TASK
+
+    _FEW_SHOT_BATCH_INSTRUCTION = _FOLLOWING_THE_EXAMPLES + _BATCH_TASK
 
     DEFAULT_SYSTEM_MESSAGE = _SYSTEM_MESSAGE
     DEFAULT_INSTRUCTION_TEMPLATE = _SINGLE_INSTRUCTION
-    DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE = _EXAMPLES_HEADING + _SINGLE_INSTRUCTION
-    DEFAULT_EXAMPLE_FORMAT = {"type": "text", "template": "{src_lang}: {source}\n{trg_lang}: {target}\n\n"}
+    DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE = _FOLLOWING_THE_EXAMPLES + _SINGLE_TASK
+    DEFAULT_EXAMPLE_FORMAT = {
+        "type": "text",
+        "template": "{src_lang}: {source}\n{trg_lang}: {target}",
+        "separator": "\n\n",
+        "escape": True,
+    }
 
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
         super().__init__(exp_dir, config, environment)
@@ -427,8 +756,9 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
                 },
                 "infer": {
                     "prompt": {
-                        "num_examples": 10,
-                        "example_selection": {"method": ExampleRetrieverFactory.DEFAULT_METHOD, "model": None},
+                        "num_examples": 100,
+                        "example_selection": {"method": CoverageExampleRetriever.method, "model": None},
+                        "batch_system_message": None,
                         "batch_instruction_template": None,
                     },
                     "infer_batch_size": 1,
@@ -436,9 +766,11 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
                     "temperature": 0.2,
                     "max_new_tokens": 4096,
                     "concurrency": 4,
-                    "num_retries": 3,
+                    "num_retries": 8,
                     "request_timeout": 120,
                     "max_context_tokens": 180000,
+                    "reuse_saved_replies": True,
+                    "copy_exact_matches": True,
                 },
                 "params": {
                     # Passed straight through to litellm.completion (api_base, extra_headers, ...).
@@ -457,16 +789,21 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
         return PreferredCorpusPairProvider(detokenized, self._train_corpus_pair())
 
     def build_corpus_block(self, rendered_examples: str) -> str:
-        return f"{self._CORPUS_HEADING}\n\n{rendered_examples}" if rendered_examples else ""
+        return self._EXAMPLES_BLOCK.format(examples=rendered_examples) if rendered_examples else ""
+
+    def prompt_defaults(self) -> RemotePromptDefaults:
+        return RemotePromptDefaults(
+            system_message=self.DEFAULT_SYSTEM_MESSAGE,
+            instruction_template=self.DEFAULT_INSTRUCTION_TEMPLATE,
+            few_shot_instruction_template=self.DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE,
+            example_format=self.DEFAULT_EXAMPLE_FORMAT,
+            batch_system_message=self._BATCH_SYSTEM_MESSAGE,
+            batch_instruction_template=self._BATCH_INSTRUCTION,
+            few_shot_batch_instruction_template=self._FEW_SHOT_BATCH_INSTRUCTION,
+        )
 
     def _create_infer_prompt_config(self, settings: dict) -> RemotePromptConfig:
-        self._infer_prompt = RemotePromptConfig(
-            settings,
-            self.prompt_defaults(),
-            self._SINGLE_INSTRUCTION,
-            self._BATCH_INSTRUCTION,
-            self._FEW_SHOT_BATCH_INSTRUCTION,
-        )
+        self._infer_prompt = RemotePromptConfig(settings, self.prompt_defaults())
         return self._infer_prompt
 
     def create_messages_factory(self) -> PromptMessagesFactory[PromptMessages]:
@@ -475,7 +812,7 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
     def _create_single_prompt_builder(self, instruction_template: str) -> PromptBuilder[PromptMessages]:
         prompt = self._infer_prompt_config()
         return PromptBuilder(
-            self._variant_templates(instruction_template),
+            self._variant_templates(prompt.create_template(instruction_template)),
             prompt.get_num_examples(),
             self._infer_example_pool,
             self.create_messages_factory(),
@@ -485,7 +822,7 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
         self, instruction_template: str, validate_as: Optional[str] = None
     ) -> BatchPromptBuilder:
         prompt = self._infer_prompt_config()
-        templates = self._variant_templates(instruction_template)
+        templates = self._variant_templates(prompt.create_batch_template(instruction_template))
         if validate_as is not None:
             templates.validate_for_icl(prompt.get_num_examples(), validate_as)
         return BatchPromptBuilder(
@@ -495,11 +832,9 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
     def _infer_prompt_config(self) -> RemotePromptConfig:
         return self._infer_prompt
 
-    def _variant_templates(self, instruction_template: str) -> PromptTemplateCollection:
+    def _variant_templates(self, template: PromptTemplate) -> PromptTemplateCollection:
         """Every variant draws on the single-segment builder's examples, so the corpus is indexed once."""
-        return PromptTemplateCollection.from_fixed_prompt_template(
-            self._infer_prompt_config().create_template(instruction_template)
-        )
+        return PromptTemplateCollection.from_fixed_prompt_template(template)
 
     def _validate(self) -> None:
         if not str(self.model).strip():
@@ -584,6 +919,7 @@ class RemoteLLMModel(NMTModel):
     # The train step writes this checkpoint so that CheckpointType.LAST resolves to step 1.
     _CHECKPOINT_STEP = 1
     _MODEL_INFO_FILENAME = "remote_llm_model.json"
+    _SAVED_REPLIES_FILENAME = "remote_llm_replies.jsonl"
 
     def __init__(
         self,
@@ -595,7 +931,15 @@ class RemoteLLMModel(NMTModel):
         self._client_factory = completion_client_factory or LiteLLMCompletionClientFactory()
         self._client: Optional[CompletionClient] = None
         self._corpus_block: Optional[str] = None
-        # Requests run on a thread pool; guards the lazily built client and corpus block.
+        self._target_profile: Optional[TargetLanguageProfile] = None
+        self._translation_memory: Optional[TranslationMemory] = None
+        # Kept in the experiment folder because experiment.py deletes the run folder after every run.
+        self._reply_reusing_client: Optional[ReplyReusingClient] = (
+            ReplyReusingClient(SavedReplies(config.exp_dir / self._SAVED_REPLIES_FILENAME), self._request_settings())
+            if config.infer["reuse_saved_replies"]
+            else None
+        )
+        # Requests run on a thread pool; guards the members above that are built on first use.
         self._lock = threading.Lock()
 
     def train(self) -> None:
@@ -661,6 +1005,23 @@ class RemoteLLMModel(NMTModel):
             if self._client is None:
                 self._client = self._client_factory.create(self._config)
             return self._client
+
+    def _request_settings(self) -> str:
+        """What besides the messages shapes a reply, so that a saved reply is only reused under the same settings."""
+        settings = self._config.create_completion_settings()
+        return json.dumps(
+            {
+                "model": self._config.model,
+                "temperature": settings.temperature,
+                "max_new_tokens": settings.max_new_tokens,
+                "litellm": self._config.get_litellm_options(),
+            },
+            sort_keys=True,
+            default=str,
+        )
+
+    def _saved_replies_session(self) -> ContextManager[None]:
+        return self._reply_reusing_client.session() if self._reply_reusing_client is not None else nullcontext()
 
     def _get_corpus_block(self, src_lang: Language, trg_lang: Language) -> Optional[str]:
         """The whole corpus, for the system message, when num_examples covers all of it."""
@@ -739,6 +1100,20 @@ class RemoteLLMModel(NMTModel):
                 if save_confidences:
                     generate_confidence_files(translated_draft, draft_path)
 
+    def has_completed_translation(self, input_path: Path, translation_path: Path) -> bool:
+        if not super().has_completed_translation(input_path, translation_path):
+            return False
+        # Blank lines indicate failed LLM translations -- only re-translate those
+        lines = zip_longest(self._read_lines(input_path), self._read_lines(translation_path), fillvalue="")
+        num_blank = sum(1 for source, translation in lines if source != "" and translation == "")
+        if num_blank > 0:
+            LOGGER.info("%s has %s blank translations, which are asked for again.", translation_path, f"{num_blank:,}")
+        return num_blank == 0
+
+    def discard_saved_inference(self) -> None:
+        if self._reply_reusing_client is not None:
+            self._reply_reusing_client.discard_saved_replies()
+
     def _check_confidences_supported(self) -> None:
         if self._config.get_infer_batch_size() != 1:
             raise RuntimeError(
@@ -801,15 +1176,37 @@ class RemoteLLMModel(NMTModel):
         usage = UsageTotals()
         tasks = [(batch_index, draft_index) for draft_index in range(num_drafts) for batch_index in range(len(batches))]
         concurrency = self._config.get_concurrency()
-        if concurrency == 1 or len(tasks) <= 1:
-            for task in tasks:
-                run_task(task)
-        else:
-            with ThreadPoolExecutor(max_workers=concurrency) as executor:
-                # Consume the iterator so that any exception raised in a worker propagates here.
-                list(executor.map(run_task, tasks))
+        with self._saved_replies_session():
+            try:
+                if concurrency == 1 or len(tasks) <= 1:
+                    for task in tasks:
+                        run_task(task)
+                else:
+                    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+                        # Consume the iterator so that any exception raised in a worker propagates here.
+                        list(executor.map(run_task, tasks))
+            except Exception:
+                resume_hint = (
+                    " The replies received are saved, so rerunning resumes."
+                    if self._reply_reusing_client is not None
+                    else ""
+                )
+                LOGGER.error("Translation failed after %s.%s", usage.describe(), resume_hint)
+                raise
 
         LOGGER.info("Translated %s segments using %s.", f"{len(sentences):,}", usage.describe())
+        num_blank = sum(
+            1
+            for draft in results
+            for sentence, completion in zip(sentences, draft)
+            if sentence.strip() != "" and (completion is None or completion.is_empty())
+        )
+        if num_blank > 0:
+            LOGGER.warning(
+                "%s translations were left blank although their source segment was not.%s",
+                f"{num_blank:,}",
+                " Rerunning sends only those again." if self._reply_reusing_client is not None else "",
+            )
 
         for index in range(len(sentences)):
             yield SentenceTranslationGroup(
@@ -824,13 +1221,22 @@ class RemoteLLMModel(NMTModel):
         want_logprobs: bool = False,
         usage: Optional[UsageTotals] = None,
     ) -> List[Completion]:
+        memory = self._get_translation_memory()
         translations: List[Completion] = [Completion("")] * len(texts)
-        # Blank segments are verses absent from the source; no request needed.
-        non_blank = [(index, text) for index, text in enumerate(texts) if text.strip() != ""]
-        if len(non_blank) == 0:
+        unknown: List[Tuple[int, str]] = []
+        for index, text in enumerate(texts):
+            known = memory.translate(text)
+            if known is not None:
+                translations[index] = Completion(known)
+                if usage is not None:
+                    usage.add_copied_translation()
+            # Blank segments are verses absent from the source; no request needed.
+            elif text.strip() != "":
+                unknown.append((index, text))
+        if len(unknown) == 0:
             return translations
-        completed = self._complete_texts([text for _, text in non_blank], src_lang, trg_lang, want_logprobs, usage)
-        for (index, _), completion in zip(non_blank, completed):
+        completed = self._complete_texts([text for _, text in unknown], src_lang, trg_lang, want_logprobs, usage)
+        for (index, _), completion in zip(unknown, completed):
             translations[index] = completion
         return translations
 
@@ -848,9 +1254,10 @@ class RemoteLLMModel(NMTModel):
         if len(texts) == 1:
             return [self._complete_single(texts[0], src_lang, trg_lang, want_logprobs, usage)]
 
+        reader = BatchReplyReader(len(texts))
         messages = self._build_messages(texts, src_lang, trg_lang)
         response = self._complete(messages, usage=usage).text
-        parsed = ModelReply(response).parse(len(texts))
+        parsed = reader.read(response)
         if parsed is None:
             correction = messages + [
                 {"role": "assistant", "content": response},
@@ -863,7 +1270,7 @@ class RemoteLLMModel(NMTModel):
                     ),
                 },
             ]
-            parsed = ModelReply(self._complete(correction, usage=usage).text).parse(len(texts))
+            parsed = reader.read(self._complete(correction, usage=usage).text)
         if parsed is not None:
             return [Completion(text) for text in parsed]
 
@@ -883,18 +1290,46 @@ class RemoteLLMModel(NMTModel):
         want_logprobs: bool = False,
         usage: Optional[UsageTotals] = None,
     ) -> Completion:
-        completion = self._complete(self._build_messages([text], src_lang, trg_lang), want_logprobs, usage)
-        stripped = ModelReply(completion.text).strip_code_fence().strip()
-        if stripped == completion.text:
+        reader = SingleReplyReader(TranslationLabelRemover(trg_lang.name), self._get_target_profile())
+        messages = self._build_messages([text], src_lang, trg_lang)
+        completion = self._complete(messages, want_logprobs, usage, lambda reply: reader.read(reply.text) != "")
+        translation = reader.read(completion.text)
+        if translation == completion.text:
             return completion
-        # The scores still cover the stripped text, so drop them rather than misalign them.
-        return replace(completion, text=stripped, token_logprobs=[])
+        # The scores still cover the discarded text, so drop them rather than misalign them.
+        return replace(completion, text=translation, token_logprobs=[])
+
+    def _get_target_profile(self) -> TargetLanguageProfile:
+        with self._lock:
+            if self._target_profile is None:
+                self._target_profile = self._config.get_infer_prompt_builder().create_target_language_profile()
+            return self._target_profile
+
+    def _get_translation_memory(self) -> TranslationMemory:
+        with self._lock:
+            if self._translation_memory is None:
+                # Seeded, so that a rerun or a resumed run picks the same translation.
+                rng = random.Random(self._config.data["seed"])
+                self._translation_memory = (
+                    self._config.get_infer_prompt_builder().create_translation_memory(rng)
+                    if self._config.infer["copy_exact_matches"]
+                    else TranslationMemory([], rng)
+                )
+            return self._translation_memory
 
     def _complete(
-        self, messages: List[Dict[str, str]], logprobs: bool = False, usage: Optional[UsageTotals] = None
+        self,
+        messages: List[Dict[str, str]],
+        logprobs: bool = False,
+        usage: Optional[UsageTotals] = None,
+        usable: Callable[[Completion], bool] = lambda reply: not reply.is_empty(),
     ) -> Completion:
         """Send one request, counting it against the run's totals."""
-        completion = self._get_client().complete(messages, logprobs)
+        client = self._get_client()
+        if self._reply_reusing_client is None:
+            completion = client.complete(messages, logprobs)
+        else:
+            completion = self._reply_reusing_client.complete(client, messages, logprobs, usable)
         if usage is not None:
             usage.add(completion)
         return completion

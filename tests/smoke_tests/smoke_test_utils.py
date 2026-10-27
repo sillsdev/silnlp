@@ -36,8 +36,8 @@ PREPROCESS_OUTPUT_PATTERNS = [
     "token_occurrence*",
 ]
 TRAIN_OUTPUT_PATTERNS = ["effective-config*", "run"]
-TEST_OUTPUT_PATTERNS = ["test.trg-predictions*", "scores-*", "linregress*"]
-TRANSLATE_OUTPUT_PATTERNS = ["infer"]
+TEST_OUTPUT_PATTERNS = ["test.trg-predictions*", "scores-*", "linregress*", "remote_llm_replies*"]
+TRANSLATE_OUTPUT_PATTERNS = ["infer", "remote_llm_replies*"]
 
 # What a run of the whole pipeline writes to an experiment directory
 PIPELINE_OUTPUT_PATTERNS = (

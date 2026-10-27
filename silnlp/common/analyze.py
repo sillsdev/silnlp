@@ -1,8 +1,9 @@
 import argparse
 import logging
 import re
+from pathlib import Path
 from statistics import mean
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import pandas as pd
 from machine.scripture import VerseRef, is_ot_nt
@@ -12,6 +13,7 @@ from ..alignment.config import get_aligner_name
 from ..alignment.utils import add_alignment_scores
 from ..nmt.clearml_connection import TAGS_LIST, SILClearML
 from ..nmt.config import Config, get_data_file_pairs
+from ..nmt.corpora import BasicParallelCorpus, DataFile
 from .collect_verse_counts import DT_CANON, NT_CANON, OT_CANON, collect_verse_counts
 from .corpus import filter_parallel_corpus, get_scripture_parallel_corpus, include_chapters
 from .environment import SilNlpEnv
@@ -21,6 +23,27 @@ from .utils import get_git_revision_hash
 LOGGER = logging.getLogger(__package__ + ".analyze")
 
 ALIGNMENT_SCORES_FILE = re.compile(r"([a-z]{2,3}-.+)_([a-z]{2,3}-.+)")
+
+
+def get_corpus_with_text(
+    src_file: DataFile,
+    trg_file: DataFile,
+    corpus_books: Dict[int, List[int]],
+    deutero: bool,
+    environment: SilNlpEnv,
+) -> pd.DataFrame:
+    if not src_file.is_scripture:
+        return BasicParallelCorpus(src_file.path, trg_file.path).to_data_frame(remove_empty_sentences=False)
+    corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, False, environment=environment)
+    if not deutero:
+        corpus = corpus.loc[[is_ot_nt(vref.book_num) for vref in corpus["vref"]]]
+    if len(corpus_books) > 0:
+        corpus = include_chapters(corpus, corpus_books)
+    return corpus
+
+
+def is_scripture_file(path: Path, environment: SilNlpEnv) -> bool:
+    return path.is_file() and DataFile(path, environment=environment).is_scripture
 
 
 def get_corpus_stats(
@@ -59,7 +82,7 @@ def get_corpus_stats(
             if src_file == trg_file:
                 continue
 
-            src_project, trg_project = f"{src_file.iso}-{src_file.project}", f"{trg_file.iso}-{trg_file.project}"
+            src_project, trg_project = src_file.path.stem, trg_file.path.stem
             if force_align:
                 (config.exp_dir / f"{src_project}_{trg_project}.csv").unlink(missing_ok=True)
                 (config.exp_dir / f"{trg_project}_{src_project}.csv").unlink(missing_ok=True)
@@ -67,16 +90,11 @@ def get_corpus_stats(
             pairs_to_process.append((src_file, trg_file, pair.corpus_books, pair.score_threshold))
 
     for src_file, trg_file, corpus_books, score_threshold in pairs_to_process:
-        source = f"{src_file.iso}-{src_file.project}"
-        target = f"{trg_file.iso}-{trg_file.project}"
+        source = src_file.path.stem
+        target = trg_file.path.stem
         project_pair = (source, target)
         if project_pair not in stats_df.index:
-            # Get corpus and filter by book/chapter configurations
-            corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, False, environment=environment)
-            if not deutero:
-                corpus = corpus.loc[[is_ot_nt(vref.book_num) for vref in corpus["vref"]]]
-            if len(corpus_books) > 0:
-                corpus = include_chapters(corpus, corpus_books)
+            corpus = get_corpus_with_text(src_file, trg_file, corpus_books, deutero, environment)
 
             pair_count = len(corpus.index)
             src_only_count = len(corpus.loc[corpus["target"].str.len() == 0].index)
@@ -96,7 +114,7 @@ def get_corpus_stats(
                 pair_stats = pd.read_csv(pair_stats_path)
                 pair_stats["idx"] = corpus.index
                 pair_stats.set_index("idx", inplace=True)
-                corpus.insert(3, "score", pair_stats["score"])
+                corpus["score"] = pair_stats["score"]
             else:
                 aligner_id = config.data["aligner"]
                 LOGGER.info(f"Computing alignment beteween {source} and {target} using {get_aligner_name(aligner_id)}")
@@ -133,7 +151,7 @@ def get_corpus_stats(
         # Use values from the df because not all values get recalculated
         row = stats_df.loc[project_pair]
         LOGGER.info(
-            f"{src_file.project} -> {trg_file.project} stats -"
+            f"{source} -> {target} stats -"
             f" count: {row.at['count']},"
             f" source only count: {row.at['src_only']}"
             f" target only count: {row.at['trg_only']}"
@@ -186,16 +204,20 @@ def get_extra_alignments(
         if project_pair not in stats_df.index and project_pair not in stats_df.swaplevel().index:
             LOGGER.info(f"Extra alignment file found: {filepath.name}")
             src_path = environment.get_mt_corpus_path(project_pair[0])
-            if src_path.is_file():
+            if is_scripture_file(src_path, environment):
                 extra_projects.append(src_path.name)
             trg_path = environment.get_mt_corpus_path(project_pair[1])
-            if trg_path.is_file():
+            if is_scripture_file(trg_path, environment):
                 extra_projects.append(trg_path.name)
 
             if src_path.is_file() and trg_path.is_file():
-                corpus = get_scripture_parallel_corpus(src_path, trg_path, False, environment=environment)
-                if not deutero:
-                    corpus = corpus.loc[[is_ot_nt(vref.book_num) for vref in corpus["vref"]]]
+                corpus = get_corpus_with_text(
+                    DataFile(src_path, environment=environment),
+                    DataFile(trg_path, environment=environment),
+                    {},
+                    deutero,
+                    environment,
+                )
                 pair_count = len(corpus.index)
                 src_only_count = len(corpus.loc[corpus["target"].str.len() == 0].index)
                 trg_only_count = len(corpus.loc[corpus["source"].str.len() == 0].index)
@@ -208,7 +230,7 @@ def get_extra_alignments(
                 trg_only_count = ""
 
             align_corpus = pd.read_csv(filepath)
-            if not deutero:
+            if not deutero and "vref" in align_corpus.columns:
                 align_corpus = align_corpus.loc[
                     [is_ot_nt(VerseRef.from_string(vref).book_num) for vref in align_corpus["vref"]]
                 ]
@@ -233,10 +255,10 @@ def get_extra_alignments(
             ]
         elif project_pair in stats_df.index and len(stats_df.loc[project_pair, "filtered_align_score"]) == 0:
             src_path = environment.get_mt_corpus_path(project_pair[0])
-            if src_path.is_file():
+            if is_scripture_file(src_path, environment):
                 extra_projects.append(src_path.name)
             trg_path = environment.get_mt_corpus_path(project_pair[1])
-            if trg_path.is_file():
+            if is_scripture_file(trg_path, environment):
                 extra_projects.append(trg_path.name)
     stats_df.sort_values("filtered_align_score", ascending=False).to_csv(stats_path)
 
@@ -258,16 +280,21 @@ def create_summary_file(config: Config) -> None:
     )
 
     LOGGER.info("Creating summary file")
+    # Only verse-referenced corpora have the verse counts and per-book scores that the summaries are made of.
+    scripture_stats_df = corpus_stats_df[
+        [src in verse_counts_df.index and trg in verse_counts_df.index for src, trg in corpus_stats_df.index]
+    ]
+    trg_projects = sorted(scripture_stats_df.index.get_level_values(1).unique())
     trg_summary_dfs = {}
-    if len(corpus_stats_df.index.levels[1]) > 250:
+    if len(trg_projects) > 250:
         # Max # of sheets in an Excel spreadsheet is 255
         LOGGER.warning("Too many target projects (>250); Summary sheets for each target project will not be written.")
     else:
-        for trg_project in tqdm(sorted(corpus_stats_df.index.levels[1])):
+        for trg_project in tqdm(trg_projects):
             summary_df = pd.DataFrame(columns=["file"] + list(verse_counts_df.columns)).set_index("file")
             summary_df.loc[trg_project] = verse_counts_df.loc[trg_project]
 
-            for src_project in sorted(corpus_stats_df.swaplevel().loc[trg_project].index):
+            for src_project in sorted(scripture_stats_df.swaplevel().loc[trg_project].index):
                 summary_df = pd.concat([summary_df, pd.Series({col: "" for col in summary_df.columns}).to_frame().T])
                 summary_df.loc[src_project] = verse_counts_df.loc[src_project]
                 pair = (src_project, trg_project)
@@ -320,7 +347,7 @@ def create_summary_file(config: Config) -> None:
             trg_summary_sheet = writer.sheets[name]
             trg_summary_sheet.autofit()
             trg_summary_sheet.set_column(1, len(verse_counts_df.columns), None, int_format)
-            for i in range(len(corpus_stats_df.swaplevel().loc[trg_project].index)):
+            for i in range(len(scripture_stats_df.swaplevel().loc[trg_project].index)):
                 trg_summary_sheet.set_row(4 + i * 3, None, round4_format)
             trg_summary_sheet.freeze_panes(1, 1)
 
@@ -363,6 +390,8 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
             scores_path = config.exp_dir / f"{trg_project}_{src_project}.csv"
 
         # Get verse alignment scores for pair
+        if "vref" not in pd.read_csv(scores_path, nrows=0).columns:
+            continue
         align_scores_df = pd.read_csv(scores_path).set_index("vref").drop(columns=["source", "target"])
         align_scores_df.index = pd.MultiIndex.from_tuples(
             [split_index(vref) for vref in align_scores_df.index], names=["book", "chapter", "verse"]
@@ -481,17 +510,21 @@ def analyze(
             LOGGER.error(f"The source file {str(file)} does not exist")
             return
 
-    file_patterns = ";".join([f.name for f in data_files])
-    collect_verse_counts(
-        environment.mt_scripture_dir, config.exp_dir, file_patterns, deutero, recalculate, environment=environment
-    )
+    scripture_files = {
+        f.path for pair in config.corpus_pairs for f in pair.src_files + pair.trg_files if f.is_scripture
+    }
+    if len(scripture_files) > 0:
+        file_patterns = ";".join([f.name for f in scripture_files])
+        collect_verse_counts(
+            environment.mt_scripture_dir, config.exp_dir, file_patterns, deutero, recalculate, environment=environment
+        )
 
     get_corpus_stats(config, exp_name, recalculate, deutero, environment)
 
     # Add stats about projects in extra alignment files in the experiment folder
     extra_projects = get_extra_alignments(config, deutero, environment)
-    all_projects = set(extra_projects) | set([f.name for f in data_files])
-    if len(all_projects) > len(data_files):
+    all_projects = set(extra_projects) | set([f.name for f in scripture_files])
+    if len(all_projects) > len(scripture_files):
         LOGGER.info("Adding verse counts for projects in extra alignment files")
         collect_verse_counts(
             environment.mt_scripture_dir,
@@ -503,7 +536,7 @@ def analyze(
         )
 
     # Create summary outputs
-    if create_summaries:
+    if create_summaries and len(all_projects) > 0:
         try:
             create_alignment_breakdown_file(config, deutero)
             create_summary_file(config)

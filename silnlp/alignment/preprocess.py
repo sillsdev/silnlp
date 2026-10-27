@@ -3,7 +3,7 @@ import json
 import logging
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Collection, Generator, Iterable, List, Optional, TextIO
+from typing import Collection, Generator, Iterable, List, Optional, TextIO, Tuple
 
 from machine.corpora import AlignedWordPair, ParallelTextCorpus, ParallelTextRow, TextFileTextCorpus
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_chapters
@@ -137,6 +137,26 @@ def stem(src_stemmer: Stemmer, trg_stemmer: Stemmer, row: ParallelTextRow) -> Pa
     return row
 
 
+def load_parallel_corpus(config: dict, environment: SilNlpEnv) -> Tuple[ParallelTextCorpus, bool]:
+    src_file_path = environment.get_mt_corpus_path(config["src"])
+    trg_file_path = environment.get_mt_corpus_path(config["trg"])
+    is_scripture = src_file_path.parent == environment.mt_scripture_dir
+    if is_scripture != (trg_file_path.parent == environment.mt_scripture_dir):
+        raise RuntimeError("All corpora in a corpus pair must contain the same type of data.")
+    if is_scripture:
+        scripture_corpus = get_scripture_parallel_corpus(src_file_path, trg_file_path, environment=environment)
+        corpus_books = get_chapters(config.get("corpus_books", []))
+        if len(corpus_books) > 0:
+            scripture_corpus = include_chapters(scripture_corpus, corpus_books)
+        return ParallelTextCorpus.from_pandas(scripture_corpus, ref_column="vref"), True
+    verse_settings = [key for key in ("corpus_books", "by_book") if config.get(key)]
+    if len(verse_settings) > 0:
+        raise RuntimeError(
+            f"Basic corpora have no verse references, so they do not support {', '.join(verse_settings)}."
+        )
+    return TextFileTextCorpus(src_file_path).align_rows(TextFileTextCorpus(trg_file_path)), False
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Preprocesses Clear gold standard alignments")
     parser.add_argument("experiments", type=str, help="Experiment pattern")
@@ -189,23 +209,7 @@ def main() -> None:
             is_scripture = True
             has_gold_alignments = True
         else:
-            src_file_path = environment.get_mt_corpus_path(config["src"])
-            trg_file_path = environment.get_mt_corpus_path(config["trg"])
-            if (
-                src_file_path.parent == environment.mt_scripture_dir
-                or trg_file_path.parent == environment.mt_scripture_dir
-            ):
-                corpus = get_scripture_parallel_corpus(src_file_path, trg_file_path, environment=environment)
-                corpus_books = get_chapters(config.get("corpus_books", []))
-                if len(corpus_books) > 0:
-                    corpus = include_chapters(corpus, corpus_books)
-                corpus = ParallelTextCorpus.from_pandas(corpus, ref_column="vref")
-                is_scripture = True
-            else:
-                src_corpus = TextFileTextCorpus(src_file_path)
-                trg_corpus = TextFileTextCorpus(trg_file_path)
-                corpus = src_corpus.align_rows(trg_corpus)
-                is_scripture = False
+            corpus, is_scripture = load_parallel_corpus(config, environment)
             corpus = corpus.tokenize(LatinWordTokenizer())
 
         src_casing: str = config["src_casing"]

@@ -112,6 +112,11 @@ Unit tests live in `tests/unit_tests/`. End-to-end smoke tests live in
     `SilSeq2SeqTrainer`) reads `inspect.signature(model_class.forward)` to
     find the label columns, so an override with a narrower signature
     silently drops the labels and training fails far from the cause.
+- **No `pytest.mark.parametrize`.** Write a separate test for each case,
+  even when the tests share most of their code, so that each test's name
+  can say which case it covers (`test_a_request_timeout_is_retried`, not
+  `test_transient_http_errors_are_retried[408]`). Shared setup can go in a
+  fixture or a helper, but the cases stay separate tests.
 
 ### Refactoring
 

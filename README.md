@@ -14,7 +14,7 @@ These are the main requirements for the SILNLP code to run on a local machine. S
 
 | Requirement           | Reason                                                            |
 | --------------------- | ----------------------------------------------------------------- |
-| Ubuntu-22.04          | Linux Distro that is officially supported                         |
+| Ubuntu-24.04          | Linux Distro that is officially supported                         |
 | GIT                   | to get the repo from [github](https://github.com/sillsdev/silnlp) |
 | Python                | to run the silnlp code                                            |
 | Poetry                | to manage all the Python packages and versions                    |
@@ -33,27 +33,27 @@ If using a local GPU, install the corresponding [NVIDIA driver](https://www.nvid
 ## WSL Setup
 Follow these steps if you plan to run silnlp on a Windows machine.
 
-   1. Install Ubuntu-22.04 by running the following command: 
+   1. Install Ubuntu-24.04 by running the following command: 
       ```
-      wsl --install Ubuntu-22.04
+      wsl --install Ubuntu-24.04
       ```
 
       * Follow any prompts wsl provides, such as entering a UNIX username and password, this can be anything you would like.
       * To know that you are in wsl, the command line should be green with the following information: <your_username>@<your_machine_name>:~$
       * To exit WSL, you can either close the command prompt or by running the "exit" command
       * To reenter WSL, you can open a command prompt and run the command "wsl ~"
-      * To shutdown WSL when you are not using it, run the command "wsl --terminate Ubuntu-22.04"
+      * To shutdown WSL when you are not using it, run the command "wsl --terminate Ubuntu-24.04"
 
    2. Exit WSL and run the following commands in a command prompt:
 
       * Run this command to set root as the default user:
          ```
-         ubuntu2204 config --default-user root
+         ubuntu2404 config --default-user root
          ```
 
-   3. Run this command to set Ubuntu-22.04 as your default distro:
+   3. Run this command to set Ubuntu-24.04 as your default distro:
          ```
-         wsl -s Ubuntu-22.04
+         wsl -s Ubuntu-24.04
          ```
 
 ### Note on WSL Paths: 
@@ -61,8 +61,8 @@ Follow these steps if you plan to run silnlp on a Windows machine.
    The paths are the same except with /mnt/ appended to them and the drive letter is lowercased with no colon following. For example, the Windows path may be "C:/Users/username/Desktop/silnlp", inside WSL it is "/mnt/c/Users/username/Desktop/silnlp"
 
    * To access WSL files from Windows, open File Explorer and either:
-      - Scroll down and choose Linux, then Ubuntu-22.04
-      - Or search "\\wsl.localhost\Ubuntu-22.04"
+      - Scroll down and choose Linux, then Ubuntu-24.04
+      - Or search "\\wsl.localhost\Ubuntu-24.04"
    
    * Note that for silnlp on WSL forward slashes are required in paths. If you see an error like: `RuntimeError: Config file has no contents.` or any other error indicating a missing file or contents check that you have used `/` and not `\` in the command line arguments.
      
@@ -82,7 +82,7 @@ The rest of these instructions are to be carried out in a WSL/Linux terminal as 
       git clone https://github.com/sillsdev/silnlp.git
       ```
 
-2. Create a env_vars.txt file with your credentials in this form in the root directory (/root, or \\wsl.localhost\Ubuntu-22.04\root from Windows File Explorer). This file may be created outside of WSL, but should be saved in the \\wsl.localhost\Ubuntu-22.04\root directory.:
+2. Create a env_vars.txt file with your credentials in this form in the root directory (/root, or \\wsl.localhost\Ubuntu-24.04\root from Windows File Explorer). This file may be created outside of WSL, but should be saved in the \\wsl.localhost\Ubuntu-24.04\root directory.:
    ```
    CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
    CLEARML_API_ACCESS_KEY=xxxxxxxxxxxxxxxx
@@ -131,7 +131,7 @@ The rest of these instructions are to be carried out in a WSL/Linux terminal as 
 
 8. Install Poetry with the official installer
    ```
-	curl -sSL https://install.python-poetry.org | python3 - --version 1.7.1
+	curl -sSL https://install.python-poetry.org | python3 - --version 2.4.1
    ```
    * Follow Poetry's instructions, namely run:
       ```
@@ -142,12 +142,7 @@ The rest of these instructions are to be carried out in a WSL/Linux terminal as 
       echo "export PATH="/root/.local/bin:$PATH"" >> ~/.bashrc
       ```
 
-9. Configure Poetry to use the active Python
-   ```
-	poetry config virtualenvs.prefer-active-python true
-   ```
-
-10. Install the Python packages for the silnlp repo
+9. Install the Python packages for the silnlp repo
     In a terminal at the silnlp repo, run:
    ```
 	poetry install
@@ -257,11 +252,11 @@ Follow the instructions below to set up a Dev Container in VS Code. This is the 
       * Note: If you don't have a local GPU, you may need to comment out the `gpus --all` part of the `runArgs` field of the `.devcontainer/devcontainer.json` file.
 
 10. Install and activate Poetry environment.
-      * In the VS Code terminal, run `poetry install` to install the necessary Python libraries, and then run `poetry shell` to enter the environment in the terminal. 
+      * In the VS Code terminal, run `poetry install` to install the necessary Python libraries, and then run `poetry env activate` to enter the environment in the terminal. 
 
 11. (Optional) Locally mount the MinIO and/or B2 bucket(s). This will allow you to interact directly with the bucket(s) from your local terminal (outside of the dev container). See instructions [here](bucket_setup.md).
 
-To get back into the dev container and poetry environment each subsequent time, open the silnlp folder in VS Code, select the "Reopen in Container" option from the Remote Connection menu (bottom left corner), and use the `poetry shell` command in the terminal.
+To get back into the dev container and poetry environment each subsequent time, open the silnlp folder in VS Code, select the "Reopen in Container" option from the Remote Connection menu (bottom left corner), and use the `poetry env activate` command in the terminal.
 
 ## Setting Up and Running Experiments
 See the [wiki](../../wiki) for information on setting up and running experiments. The most important pages for getting started are the ones on [file structure](../../wiki/File-conventions-and-cleanup), [model configuration](../../wiki/Configure-a-model), and [running experiments](../../wiki/NMT:-Usage). A lot of the instructions are specific to NMT, but are still helpful starting points for doing other things like [alignment](../../wiki/Alignment:-Usage).

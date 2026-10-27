@@ -42,7 +42,6 @@ TVerseKey = TypeVar("TVerseKey")
 
 
 class ConfidenceFile(ABC, Generic[TVerseKey]):
-
     def __init__(self, path: Path):
         if not path.name.endswith(CONFIDENCE_SUFFIX):
             raise ValueError(f"Confidence file path must end with {CONFIDENCE_SUFFIX}, got {path.name}")
@@ -115,7 +114,6 @@ class ConfidenceFile(ABC, Generic[TVerseKey]):
 
 
 class UsfmConfidenceFile(ConfidenceFile[VerseRef]):
-
     def __init__(self, path: Path):
         super().__init__(path)
         self._book_confidences_cache: Optional[Dict[str, float]] = None
@@ -208,7 +206,6 @@ class UsfmConfidenceFile(ConfidenceFile[VerseRef]):
 
 
 class TxtConfidenceFile(ConfidenceFile[int]):
-
     def get_files_path(self) -> Path:
         return self._path.parent / "confidences.files.tsv"
 
@@ -266,6 +263,13 @@ class TestConfidenceFile(ConfidenceFile[int]):
         scripture_refs: Optional[List[ScriptureRef]] = None,
     ) -> None:
         translated_draft.write_confidence_scores_to_file(self._path)
+
+    def exists(self) -> bool:
+        return self._path.is_file()
+
+    def get_sequence_confidences(self) -> List[float]:
+        with self._path.open("r", encoding="utf-8") as confidences_file:
+            return [float(line.split("\t")[0]) for line in list(confidences_file)[3::2]]
 
 
 def generate_confidence_files(
@@ -436,7 +440,9 @@ class Translator(AbstractContextManager["Translator"], ABC):
         if postprocess_handler is None:
             postprocess_handler = PostprocessHandler(environment=self._environment)
         for draft_index, translated_draft in enumerate(translated_text_rows.get_translated_drafts(), 1):
-            translated_text_rows.construct_postprocessing_rows_for_draft_index(postprocess_handler, draft_index, src_training_rows, trg_training_rows)
+            translated_text_rows.construct_postprocessing_rows_for_draft_index(
+                postprocess_handler, draft_index, src_training_rows, trg_training_rows
+            )
 
             for config in postprocess_handler.configs:
 
