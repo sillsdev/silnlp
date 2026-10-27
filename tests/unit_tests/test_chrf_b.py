@@ -134,3 +134,23 @@ def test_training_corpus_leaves_out_verses_overlapping_the_excluded(tmp_path: Pa
     corpus = training_corpus(tmp_path / "src.txt", tmp_path / "trg.txt", {"GEN 1:3", "GEN 1:5"})
 
     assert corpus["target"].tolist() == ["uno"]
+
+
+def test_scoring_references_without_spaces_between_words_warns_once(caplog) -> None:
+    from silnlp.common.chrf_b import lacks_word_spaces
+
+    spaced = [["in the beginning god created the heavens and the earth"]]
+    unspaced = [["太初，上帝创造了天和地。 大地一片混沌，空虚黑暗，上帝的灵运行在水面上。"]]
+    assert not lacks_word_spaces(spaced[0])
+    assert lacks_word_spaces(unspaced[0])
+
+    metric = ChrFB(None, None, "en-cmn")
+    with caplog.at_level("WARNING", logger="silnlp.common.chrf_b"):
+        metric.corpus_score(["s"], unspaced[0], unspaced)
+        metric.normalized_corpus_score(["s"], unspaced[0], unspaced)
+    assert len(caplog.records) == 1 and "en-cmn" in caplog.records[0].getMessage()
+
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="silnlp.common.chrf_b"):
+        ChrFB(None, None).corpus_score(["s"], spaced[0], spaced)
+    assert not caplog.records

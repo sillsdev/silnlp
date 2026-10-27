@@ -178,6 +178,7 @@ class ChrFBMetrics:
             training_corpus(source_path, target_path, excluded),
             training_corpus(english_path, target_path, excluded),
             get_terms(None, iso="en", list_name="Major").values(),
+            f"{src_iso}-{trg_iso}",
         )
 
 
