@@ -91,8 +91,8 @@ class ChrFB:
         if lacks_word_spaces([line for reference in references for line in reference]):
             language = f" for {self._language}" if self._language else ""
             LOGGER.warning(
-                f"chrF-B{language} is unreliable: the references don't put spaces between words, and chrF-B is only "
-                "validated on scripts that do. chrF3 is the score to use."
+                f"chrF-B{language} is unreliable: the references have no word breaks, and chrF-B is only validated "
+                "on scripts that have them. chrF3 is the score to use."
             )
 
     def _added_points(self, sources: Sequence[str], hypotheses: Sequence[str], references: List[List[str]]) -> float:
