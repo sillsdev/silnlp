@@ -302,7 +302,7 @@ def process_request(request_dict: dict):
         )
         adjusted_name = rename_project(request.main_project.short_name, True)
         display_message(
-            f"Results will be stored in {OnboardingEnvironment.ONBOARDING_REQUESTS_BUCKET_DIR}/{adjusted_name}",
+            f"Results will be stored in {OnboardingEnvironment.ONBOARDING_REQUESTS_BUCKET_DIR}/{adjusted_name}_Request",
             MessageType.INFO,
             request.id,
         )
