@@ -20,7 +20,9 @@ python -m silnlp.common.auto_onboarding <folder>
 ```
 
 `<folder>` is the request folder relative to `MT/experiments`, for example
-`_OnboardingRequests/ABC_2026_10_01_Request`. There are no other options. Every
+`_OnboardingRequests/ABC_2026_10_01_Request`. If that folder doesn't exist,
+`_Request` is added to the name and the folder is checked again, so
+`_OnboardingRequests/ABC_2026_10_01` works too. There are no other options. Every
 other value comes from the folder or from the fixed values in this plan.
 
 ## Inputs
@@ -56,6 +58,7 @@ experiments go in `MT/experiments/<Country>/<Language>/`, named exactly as
 | Back translation thresholds | at least 400 parallel verses and alignment ≥ 0.25 |
 | Book completeness for training | ≥ 98% of the book's verses, in the target and every source |
 | Test set | the default random 250 verses |
+| "Close" alignment, for choosing between sources (rule 3a) | within 0.025 |
 | Model, checkpoint, seed | as in `create_onboarding_experiments.py` |
 
 Iso codes compare equal across their 2- and 3-letter forms (`ALT_ISO` in
@@ -101,10 +104,63 @@ At most four, in this order:
 
 If `draft_source` fails the thresholds, the second-best-aligned candidate takes
 its place in experiments 1 and 3, so the run uses the two best-aligned candidates.
+Throughout this rule, "best-aligned" means the candidate chosen by rule 3a.
 When `draft_source` is the best-aligned candidate, experiments 1 and 2 are the
 same, and so are 3 and 4. Keep one of each. In a pair the source comes first and
 the back translation second. The source for training is also the source for drafting
 in all cases.
+
+### 3a. Choosing between close sources
+
+Alignment scores of the leading sources are often within a few thousandths of
+each other, too close to separate them. Rule 3a lets language and edition break
+the tie.
+
+`silnlp/assets/preferredSources.json` lists preferred sources and sources to
+avoid, so the lists can be edited without touching the code:
+
+```json
+{
+  "preferred": {
+    "eng": [["NIV11R", "NIV84", "NLT07", "BSB"]],
+    "fra": [["LBS21", "LS1910"], ["PDV2017", "PDV"], ["FCR19DBL", "FRC97", "FC97"]]
+  },
+  "avoid": ["ESV*"]
+}
+```
+
+Each inner list runs from most to least preferred, which usually means later
+editions before earlier ones. Below, a "later edition" of a source is any
+project before it in the same list. The language keys only group the lists; a list
+compares only the projects named in it. `avoid` holds name patterns: the ESV
+and its variants are avoided because of licensing.
+
+First, `draft_source`. It is the team's choice, so it is kept even when it is
+avoided (with a warning). But if a later edition of it aligns better, draft from
+that instead, and say so: the team may not have seen the scores before, and can
+still pick another project.
+
+Then choose the best-aligned source:
+
+1. Leave out the avoided candidates, unless no other candidate passes the
+   thresholds.
+2. Start with the highest-aligned of the remaining candidates.
+3. If it isn't in `draft_source`'s language, and a candidate in that language is
+   close to it and aligns better than `draft_source`, take the highest-aligned
+   such candidate instead. Experiments 1 and 2 then compare two Bibles in the
+   same language.
+4. If a later edition is close to the one chosen, take the latest such edition
+   instead. This step never chooses `draft_source` itself, so that experiments 1
+   and 2 stay different.
+
+When `draft_source` fails the thresholds, step 3 doesn't apply: steps 1, 2 and 4
+choose the first source, then again, without it, the second.
+
+In a recent request, `draft_source` was a French Bible scoring 0.2485 and BSB led
+with 0.2561. LBS21 (French, 0.2507) is close to BSB and better than
+`draft_source`, so step 3 takes LBS21, and it heads its own list. Had
+`draft_source` been English, step 4 would have taken NIV11R (0.2504), which comes
+before BSB in the English list.
 
 ### 4. Books to draft
 
@@ -221,6 +277,13 @@ Write one test per case, without `pytest.mark.parametrize`:
   that source.
 - Back translation: missing from the stats; below 400 verses; alignment below
   0.25; the same project as `draft_source`; a different language gives no pairs.
+- Close sources: the same-language candidate replaces a close best-aligned
+  source in another language; it doesn't when it isn't close, or aligns below
+  `draft_source`; a preferred edition replaces a close older one; one that
+  isn't close doesn't; an avoided source is skipped, and used when it is the
+  only candidate; an avoided `draft_source` is kept; a later edition of
+  `draft_source` that aligns better replaces it, and one that aligns worse
+  doesn't; with `draft_source` failing, both sources follow the preferences.
 - Experiments: four when everything qualifies; one when `draft_source` is the
   best-aligned candidate and there is no back translation, two when there is; the two best-aligned
   candidates when `draft_source` fails the thresholds.

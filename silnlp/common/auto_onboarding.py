@@ -6,6 +6,8 @@ remains the interactive tool for overriding them by hand.
 
 import argparse
 import dataclasses
+import fnmatch
+import json
 import logging
 import re
 import shutil
@@ -62,6 +64,17 @@ class DataPaths:
     scripture_dir: Path
     terms_dir: Path
     projects_dir: Path
+
+
+class RequestFolder:
+    def __init__(self, experiments_dir: Path):
+        self._experiments_dir = experiments_dir
+
+    def resolve(self, name: str) -> Path:
+        for folder in (self._experiments_dir / name, self._experiments_dir / f"{name.rstrip('/')}_Request"):
+            if folder.is_dir():
+                return folder
+        raise OnboardingError(f"Neither {name} nor {name.rstrip('/')}_Request is a folder in {self._experiments_dir}.")
 
 
 class OnboardingRequest:
@@ -147,14 +160,44 @@ class BackTranslationCheck:
         return bt
 
 
+class SourcePreferences:
+    def __init__(self, preferred: Sequence[Sequence[str]], avoid: Sequence[str]):
+        self._preferred = [list(names) for names in preferred]
+        self._avoid = list(avoid)
+
+    def is_avoided(self, name: str) -> bool:
+        return any(fnmatch.fnmatchcase(name, pattern) for pattern in self._avoid)
+
+    def later_editions(self, name: str) -> List[str]:
+        """Projects preferred over `name`, most preferred first."""
+        for names in self._preferred:
+            if name in names:
+                return names[: names.index(name)]
+        return []
+
+
+class SourcePreferencesFile:
+    def __init__(self, assets_dir: Path):
+        self._path = assets_dir / "preferredSources.json"
+
+    def load(self) -> SourcePreferences:
+        if not self._path.is_file():
+            return SourcePreferences([], [])
+        with open(self._path, "r", encoding="utf-8") as file:
+            data = json.load(file)
+        preferred = [names for lists in (data.get("preferred") or {}).values() for names in lists]
+        return SourcePreferences(preferred, data.get("avoid") or [])
+
+
 class ExperimentChooser:
-    def __init__(self, thresholds: Thresholds):
+    def __init__(self, thresholds: Thresholds, preferences: SourcePreferences, close: float = 0.025):
         self._thresholds = thresholds
+        self._preferences = preferences
+        self._close = close
 
     def choose(
         self, candidates: Sequence[Candidate], sign_up: SignUp, back_translation: Optional[Candidate]
     ) -> List[List[Candidate]]:
-        draft_source = sign_up.draft_source
         passing = sorted(
             (c for c in candidates if c.name != sign_up.bt_project and self._thresholds.passes(c)),
             key=lambda c: c.alignment,
@@ -163,14 +206,19 @@ class ExperimentChooser:
         if not passing:
             print(f"No source has {self._thresholds.describe()}; no experiments.")
             return []
-        best = passing[0]
-        first = next((c for c in passing if c.name == draft_source), None)
-        if first is None:
+        pool = [c for c in passing if not self._preferences.is_avoided(c.name)] or passing
+        first = next((c for c in passing if c.name == sign_up.draft_source), None)
+        if first is not None:
+            first = self._later_edition_of_draft_source(first, passing)
+            best = self._best(pool, first)
+        else:
             print(
-                f"Warning: draft_source '{draft_source}' is not a candidate (it needs"
+                f"Warning: draft_source '{sign_up.draft_source}' is not a candidate (it needs"
                 f" {self._thresholds.describe()}); using the two best-aligned sources instead."
             )
-            first = passing[1] if len(passing) > 1 else None
+            best = self._best(pool, None)
+            rest = [c for c in pool if c is not best]
+            first = self._best(rest, None) if rest else None
 
         experiments: List[List[Candidate]] = []
         for sources in (
@@ -183,8 +231,49 @@ class ExperimentChooser:
                 experiments.append(sources)
         return experiments
 
+    def _later_edition_of_draft_source(self, draft_source: Candidate, passing: Sequence[Candidate]) -> Candidate:
+        if self._preferences.is_avoided(draft_source.name):
+            print(f"Warning: draft_source {draft_source.name} is normally avoided; keeping it as the team's choice.")
+        for name in self._preferences.later_editions(draft_source.name):
+            later = next((c for c in passing if c.name == name and c.alignment > draft_source.alignment), None)
+            if later is not None:
+                print(
+                    f"Drafting from {later.name} ({later.alignment:.4f}) instead of draft_source"
+                    f" {draft_source.name} ({draft_source.alignment:.4f}): a later edition that aligns better."
+                )
+                return later
+        return draft_source
+
+    def _best(self, pool: Sequence[Candidate], draft_source: Optional[Candidate]) -> Candidate:
+        chosen = pool[0]
+        if chosen is draft_source:
+            return chosen
+        if draft_source is not None and not self._same_language(chosen, draft_source):
+            same_language = [
+                c
+                for c in pool
+                if self._same_language(c, draft_source)
+                and c.alignment > draft_source.alignment
+                and self._is_close(c, chosen)
+            ]
+            if same_language:
+                chosen = same_language[0]
+        for name in self._preferences.later_editions(chosen.name):
+            later = next(
+                (c for c in pool if c.name == name and c is not draft_source and self._is_close(c, chosen)), None
+            )
+            if later is not None:
+                return later
+        return chosen
+
+    def _is_close(self, candidate: Candidate, other: Candidate) -> bool:
+        return abs(candidate.alignment - other.alignment) <= self._close
+
+    def _same_language(self, a: Candidate, b: Candidate) -> bool:
+        return to_iso3(a.iso) == to_iso3(b.iso)
+
     def _pair(self, source: Optional[Candidate], bt: Optional[Candidate]) -> Optional[List[Candidate]]:
-        if source is None or bt is None or to_iso3(source.iso) != to_iso3(bt.iso):
+        if source is None or bt is None or not self._same_language(source, bt):
             return None
         return [source, bt]
 
@@ -373,7 +462,9 @@ class AutoOnboarding:
         self._print_candidates(candidates, sign_up)
 
         back_translation = BackTranslationCheck(Thresholds(400, 0.25)).usable(sign_up, candidates)
-        choices = ExperimentChooser(Thresholds(1000, 0.2)).choose(candidates, sign_up, back_translation)
+        preferences = SourcePreferencesFile(self._paths.assets_dir).load()
+        chooser = ExperimentChooser(Thresholds(1000, 0.2), preferences)
+        choices = chooser.choose(candidates, sign_up, back_translation)
         if not choices:
             return []
 
@@ -469,7 +560,7 @@ class AutoOnboarding:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
     parser = argparse.ArgumentParser(description="Create experiments for an onboarding request automatically.")
-    parser.add_argument("folder", help="Request folder relative to MT/experiments")
+    parser.add_argument("folder", help="Request folder relative to MT/experiments; '_Request' is added if needed")
     args = parser.parse_args()
 
     environment = SilNlpEnv.create_standard_environment()
@@ -480,10 +571,8 @@ def main() -> None:
         terms_dir=Path(environment.mt_terms_dir),
         projects_dir=Path(environment.pt_projects_dir),
     )
-    folder = paths.experiments_dir / args.folder
-    if not folder.is_dir():
-        parser.error(f"{folder} is not a folder.")
     try:
+        folder = RequestFolder(paths.experiments_dir).resolve(args.folder)
         AutoOnboarding(paths, Confirmer(), ExperimentRunner()).run(folder)
     except OnboardingError as e:
         print(f"Error: {e}")
