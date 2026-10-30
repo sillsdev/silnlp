@@ -135,10 +135,16 @@ The rest of these instructions are to be carried out in a WSL/Linux terminal as 
    ```
 
 9. Install the Python packages for the silnlp repo
-    In a terminal at the silnlp repo, run:
-   ```
-	uv sync
-   ```
+    In a terminal at the silnlp repo, run the command corresponding to your use case:
+   
+      For NLLB only:
+      ```
+      uv sync
+      ```
+      For NLLB and LLMs:
+      ```
+      uv sync --extra llm
+      ```
 
 ## Bucket Setup
 1. For MinIO, enable your VPN. On Windows this should be done outside of WSL:
