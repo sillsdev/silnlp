@@ -40,7 +40,7 @@ COPY pyproject.toml uv.lock ./
 # Hashes keep the cross-index lookup safe for the CUDA-specific torch wheel.
 RUN uv export --locked --no-dev --no-emit-project --emit-index-url --format requirements-txt --output-file requirements.txt \
     && uv pip install --system --break-system-packages --index-strategy unsafe-best-match --require-hashes \
-        --requirements requirements.txt \
+    --requirements requirements.txt \
     && rm requirements.txt
 
 # Install fast_align
@@ -64,17 +64,6 @@ RUN make -C mgiza/mgizapp install
 RUN mv mgiza/mgizapp/inst/mgiza mgiza/mgizapp/inst/mkcls mgiza/mgizapp/inst/plain2snt mgiza/mgizapp/inst/snt2cooc /usr/local/bin
 RUN rm -rf mgiza
 ENV MGIZA_PATH=/usr/local/bin
-
-# Install meteor
-RUN wget "https://download.oracle.com/java/21/latest/jdk-21_linux-x64_bin.tar.gz"
-RUN tar -xf jdk-21_linux-x64_bin.tar.gz
-RUN rm jdk-21_linux-x64_bin.tar.gz
-RUN wget "http://www.cs.cmu.edu/~alavie/METEOR/download/meteor-1.5.tar.gz"
-RUN tar -xf meteor-1.5.tar.gz
-RUN rm meteor-1.5.tar.gz
-RUN mv meteor-1.5/meteor-1.5.jar /usr/local/bin
-RUN rm -rf meteor-1.5
-ENV METEOR_PATH=/usr/local/bin
 
 # Clone silnlp and make it the starting directory
 RUN git clone https://github.com/sillsdev/silnlp.git
