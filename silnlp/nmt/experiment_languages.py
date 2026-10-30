@@ -1,6 +1,13 @@
-from typing import Dict
+from dataclasses import dataclass
+from typing import Dict, Set
 
 from .corpus_inventory import CorpusInventory
+
+
+@dataclass(frozen=True)
+class Language:
+    iso: str
+    name: str
 
 
 class ExperimentLanguages:
@@ -14,6 +21,9 @@ class ExperimentLanguages:
     def name_of(self, iso: str) -> str:
         return self._lang_codes.get(iso, iso)
 
+    def of(self, iso: str) -> Language:
+        return Language(iso=iso, name=self.name_of(iso))
+
     def validation_source(self) -> str:
         return self.name_of(self._inventory.default_validation_source_iso())
 
@@ -25,3 +35,12 @@ class ExperimentLanguages:
 
     def test_target(self) -> str:
         return self.name_of(self._inventory.default_test_target_iso())
+
+    def training_source_iso(self) -> str:
+        return self._inventory.default_test_source_iso() or self._any(self._inventory.source_isos())
+
+    def training_target_iso(self) -> str:
+        return self._inventory.default_test_target_iso() or self._any(self._inventory.target_isos())
+
+    def _any(self, isos: Set[str]) -> str:
+        return next(iter(isos)) if len(isos) > 0 else ""

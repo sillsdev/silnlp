@@ -38,7 +38,7 @@ from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.utils import merge_dict
 from .checkpoints import CheckpointDirectory
-from .config import CheckpointType, Language, NMTModel
+from .config import CheckpointType, NMTModel
 from .example_retrieval import (
     CorpusPair,
     CorpusPairProvider,
@@ -48,6 +48,7 @@ from .example_retrieval import (
     TargetLanguageProfile,
     TranslationMemory,
 )
+from .experiment_languages import ExperimentLanguages, Language
 from .llm_config import (
     LLMConfig,
     PlainPromptMessagesFactory,
@@ -934,7 +935,7 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
     ) -> NMTModel:
         if completion_client_factory is None:
             completion_client_factory = LiteLLMCompletionClientFactory()
-        return RemoteLLMModel(self, completion_client_factory)
+        return RemoteLLMModel(self, self.create_languages(), completion_client_factory)
 
 
 class RemoteLLMModel(NMTModel):
@@ -946,10 +947,12 @@ class RemoteLLMModel(NMTModel):
     def __init__(
         self,
         config: RemoteLLMConfig,
+        languages: ExperimentLanguages,
         completion_client_factory: Optional[CompletionClientFactory] = None,
     ) -> None:
         super().__init__(CheckpointDirectory(config.model_dir), config.infer.get("num_drafts", 1))
         self._config: RemoteLLMConfig = config
+        self._languages = languages
         self._client_factory = completion_client_factory or LiteLLMCompletionClientFactory()
         self._client: Optional[CompletionClient] = None
         self._corpus_block: Optional[str] = None
@@ -978,8 +981,8 @@ class RemoteLLMModel(NMTModel):
             LOGGER.info("No in-context examples are configured, so there is no retrieval index to build.")
         elif builder.covers_whole_pool():
             rendered = builder.render_pool(
-                self._config.language(self._config.get_train_src_iso()),
-                self._config.language(self._config.get_train_trg_iso()),
+                self._languages.of(self._languages.training_source_iso()),
+                self._languages.of(self._languages.training_target_iso()),
             )
             corpus_tokens = self._get_client().count_tokens(rendered)
             info["num_training_pairs"] = summary.corpus_size
@@ -1077,8 +1080,8 @@ class RemoteLLMModel(NMTModel):
         yield from self._translate_batches(
             sentence_list,
             batches,
-            self._config.language(src_iso),
-            self._config.language(trg_iso),
+            self._languages.of(src_iso),
+            self._languages.of(trg_iso),
             produce_multiple_translations,
         )
 
@@ -1095,8 +1098,8 @@ class RemoteLLMModel(NMTModel):
             self._check_confidences_supported()
         self._load_saved_index()
 
-        default_src_iso = self._config.get_train_src_iso()
-        default_trg_iso = self._config.get_train_trg_iso()
+        default_src_iso = self._languages.training_source_iso()
+        default_trg_iso = self._languages.training_target_iso()
         for input_path, translation_path in zip(input_paths, translation_paths):
             src_iso, trg_iso = self._isos_for_test_file(input_path, default_src_iso, default_trg_iso)
             sentences = self._read_lines(input_path)
@@ -1105,8 +1108,8 @@ class RemoteLLMModel(NMTModel):
                 self._translate_batches(
                     sentences,
                     batches,
-                    self._config.language(src_iso),
-                    self._config.language(trg_iso),
+                    self._languages.of(src_iso),
+                    self._languages.of(trg_iso),
                     produce_multiple_translations,
                     save_confidences,
                 )

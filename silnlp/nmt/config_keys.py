@@ -35,3 +35,14 @@ class RenamedConfigKeys:
                         f"{section}.{old_name} was renamed to {section}.{new_name} and is being ignored. "
                         f"Rename it to keep its effect.",
                     )
+
+
+class DeprecatedAdapterKey:
+    """params.lora was renamed to params.adapter when DoRA was added, since the same hyperparameters now
+    back both. A config using the old name is migrated rather than rejected."""
+
+    def apply_to(self, config: dict) -> None:
+        params = config.get("params")
+        if isinstance(params, dict) and "lora" in params and "adapter" not in params:
+            LOGGER.warning("params.lora is deprecated; rename it to params.adapter.")
+            params["adapter"] = params.pop("lora")
