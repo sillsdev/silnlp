@@ -10,14 +10,14 @@ SIL NLP provides a set of pipelines for performing experiments on various NLP ta
 ---
 
 ## SILNLP Prerequisites
-These are the main requirements for the SILNLP code to run on a local machine. Since there are many Python packages that need to be used with complex versioning requirements, we use a Python package called Poetry to mangage all of those. So here is a rough heirarchy of SILNLP with the major dependencies.
+These are the main requirements for the SILNLP code to run on a local machine. Since there are many Python packages with complex versioning requirements, we use UV to manage them. Here is a rough hierarchy of SILNLP and its major dependencies.
 
 | Requirement           | Reason                                                            |
 | --------------------- | ----------------------------------------------------------------- |
 | Ubuntu-24.04          | Linux Distro that is officially supported                         |
 | GIT                   | to get the repo from [github](https://github.com/sillsdev/silnlp) |
 | Python                | to run the silnlp code                                            |
-| Poetry                | to manage all the Python packages and versions                    |
+| UV                    | to manage all the Python packages and versions                    |
 | NVIDIA GPU            | Required to run on a local machine                                |
 | Nvidia drivers        | Required for the GPU                                              |
 | CUDA Toolkit          | Required for the Machine learning with the GPU                    |
@@ -129,23 +129,15 @@ The rest of these instructions are to be carried out in a WSL/Linux terminal as 
    ```
    * You will know the environment is active if the command line starts with "(silnlp)"
 
-8. Install Poetry with the official installer
+8. Install UV with the official installer
    ```
-	curl -sSL https://install.python-poetry.org | python3 - --version 2.4.1
+	curl -LsSf https://astral.sh/uv/0.12.23/install.sh | sh
    ```
-   * Follow Poetry's instructions, namely run:
-      ```
-      export PATH="/root/.local/bin:$PATH"
-      ```
-   * Run the following command:
-      ```
-      echo "export PATH="/root/.local/bin:$PATH"" >> ~/.bashrc
-      ```
 
 9. Install the Python packages for the silnlp repo
     In a terminal at the silnlp repo, run:
    ```
-	poetry install
+	uv sync
    ```
 
 ## Bucket Setup
@@ -177,10 +169,10 @@ python3 scripts/check_bucket_setup.py
 ```
 or
 ```
-poetry run python -m scripts.check_bucket_setup
+uv run python -m scripts.check_bucket_setup
 ```
 
-The script only uses the Python standard library, so it works even if the poetry/conda environment is broken. Every failed check prints a hint with the likely fix. If you use [Claude Code](https://claude.com/claude-code), the `/diagnose-bucket-setup` skill runs this script and investigates any failures further.
+The script only uses the Python standard library, so it works even if the uv/conda environment is broken. Every failed check prints a hint with the likely fix. If you use [Claude Code](https://claude.com/claude-code), the `/diagnose-bucket-setup` skill runs this script and investigates any failures further.
 
 ## Setting Up and Running Experiments
 
@@ -251,12 +243,12 @@ Follow the instructions below to set up a Dev Container in VS Code. This is the 
       * If it was successful, the window will refresh and it will say "Dev Container: SILNLP" in the bottom left corner.
       * Note: If you don't have a local GPU, you may need to comment out the `gpus --all` part of the `runArgs` field of the `.devcontainer/devcontainer.json` file.
 
-10. Install and activate Poetry environment.
-      * In the VS Code terminal, run `poetry install` to install the necessary Python libraries, and then run `poetry env activate` to enter the environment in the terminal. 
+10. Install and activate the UV environment.
+      * In the VS Code terminal, run `uv sync --extra llm` to install the necessary Python libraries, and then run `source .venv/bin/activate` to enter the environment in the terminal.
 
 11. (Optional) Locally mount the MinIO and/or B2 bucket(s). This will allow you to interact directly with the bucket(s) from your local terminal (outside of the dev container). See instructions [here](bucket_setup.md).
 
-To get back into the dev container and poetry environment each subsequent time, open the silnlp folder in VS Code, select the "Reopen in Container" option from the Remote Connection menu (bottom left corner), and use the `poetry env activate` command in the terminal.
+To get back into the dev container and UV environment each subsequent time, open the silnlp folder in VS Code and select "Reopen in Container" from the Remote Connection menu (bottom left corner). The container synchronizes the environment on startup; use `source .venv/bin/activate` in a terminal when you need an activated shell.
 
 ## Setting Up and Running Experiments
 See the [wiki](../../wiki) for information on setting up and running experiments. The most important pages for getting started are the ones on [file structure](../../wiki/File-conventions-and-cleanup), [model configuration](../../wiki/Configure-a-model), and [running experiments](../../wiki/NMT:-Usage). A lot of the instructions are specific to NMT, but are still helpful starting points for doing other things like [alignment](../../wiki/Alignment:-Usage).
