@@ -40,7 +40,8 @@ source's. `verse_counts.csv` is not used.
 - `planned_books` and `draft_source` are required. If either is missing or
   empty, or a required file is missing, the script stops and says what is
   missing. `planned_books` holds book numbers as strings (`'41'`); convert
-  them to book IDs.
+  them to book IDs. A value in `planned_books` or `completed_books` that is not
+  a scripture book stops the run, and the error names the field.
 - `bt_project` is optional. Missing, empty or null means the team has no
   written back translation.
 - `completed_books` is the team's own training specification (rule 5). It may
@@ -206,7 +207,8 @@ partly translated or empty.
 
 **1. Training books.** Start with the declared `completed_books`. If they give
 fewer than 4000 parallel verses, add every other book with parallel verses,
-planned books included, to train on as much data as possible.
+planned books included, to train on as much data as possible. Deuterocanonical
+books may be training books like any other.
 
 **2. Gospel exception.** If the training books give fewer than 1500 parallel
 verses but include a complete gospel, draft one other gospel and nothing else:
@@ -254,6 +256,9 @@ Full testaments are compacted to `OT`/`NT` as the existing script does.
 
 ### 6. Iso clash
 
+Rule 6 runs after the experiments are chosen, so a source in an experiment
+skipped for missing data (see *Issues with data*) never causes a copy.
+
 If any source of a created experiment shares the target's iso code, the target
 gets a synthetic iso code and its extract is copied, as
 `create_onboarding_experiments.py` does (including reusing a copy from an
@@ -267,6 +272,9 @@ earlier run). Two changes:
 Print what happened: the shared iso code, the synthetic code, and the full names
 of both extract files (and of any renamed copy).
 
+Parallel verses (rule 5) are counted from the extract the experiments will train
+on: a reused earlier copy if there is one, otherwise the original.
+
 ### 7. Writing and running
 
 - `config.yml` and `translate_config.yml` are written as the existing script
@@ -276,11 +284,31 @@ of both extract files (and of any renamed copy).
 - Before writing anything, print every decision and its reason: the target,
   each candidate's figures, the back translation outcome, the books chosen,
   the experiments, and any copy into `MT/scripture`. Then ask
-  `Create these experiments? [Y/n]`.
+  `Create these experiments? [Y/n]`. In particular:
+  - the training total is the one left after the drafted books are removed;
+  - declared complete books with no parallel verses are named, so the team can
+    see what is missing;
+  - planned books that can't be drafted for this target are named, for example
+    a deuterocanonical book when the target has none;
+  - each skipped experiment is named, with the reason.
 - After writing, print the run commands and ask `Run them now? [Y/n]`.
   Experiments without books to draft run without `--translate`.
 
 In this plan "warn" and "log" mean the same thing: print to the terminal.
+
+## Issues with data
+
+The rules above assume the files they read are sound. When they aren't:
+
+- **A missing or unreadable source or back-translation extract** skips only the
+  experiments that use it, with a message naming the file. The other
+  experiments go ahead.
+- **A missing or unreadable target extract** stops the run with a clear error,
+  since every experiment needs it.
+- **An extract whose line count differs from `vref.txt`** counts as unreadable:
+  its lines can't be matched to verses, so counting it would give wrong totals.
+- **No other gospel in the drafting source** under the gospel exception (rule 5,
+  step 2) means no experiment for that source, as for too little data.
 
 ## Out of scope
 
