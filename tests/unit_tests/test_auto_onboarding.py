@@ -1,5 +1,6 @@
 import os
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -7,15 +8,18 @@ import pandas as pd
 import pytest
 import yaml
 from machine.corpora import FileParatextProjectSettingsParser
+from machine.scripture import ALL_BOOK_IDS
 
 from silnlp.common.auto_onboarding import (
     AutoOnboarding,
     BackTranslationCheck,
+    BookThresholds,
     Confirmer,
     DataPaths,
-    DraftBookChooser,
+    ExperimentBooks,
     ExperimentChooser,
     ExperimentRunner,
+    ExtractFiles,
     OnboardingError,
     OnboardingRequest,
     ParatextBooks,
@@ -25,7 +29,7 @@ from silnlp.common.auto_onboarding import (
     SourcePreferencesFile,
     Thresholds,
 )
-from silnlp.common.create_onboarding_experiments import Candidate
+from silnlp.common.create_onboarding_experiments import NT_CANON, OT_CANON, Candidate, load_vref_books
 
 ASSETS_DIR = Path(__file__).parent.parent.parent / "silnlp" / "assets"
 
@@ -74,8 +78,19 @@ def chosen_names(experiments) -> List[List[str]]:
     return [[source.name for source in experiment] for experiment in experiments]
 
 
-def sign_up(draft_source: str = "SRCB", bt_project: Optional[str] = None, planned: Sequence[str] = ("MRK", "LUK")):
-    return SignUp(main_project="TRG", planned_books=list(planned), draft_source=draft_source, bt_project=bt_project)
+def sign_up(
+    draft_source: str = "SRCB",
+    bt_project: Optional[str] = None,
+    planned: Sequence[str] = ("MRK", "LUK"),
+    completed: Sequence[str] = (),
+):
+    return SignUp(
+        main_project="TRG",
+        planned_books=list(planned),
+        completed_books=list(completed),
+        draft_source=draft_source,
+        bt_project=bt_project,
+    )
 
 
 class RequestFixture:
@@ -97,6 +112,7 @@ class RequestFixture:
         self.config: dict = {
             "main_project": "TRG",
             "planned_books": ["41", "42"],
+            "completed_books": ["40", "43"],
             "draft_source": "SRCB",
             "bt_project": "BTX",
         }
@@ -129,10 +145,10 @@ class RequestFixture:
             for stem, (parallel, alignment, script) in self.stats.items()
         ]
         pd.DataFrame(rows).to_csv(self.folder / "corpus-stats.csv", index=False)
-        counts = [{"file": "complete", **COMPLETE}, {"file": self.target_stem, **self.target_books}]
-        counts += [{"file": stem, **COMPLETE} for stem in self.stats]
-        pd.DataFrame(counts).fillna(0).to_csv(self.folder / "verse_counts.csv", index=False)
-        (self.paths.scripture_dir / f"{self.target_stem}.txt").write_text("target\n", encoding="utf-8")
+        vref_books = load_vref_books(ASSETS_DIR)
+        make_extract(self.paths.scripture_dir / f"{self.target_stem}.txt", vref_books, self.target_books)
+        for stem in self.stats:
+            make_extract(self.paths.scripture_dir / f"{stem}.txt", vref_books, COMPLETE)
         for name, books in self.projects.items():
             make_paratext_project(self.paths.projects_dir, name, books)
         return self
@@ -142,6 +158,10 @@ class RequestFixture:
         confirmer = ScriptedConfirmer(*answers)
         planned = AutoOnboarding(self.paths, confirmer, runner).run(self.folder)
         return planned, runner, confirmer
+
+
+def make_extract(path: Path, vref_books: Sequence[str], books) -> None:
+    path.write_text("".join("verse\n" if book in books else "\n" for book in vref_books), encoding="utf-8")
 
 
 def make_paratext_project(projects_dir: Path, name: str, books: Sequence[str]) -> None:
@@ -400,66 +420,6 @@ def test_next_index_follows_the_highest_existing_folder(request_fixture: Request
 # Books to draft
 
 
-def test_two_planned_books_drafted_in_ordered_list_order():
-    chooser = DraftBookChooser(["GEN", "MRK"], set(), KnownBooks({"SRC": ALL_BOOKS}))
-    assert chooser.choose("SRC", {"MAT"}) == ["MRK", "GEN"]
-
-
-def test_planned_training_book_is_skipped():
-    chooser = DraftBookChooser(["MAT", "MRK", "LUK"], set(), KnownBooks({"SRC": ALL_BOOKS}))
-    assert chooser.choose("SRC", {"MAT"}) == ["MRK", "LUK"]
-
-
-def test_next_planned_book_replaces_one_the_source_lacks():
-    chooser = DraftBookChooser(["MRK", "LUK", "JHN"], set(), KnownBooks({"SRC": ["LUK", "JHN"]}))
-    assert chooser.choose("SRC", set()) == ["LUK", "JHN"]
-
-
-def test_ordered_list_supplies_a_replacement_when_no_planned_book_is_left():
-    chooser = DraftBookChooser(["MRK", "LUK"], set(), KnownBooks({"SRC": ["MAT", "LUK"]}))
-    assert chooser.choose("SRC", set()) == ["MAT", "LUK"]
-
-
-def test_every_planned_book_used_for_training_drafts_the_first_eligible_books():
-    chooser = DraftBookChooser(["MAT"], set(), KnownBooks({"SRC": ALL_BOOKS}))
-    assert chooser.choose("SRC", {"MAT"}) == ["MRK", "LUK"]
-
-
-def test_single_planned_book_is_drafted_with_the_next_book_in_the_list():
-    chooser = DraftBookChooser(["JHN"], set(), KnownBooks({"SRC": ALL_BOOKS}))
-    assert chooser.choose("SRC", {"MAT"}) == ["MRK", "JHN"]
-
-
-def test_ot_only_planned_books_skip_the_nt():
-    chooser = DraftBookChooser(["PSA"], set(), KnownBooks({"SRC": ALL_BOOKS + ["PSA"]}))
-    assert chooser.choose("SRC", set()) == ["RUT", "PSA"]
-
-
-def test_ot_only_planned_books_never_fall_back_to_the_nt():
-    chooser = DraftBookChooser(["RUT"], set(), KnownBooks({"SRC": ["RUT", "MAT"]}))
-    assert chooser.choose("SRC", {"RUT"}) == []
-
-
-def test_planned_books_in_both_testaments_draft_in_list_order():
-    chooser = DraftBookChooser(["PSA", "GEN", "LUK"], set(), KnownBooks({"SRC": ALL_BOOKS + ["PSA"]}))
-    assert chooser.choose("SRC", set()) == ["LUK", "GEN"]
-
-
-def test_no_eligible_book_drafts_nothing():
-    chooser = DraftBookChooser(["MRK"], set(), KnownBooks({"SRC": []}))
-    assert chooser.choose("SRC", set()) == []
-
-
-def test_deuterocanon_skipped_when_target_has_none():
-    chooser = DraftBookChooser(["TOB"], set(), KnownBooks({"SRC": ["TOB"]}))
-    assert chooser.choose("SRC", set()) == []
-
-
-def test_deuterocanon_considered_when_target_has_one():
-    chooser = DraftBookChooser(["TOB"], {"JDT"}, KnownBooks({"SRC": ["TOB"]}))
-    assert chooser.choose("SRC", set()) == ["TOB"]
-
-
 def test_no_eligible_book_runs_without_translate(request_fixture: RequestFixture):
     request_fixture.projects = {}
     request_fixture.config["bt_project"] = None
@@ -510,11 +470,12 @@ def test_iso_clash_copies_the_target_extract(request_fixture: RequestFixture):
 def test_iso_clash_reuses_an_existing_copy(request_fixture: RequestFixture):
     request_fixture.write()
     copy = request_fixture.paths.scripture_dir / "tai-TRG.txt"
-    copy.write_text("copy\n", encoding="utf-8")
+    make_extract(copy, load_vref_books(ASSETS_DIR), ["MAT", "JHN"])
+    copied = copy.read_text(encoding="utf-8")
     old = time.time() - 100
     os.utime(request_fixture.paths.scripture_dir / "tpi-TRG.txt", (old, old))
     planned, _, _ = request_fixture.run(True, False)
-    assert copy.read_text(encoding="utf-8") == "copy\n"
+    assert copy.read_text(encoding="utf-8") == copied
     assert planned[0].config["data"]["corpus_pairs"][0]["trg"] == "tai-TRG"
 
 
@@ -528,7 +489,7 @@ def test_outdated_copy_renamed_to_1_then_2(request_fixture: RequestFixture):
         os.utime(copy, (old, old))
         request_fixture.run(True, False)
         assert (scripture / expected).read_text(encoding="utf-8") == "old copy\n"
-        assert copy.read_text(encoding="utf-8") == "target\n"
+        assert copy.read_text(encoding="utf-8") == (scripture / "tpi-TRG.txt").read_text(encoding="utf-8")
 
 
 # Close sources
@@ -649,3 +610,300 @@ def test_missing_preferred_sources_file_means_no_preferences(tmp_path: Path):
     preferences = SourcePreferencesFile(tmp_path).load()
     assert preferences.later_editions("PDV") == []
     assert not preferences.is_avoided("ESVUS16")
+
+
+# Training and drafting books
+
+
+@pytest.fixture(scope="module")
+def complete_counts() -> Dict[str, int]:
+    return dict(Counter(load_vref_books(ASSETS_DIR)))
+
+
+def books_for(
+    complete_counts: Dict[str, int],
+    planned: Sequence[str],
+    completed: Sequence[str],
+    target_books: Sequence[str] = (),
+    source_books: Sequence[str] = tuple(ALL_BOOK_IDS),
+) -> ExperimentBooks:
+    paratext = KnownBooks({"SRC": source_books})
+    return ExperimentBooks(
+        sign_up(planned=planned, completed=completed), set(target_books), complete_counts, paratext, BookThresholds()
+    )
+
+
+def full(complete_counts: Dict[str, int], books: Sequence[str]) -> Dict[str, int]:
+    return {book: complete_counts[book] for book in books}
+
+
+def canon(name: str) -> List[str]:
+    return {"NT": NT_CANON, "OT": OT_CANON, "EPISTLES": ["ROM", "1CO", "2CO", "GAL", "EPH", "PHP"]}[name]
+
+
+def test_example_a_plenty_of_declared_nt_drafts_two_planned_ot_books(complete_counts):
+    chooser = books_for(complete_counts, ["GEN", "EXO"], canon("NT"))
+    choice = chooser.choose("SRC", full(complete_counts, canon("NT")))
+    assert choice.training == canon("NT") and choice.drafts == ["GEN", "EXO"]
+
+
+def test_example_b_one_gospel_drafts_the_planned_gospel_only(complete_counts):
+    chooser = books_for(complete_counts, ["MRK"], ["MAT"])
+    choice = chooser.choose("SRC", full(complete_counts, ["MAT"]))
+    assert choice.training == ["MAT"] and choice.drafts == ["MRK"]
+
+
+def test_example_c_mark_alone_drafts_matthew(complete_counts):
+    chooser = books_for(complete_counts, ["MAT"], ["MRK"])
+    choice = chooser.choose("SRC", full(complete_counts, ["MRK"]))
+    assert choice.training == ["MRK"] and choice.drafts == ["MAT"]
+
+
+def test_example_d_unstarted_planned_book_drafted_with_the_first_nt_book(complete_counts):
+    chooser = books_for(complete_counts, ["GEN"], canon("EPISTLES"))
+    choice = chooser.choose("SRC", full(complete_counts, canon("EPISTLES")))
+    assert choice.training == canon("EPISTLES") and choice.drafts == ["MAT", "GEN"]
+
+
+def test_example_e_planned_book_kept_for_training_below_3500(complete_counts):
+    chooser = books_for(complete_counts, ["GEN"], canon("EPISTLES"))
+    choice = chooser.choose("SRC", full(complete_counts, canon("EPISTLES") + ["GEN"]))
+    assert "GEN" in choice.training and choice.drafts == ["MAT", "RUT"]
+
+
+def test_example_f_planned_book_removed_when_3500_remain(complete_counts):
+    declared = ["MAT", "MRK", "LUK", "JHN"]
+    chooser = books_for(complete_counts, ["RUT"], declared)
+    choice = chooser.choose("SRC", full(complete_counts, declared + ["ACT", "RUT"]))
+    assert choice.training == declared + ["ACT"] and choice.drafts == ["1JN", "RUT"]
+
+
+def test_example_g_declared_nt_but_only_matthew_present(complete_counts):
+    chooser = books_for(complete_counts, ["MRK"], canon("NT"))
+    choice = chooser.choose("SRC", full(complete_counts, ["MAT"]))
+    assert choice.training == ["MAT"] and choice.drafts == ["MRK"]
+
+
+def test_example_h_too_little_data_creates_no_experiment(complete_counts):
+    chooser = books_for(complete_counts, ["GEN"], ["RUT", "JON", "EST"])
+    choice = chooser.choose("SRC", full(complete_counts, ["RUT", "JON", "EST"]))
+    assert not choice.training
+
+
+def test_example_i_whole_bible_trains_on_declared_books_and_drafts_the_planned_one(complete_counts):
+    declared = ["GEN", "RUT", "JON"] + canon("NT")
+    chooser = books_for(complete_counts, ["EXO"], declared)
+    choice = chooser.choose("SRC", full(complete_counts, canon("OT") + canon("NT")))
+    assert set(choice.training) == set(declared) and choice.drafts == ["JOS", "EXO"]
+
+
+def test_book_on_both_lists_counts_as_planned(complete_counts):
+    chooser = books_for(complete_counts, ["GEN"], canon("NT") + ["GEN"])
+    choice = chooser.choose("SRC", full(complete_counts, canon("NT") + ["GEN"]))
+    assert "GEN" not in choice.training and "GEN" in choice.drafts
+
+
+def test_declared_books_without_data_add_nothing(complete_counts):
+    present = ["MAT", "MRK", "LUK", "JHN", "ACT"]
+    chooser = books_for(complete_counts, ["GEN"], canon("NT"))
+    choice = chooser.choose("SRC", full(complete_counts, present))
+    assert choice.training == present
+
+
+def test_empty_completed_books_uses_all_parallel_data(complete_counts):
+    chooser = books_for(complete_counts, ["GEN"], [])
+    choice = chooser.choose("SRC", full(complete_counts, canon("NT")))
+    assert choice.training == canon("NT")
+
+
+def test_gospel_at_90_percent_is_complete(complete_counts):
+    chooser = books_for(complete_counts, ["MRK"], ["MAT"])
+    choice = chooser.choose("SRC", {"MAT": 964})
+    assert choice.drafts == ["MRK"]
+
+
+def test_gospel_below_90_percent_is_not_complete(complete_counts):
+    chooser = books_for(complete_counts, ["MRK"], ["MAT"])
+    assert not chooser.choose("SRC", {"MAT": 963}).training
+
+
+def test_planned_gospel_preferred_to_list_order(complete_counts):
+    chooser = books_for(complete_counts, ["GEN", "JHN"], ["MAT"])
+    assert chooser.choose("SRC", full(complete_counts, ["MAT"])).drafts == ["JHN"]
+
+
+def test_gospel_exception_without_planned_gospel_takes_the_next_gospel(complete_counts):
+    chooser = books_for(complete_counts, ["GEN"], ["MAT"])
+    assert chooser.choose("SRC", full(complete_counts, ["MAT"])).drafts == ["MRK"]
+
+
+def test_third_planned_book_not_drafted(complete_counts):
+    chooser = books_for(complete_counts, ["GEN", "EXO", "LEV"], canon("NT"))
+    assert chooser.choose("SRC", full(complete_counts, canon("NT"))).drafts == ["GEN", "EXO"]
+
+
+def test_planned_book_the_source_lacks_is_skipped(complete_counts):
+    source = [book for book in ALL_BOOK_IDS if book != "GEN"]
+    chooser = books_for(complete_counts, ["GEN", "EXO", "LEV"], canon("NT"), source_books=source)
+    assert chooser.choose("SRC", full(complete_counts, canon("NT"))).drafts == ["EXO", "LEV"]
+
+
+def test_deuterocanon_counts_as_ot_when_the_target_has_some(complete_counts):
+    chooser = books_for(complete_counts, [], canon("OT"), target_books=["JDT"])
+    assert chooser.choose("SRC", full(complete_counts, canon("OT"))).drafts == ["TOB", "JDT"]
+
+
+def test_deuterocanon_skipped_when_the_target_has_none(complete_counts):
+    chooser = books_for(complete_counts, [], canon("OT"))
+    assert chooser.choose("SRC", full(complete_counts, canon("OT"))).drafts == ["MAT", "MRK"]
+
+
+def test_parallel_verses_need_both_extracts(tmp_path: Path):
+    (tmp_path / "trg.txt").write_text("a\n\nc\n", encoding="utf-8")
+    (tmp_path / "src.txt").write_text("a\nb\n\n", encoding="utf-8")
+    assert ExtractFiles(tmp_path, ["MAT", "MAT", "MRK"]).parallel_verses("trg", "src") == {"MAT": 1}
+
+
+def test_missing_extract_stops(tmp_path: Path):
+    with pytest.raises(OnboardingError, match="No extract file"):
+        ExtractFiles(tmp_path, ["MAT"]).parallel_verses("trg", "src")
+
+
+def test_gospel_exception_without_another_gospel_creates_no_experiment(complete_counts):
+    chooser = books_for(complete_counts, ["GEN"], ["MRK"], source_books=["MRK", "GEN"])
+    assert not chooser.choose("SRC", full(complete_counts, ["MRK"])).training
+
+
+def test_unknown_completed_book_error_names_completed_books(request_fixture: RequestFixture):
+    request_fixture.config["completed_books"] = ["XYZ"]
+    request_fixture.write()
+    request = OnboardingRequest(request_fixture.folder, request_fixture.paths.experiments_dir)
+    with pytest.raises(OnboardingError, match="in completed_books"):
+        request.sign_up()
+
+
+def test_missing_source_extract_skips_only_that_experiment(request_fixture: RequestFixture):
+    request_fixture.config["bt_project"] = None
+    request_fixture.write()
+    (request_fixture.paths.scripture_dir / "en-SRCA.txt").unlink()
+    planned, _, _ = request_fixture.run(False)
+    assert source_names(planned) == [["SRCB"]]
+
+
+def test_earlier_copy_stands_in_for_a_missing_target_extract(request_fixture: RequestFixture):
+    request_fixture.config["bt_project"] = None
+    request_fixture.write()
+    scripture = request_fixture.paths.scripture_dir
+    (scripture / "tpi-TRG.txt").rename(scripture / "tai-TRG.txt")
+    planned, _, _ = request_fixture.run(False)
+    assert [e.config["data"]["corpus_pairs"][0]["trg"] for e in planned] == ["tai-TRG", "tai-TRG"]
+    assert all(e.config["data"]["corpus_pairs"][0]["corpus_books"] == "MAT;JHN" for e in planned)
+
+
+def test_pair_whose_back_translation_has_no_extract_is_skipped(request_fixture: RequestFixture):
+    request_fixture.write()
+    (request_fixture.paths.scripture_dir / "en-BTX.txt").unlink()
+    planned, _, _ = request_fixture.run(False)
+    assert source_names(planned) == [["SRCB"], ["SRCA"]]
+
+
+def test_short_extract_stops(tmp_path: Path):
+    (tmp_path / "trg.txt").write_text("a\n", encoding="utf-8")
+    (tmp_path / "src.txt").write_text("a\nb\n", encoding="utf-8")
+    with pytest.raises(OnboardingError, match="has 1 lines"):
+        ExtractFiles(tmp_path, ["MAT", "MAT"]).parallel_verses("trg", "src")
+
+
+def test_non_scripture_book_id_stops(request_fixture: RequestFixture):
+    request_fixture.config["completed_books"] = ["FRT"]
+    request_fixture.write()
+    request = OnboardingRequest(request_fixture.folder, request_fixture.paths.experiments_dir)
+    with pytest.raises(OnboardingError, match="'FRT' in completed_books"):
+        request.sign_up()
+
+
+def test_reused_copy_is_the_extract_counted(request_fixture: RequestFixture):
+    request_fixture.config["bt_project"] = None
+    request_fixture.write()
+    scripture = request_fixture.paths.scripture_dir
+    make_extract(scripture / "tai-TRG.txt", load_vref_books(ASSETS_DIR), ["MAT"])
+    old = time.time() - 100
+    os.utime(scripture / "tpi-TRG.txt", (old, old))
+    planned, _, _ = request_fixture.run(False)
+    assert all(e.config["data"]["corpus_pairs"][0]["trg"] == "tai-TRG" for e in planned)
+    assert all(e.config["data"]["corpus_pairs"][0]["corpus_books"] == "MAT" for e in planned)
+
+
+def test_malformed_back_translation_extract_skips_only_its_pairs(request_fixture: RequestFixture):
+    request_fixture.write()
+    (request_fixture.paths.scripture_dir / "en-BTX.txt").write_text("short\n", encoding="utf-8")
+    planned, _, _ = request_fixture.run(False)
+    assert source_names(planned) == [["SRCB"], ["SRCA"]]
+
+
+def test_skipped_experiment_does_not_force_an_iso_copy(request_fixture: RequestFixture):
+    request_fixture.stats["tpi-SRCD"] = (5000, 0.5, "Latn")
+    request_fixture.config["bt_project"] = None
+    request_fixture.write()
+    (request_fixture.paths.scripture_dir / "tpi-SRCD.txt").unlink()
+    planned, _, _ = request_fixture.run(False)
+    assert source_names(planned) == [["SRCB"]]
+    assert planned[0].config["data"]["corpus_pairs"][0]["trg"] == "tpi-TRG"
+
+
+def test_undraftable_planned_book_is_reported(complete_counts, capsys):
+    books_for(complete_counts, ["TOB", "GEN"], canon("NT"))
+    assert "TOB can't be drafted" in capsys.readouterr().out
+
+
+def test_reason_reports_the_training_left_after_drafting(complete_counts):
+    declared = ["MAT", "MRK", "LUK", "JHN"]
+    chooser = books_for(complete_counts, ["RUT"], declared)
+    choice = chooser.choose("SRC", full(complete_counts, declared + ["ACT", "RUT"]))
+    assert choice.reason.endswith("training on 4785")
+
+
+def test_extract_bom_is_ignored(tmp_path: Path):
+    (tmp_path / "trg.txt").write_text("\ufeff\nb\n", encoding="utf-8")
+    (tmp_path / "src.txt").write_text("a\nb\n", encoding="utf-8")
+    assert ExtractFiles(tmp_path, ["MAT", "MRK"]).parallel_verses("trg", "src") == {"MRK": 1}
+
+
+def test_undecodable_extract_skips_only_its_experiment(request_fixture: RequestFixture):
+    request_fixture.config["bt_project"] = None
+    request_fixture.write()
+    (request_fixture.paths.scripture_dir / "en-SRCA.txt").write_bytes(b"\xff\xfe\x00bad")
+    planned, _, _ = request_fixture.run(False)
+    assert source_names(planned) == [["SRCB"]]
+
+
+def test_unreadable_target_extract_is_a_clean_error(request_fixture: RequestFixture):
+    request_fixture.write()
+    (request_fixture.paths.scripture_dir / "tpi-TRG.txt").write_bytes(b"\xff\xfe\x00bad")
+    with pytest.raises(OnboardingError, match="Could not read"):
+        request_fixture.run(False)
+
+
+def test_unknown_isos_are_not_the_same_language():
+    chooser = chooser_with()
+    bt = candidate("BTX", iso="qq", parallel=800, alignment=0.6)
+    experiments = chooser.choose([candidate("SRCB", iso="zz"), bt], sign_up("SRCB", "BTX"), bt)
+    assert chosen_names(experiments) == [["SRCB"]]
+
+
+def test_declared_books_without_data_are_named(complete_counts, capsys):
+    chooser = books_for(complete_counts, ["MRK"], ["MAT", "LUK", "JHN"])
+    chooser.choose("SRC", full(complete_counts, ["MAT"]))
+    assert "no parallel verses: LUK;JHN" in capsys.readouterr().out
+
+
+def test_nothing_chosen_prints_no_copy_decision(request_fixture: RequestFixture, capsys):
+    request_fixture.config["bt_project"] = None
+    request_fixture.write()
+    scripture = request_fixture.paths.scripture_dir
+    for stem in request_fixture.stats:
+        (scripture / f"{stem}.txt").unlink()
+    make_extract(scripture / "tai-TRG.txt", load_vref_books(ASSETS_DIR), ["MAT", "JHN"])
+    planned, _, _ = request_fixture.run()
+    out = capsys.readouterr().out
+    assert planned == [] and "synthetic iso code" not in out and "Nothing created." in out

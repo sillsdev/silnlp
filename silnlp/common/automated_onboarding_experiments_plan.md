@@ -33,7 +33,9 @@ All read from `<folder>`:
 |---|---|
 | `onboarding_config.yml` | `main_project`, `planned_books`, `completed_books`, `draft_source`, `bt_project` |
 | `corpus-stats.csv` (or `alignments/corpus-stats.csv`) | candidate sources: stems, parallel counts, alignment scores |
-| `verse_counts.csv` (falling back to `MT/experiments/verse_counts/verse_counts.csv`) | which books the target contains |
+
+Book data comes from the extracts in `MT/scripture`: the target's and each
+source's. `verse_counts.csv` is not used.
 
 - `planned_books` and `draft_source` are required. If either is missing or
   empty, or a required file is missing, the script stops and says what is
@@ -209,7 +211,9 @@ planned books included, to train on as much data as possible.
 **2. Gospel exception.** If the training books give fewer than 1500 parallel
 verses but include a complete gospel, draft one other gospel and nothing else:
 the first planned gospel the source contains, otherwise the first available
-gospel in list order (MAT, MRK, LUK, JHN). The training books stay as they are.
+gospel in list order (MAT, MRK, LUK, JHN). The training books stay as they are,
+except that the drafted gospel is taken out if it had parallel verses. If no
+other gospel can be drafted, create no experiment, as in step 3.
 
 **3. Too little data.** Otherwise, if the training books give fewer than 1500
 parallel verses, create no experiment and say why. The team should look at their
@@ -300,8 +304,9 @@ Follow the code design rules in `AGENTS.md`:
 A likely split:
 - `OnboardingRequest` reads and validates the folder's files.
 - `BackTranslationCheck` decides whether `bt_project` is usable.
-- `ExperimentChooser` applies rules 1 and 3.
-- `DraftBookChooser` applies rules 4 and 5.
+- `ExperimentChooser` applies rules 1, 3 and 3a.
+- `ExtractFiles` counts parallel verses.
+- `ExperimentBooks` applies rules 4 and 5.
 - `TargetExtractCopy` handles rule 6.
 - `run()` connects them and holds the two prompts.
 

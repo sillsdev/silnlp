@@ -13,18 +13,17 @@ import re
 import shutil
 import subprocess
 import sys
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import AbstractSet, Dict, List, Optional, Sequence, Tuple
 
-import pandas as pd
 import yaml
 from machine.corpora import FileParatextProjectSettingsParser
-from machine.scripture import ALL_BOOK_IDS, book_id_to_number, book_number_to_id, is_nt, is_ot
+from machine.scripture import ALL_BOOK_IDS, book_id_to_number, book_number_to_id, is_canonical, is_nt
 
 from .create_onboarding_experiments import (
     EXPERIMENT_ARGS,
-    BookCoverage,
     Candidate,
     MainProject,
     build_config,
@@ -34,7 +33,7 @@ from .create_onboarding_experiments import (
     folder_name,
     load_language_entries,
     load_name_overrides,
-    load_verse_counts,
+    load_vref_books,
     lookup_language,
     old_name_folder_warning,
     parse_corpus_stats,
@@ -53,6 +52,7 @@ class OnboardingError(Exception):
 class SignUp:
     main_project: str
     planned_books: List[str]
+    completed_books: List[str]
     draft_source: str
     bt_project: Optional[str]
 
@@ -94,7 +94,10 @@ class OnboardingRequest:
         bt_project = onboarding.get("bt_project")
         return SignUp(
             main_project=str(onboarding["main_project"]),
-            planned_books=[self._book_id(book, path) for book in onboarding["planned_books"]],
+            planned_books=[self._book_id(book, "planned_books", path) for book in onboarding["planned_books"]],
+            completed_books=[
+                self._book_id(book, "completed_books", path) for book in onboarding.get("completed_books") or []
+            ],
             draft_source=str(onboarding["draft_source"]),
             bt_project=str(bt_project) if bt_project else None,
         )
@@ -105,17 +108,11 @@ class OnboardingRequest:
                 return parse_corpus_stats(path, target=main_project)
         raise OnboardingError(f"No corpus-stats.csv in {self._folder} or its alignments folder.")
 
-    def verse_counts(self) -> pd.DataFrame:
-        try:
-            return load_verse_counts(self._folder, self._experiments_dir)
-        except FileNotFoundError as e:
-            raise OnboardingError(str(e)) from e
-
-    def _book_id(self, book: object, path: Path) -> str:
+    def _book_id(self, book: object, key: str, path: Path) -> str:
         text = str(book).strip().upper()
         book_id = book_number_to_id(int(text)) if text.isdigit() else text
-        if book_id_to_number(book_id) == 0:
-            raise OnboardingError(f"'{book}' in planned_books of {path} is not a book.")
+        if book_id_to_number(book_id) == 0 or not is_canonical(book_id):
+            raise OnboardingError(f"'{book}' in {key} of {path} is not a book.")
         return book_id
 
 
@@ -270,7 +267,7 @@ class ExperimentChooser:
         return abs(candidate.alignment - other.alignment) <= self._close
 
     def _same_language(self, a: Candidate, b: Candidate) -> bool:
-        return to_iso3(a.iso) == to_iso3(b.iso)
+        return (to_iso3(a.iso) or a.iso) == (to_iso3(b.iso) or b.iso)
 
     def _pair(self, source: Optional[Candidate], bt: Optional[Candidate]) -> Optional[List[Candidate]]:
         if source is None or bt is None or not self._same_language(source, bt):
@@ -278,26 +275,50 @@ class ExperimentChooser:
         return [source, bt]
 
 
-class TrainingBooks:
-    def __init__(self, coverage: BookCoverage, completeness: float = 0.98):
-        self._coverage = coverage
-        self._completeness = completeness
+class ExtractFiles:
+    def __init__(self, scripture_dir: Path, vref_books: Sequence[str]):
+        self._scripture_dir = scripture_dir
+        self._vref_books = vref_books
+        self._present: Dict[str, List[bool]] = {}
 
-    def books(self, stems: Sequence[str]) -> List[str]:
-        complete = self._coverage.complete()
-        counts = []
-        for stem in stems:
-            stem_counts = self._coverage.counts(stem)
-            if stem_counts is None:
-                raise OnboardingError(f"No verse counts or extract file for '{stem}'.")
-            counts.append(stem_counts)
-        canon = [book for book in complete if is_ot(book_id_to_number(book)) or is_nt(book_id_to_number(book))]
-        canon.sort(key=book_id_to_number)
-        return [
-            book
-            for book in canon
-            if complete[book] > 0 and all(c.get(book, 0) >= self._completeness * complete[book] for c in counts)
-        ]
+    def parallel_verses(self, target_stem: str, source_stem: str) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for book, in_target, in_source in zip(self._vref_books, self._lines(target_stem), self._lines(source_stem)):
+            if in_target and in_source:
+                counts[book] = counts.get(book, 0) + 1
+        return counts
+
+    def problem(self, stem: str) -> Optional[str]:
+        try:
+            self._lines(stem)
+        except OnboardingError as e:
+            return str(e)
+        return None
+
+    def books_present(self, stem: str) -> AbstractSet[str]:
+        return {book for book, present in zip(self._vref_books, self._lines(stem)) if present}
+
+    def _lines(self, stem: str) -> List[bool]:
+        if stem not in self._present:
+            path = self._scripture_dir / f"{stem}.txt"
+            if not path.is_file():
+                raise OnboardingError(f"No extract file {path}.")
+            try:
+                with open(path, "r", encoding="utf-8-sig") as file:
+                    present = [bool(line.strip()) for line in file]
+            except (OSError, UnicodeDecodeError) as e:
+                raise OnboardingError(f"Could not read {path}: {e}") from e
+            if len(present) != len(self._vref_books):
+                raise OnboardingError(f"{path} has {len(present)} lines, but vref.txt has {len(self._vref_books)}.")
+            self._present[stem] = present
+        return self._present[stem]
+
+
+@dataclass
+class BookChoice:
+    training: List[str]
+    drafts: List[str]
+    reason: str
 
 
 class ParatextBooks:
@@ -322,101 +343,215 @@ class ParatextBooks:
         return frozenset(book for book in ALL_BOOK_IDS if (project_dir / settings.get_book_file_name(book)).is_file())
 
 
-class DraftBookChooser:
-    def __init__(self, planned_books: Sequence[str], target_books: AbstractSet[str], paratext: ParatextBooks):
-        nt = "MAT MRK LUK JHN ACT 1JN 2JN 3JN 1TH 2TH REV 1CO 2TI GAL 1PE PHP ROM TIT EPH PHM JAS 2PE JUD 1TI COL"
-        nt += " HEB 2CO"
-        ot = "RUT JOS EST JON GEN EXO LEV NUM DEU JDG 1SA 2SA 1KI 2KI 1CH 2CH EZR NEH ISA JER LAM EZK DAN HOS JOL"
-        ot += " AMO OBA MIC NAM HAB ZEP HAG ZEC MAL JOB ECC SNG PRO PSA"
+@dataclass
+class BookThresholds:
+    declared_enough: int = 4000
+    left_after_drafting: int = 3500
+    minimum: int = 1500
+    complete_gospel: float = 0.9
+
+
+class ExperimentBooks:
+    def __init__(
+        self,
+        sign_up: SignUp,
+        target_books: AbstractSet[str],
+        complete_counts: Dict[str, int],
+        paratext: ParatextBooks,
+        thresholds: BookThresholds,
+    ):
+        nt = (
+            "MAT MRK LUK JHN ACT 1JN 2JN 3JN 1TH 2TH REV 1CO 2TI GAL 1PE PHP ROM TIT EPH PHM JAS 2PE JUD 1TI COL"
+            " HEB 2CO"
+        ).split()
+        ot = (
+            "RUT JOS EST JON GEN EXO LEV NUM DEU JDG 1SA 2SA 1KI 2KI 1CH 2CH EZR NEH ISA JER LAM EZK DAN HOS JOL"
+            " AMO OBA MIC NAM HAB ZEP HAG ZEC MAL JOB ECC SNG PRO PSA"
+        ).split()
         deuterocanon = "TOB JDT ESG WIS SIR BAR LJE S3Y SUS BEL 1MA 2MA 3MA 4MA 1ES 2ES MAN PS2 ODA PSS EZA JUB ENO"
-        self._ordered = ot.split()
-        # A team planning only OT books is not offered NT drafts.
-        if set(planned_books) & set(nt.split()):
-            self._ordered = nt.split() + self._ordered
+        self._ordered = nt + ot
         # Deuterocanonical books are drafted only for a team that has already translated some.
         if target_books & set(deuterocanon.split()):
             self._ordered += deuterocanon.split()
-        self._planned = set(planned_books)
+        self._gospels = ["MAT", "MRK", "LUK", "JHN"]
+        planned = set(sign_up.planned_books)
+        self._planned = [book for book in self._ordered if book in planned]
+        ignored = [book for book in sign_up.planned_books if book not in self._ordered]
+        if ignored:
+            print(f"Warning: planned book(s) {';'.join(ignored)} can't be drafted for this target; ignoring them.")
+        self._declared = set(sign_up.completed_books) - set(sign_up.planned_books)
+        self._complete_counts = complete_counts
         self._paratext = paratext
+        self._thresholds = thresholds
 
-    def choose(self, drafting_project: str, training_books: AbstractSet[str]) -> List[str]:
-        eligible = [
-            book for book in self._ordered if book not in training_books and self._paratext.has(drafting_project, book)
-        ]
-        planned = [book for book in eligible if book in self._planned][:2]
-        others = [book for book in eligible if book not in planned]
-        return sorted(planned + others[: 2 - len(planned)], key=self._ordered.index)
+    def choose(self, drafting_project: str, parallel: Dict[str, int]) -> BookChoice:
+        limits = self._thresholds
+        declared = {book for book in self._declared if parallel.get(book, 0) > 0}
+        empty = self._canonical(self._declared - declared)
+        if empty:
+            print(f"  Declared complete but with no parallel verses: {';'.join(empty)}")
+        declared_total = self._total(declared, parallel)
+        if declared_total >= limits.declared_enough:
+            training = declared
+            source = f"the declared books give {declared_total} parallel verses"
+        else:
+            training = {book for book, count in parallel.items() if count > 0}
+            source = f"the declared books give only {declared_total} parallel verses, so all parallel data is used"
+        training_total = self._total(training, parallel)
+
+        if training_total < limits.minimum:
+            complete_gospels = [g for g in self._gospels if g in training and self._is_complete(g, parallel)]
+            short = f"{source}; {training_total} is fewer than {limits.minimum}"
+            if not complete_gospels:
+                return BookChoice([], [], f"{short} and there is no complete gospel")
+            gospel = self._other_gospel(drafting_project, training, complete_gospels)
+            if gospel is None:
+                return BookChoice([], [], f"{short} and {drafting_project} has no other gospel to draft from")
+            training.discard(gospel)
+            reason = f"{short}, so one other gospel is drafted ({self._total(training, parallel)} training verses)"
+            return BookChoice(self._canonical(training), [gospel], reason)
+
+        drafts: List[str] = []
+        for book in self._planned:
+            if len(drafts) == 2:
+                break
+            if not self._paratext.has(drafting_project, book):
+                continue
+            if book in training:
+                if training_total - parallel[book] < limits.left_after_drafting:
+                    continue
+                training.discard(book)
+                training_total -= parallel[book]
+            drafts.append(book)
+
+        testaments = {self._testament(book) for book in training}
+        while len(drafts) < 2:
+            second = self._second_book(drafting_project, training, drafts, testaments)
+            if second is None:
+                break
+            drafts.append(second)
+        reason = f"{source}; training on {training_total}"
+        return BookChoice(self._canonical(training), sorted(drafts, key=self._ordered.index), reason)
+
+    def _other_gospel(self, project: str, training: AbstractSet[str], complete: Sequence[str]) -> Optional[str]:
+        planned = [g for g in self._planned if g in self._gospels and g not in complete]
+        others = [g for g in self._gospels if g not in training]
+        return next((g for g in planned + others if self._paratext.has(project, g)), None)
+
+    def _second_book(
+        self, project: str, training: AbstractSet[str], drafts: Sequence[str], testaments: AbstractSet[str]
+    ) -> Optional[str]:
+        drafted = {self._testament(book) for book in drafts}
+        if len(testaments) == 2:
+            order = [t for t in ("NT", "OT") if t not in drafted] + [t for t in ("NT", "OT") if t in drafted]
+        else:
+            (only,) = testaments
+            order = [only, "OT" if only == "NT" else "NT"]
+        for testament in order:
+            book = next(
+                (
+                    b
+                    for b in self._ordered
+                    if self._testament(b) == testament
+                    and b not in training
+                    and b not in drafts
+                    and self._paratext.has(project, b)
+                ),
+                None,
+            )
+            if book is not None:
+                return book
+        return None
+
+    def _is_complete(self, gospel: str, parallel: Dict[str, int]) -> bool:
+        full = self._complete_counts.get(gospel, 0)
+        return full > 0 and parallel.get(gospel, 0) >= self._thresholds.complete_gospel * full
+
+    def _testament(self, book: str) -> str:
+        return "NT" if is_nt(book_id_to_number(book)) else "OT"
+
+    def _total(self, books: AbstractSet[str], parallel: Dict[str, int]) -> int:
+        return sum(parallel.get(book, 0) for book in books)
+
+    def _canonical(self, books: AbstractSet[str]) -> List[str]:
+        return sorted(books, key=book_id_to_number)
 
 
 class TargetExtractCopy:
-    def __init__(self, scripture_dir: Path, terms_dir: Path, real_isos: AbstractSet[str]):
+    def __init__(self, scripture_dir: Path, terms_dir: Path, real_isos: AbstractSet[str], main: MainProject):
         self._scripture_dir = scripture_dir
         self._terms_dir = terms_dir
         self._real_isos = real_isos
-        self._pending: Optional[Tuple[str, str]] = None
+        self._original = main
+        self._prior_iso = find_prior_copy(scripture_dir, main, real_isos)
+        self._copy_stem: Optional[str] = f"{self._prior_iso}-{main.name}" if self._prior_iso else None
+        original = self._path(main.stem)
+        prior = self._path(self._copy_stem) if self._copy_stem else None
+        # Decided once: an earlier copy is kept unless the original has been re-extracted since.
+        self._reuse_prior = (
+            prior is not None
+            and prior.is_file()
+            and not (original.is_file() and original.stat().st_mtime > prior.stat().st_mtime)
+        )
 
-    def apply(self, main: MainProject, sources: Sequence[Candidate]) -> MainProject:
-        clashing = sorted({c.name for c in sources if to_iso3(c.iso) == to_iso3(main.iso)})
-        prior_iso = find_prior_copy(self._scripture_dir, main, self._real_isos)
-        if not clashing and prior_iso is None:
+    def extract_to_read(self) -> str:
+        """The extract whose content the experiments' target will have once execute() has run."""
+        return self._copy_stem if self._reuse_prior and self._copy_stem else self._original.stem
+
+    def apply(self, sources: Sequence[Candidate]) -> MainProject:
+        main = self._original
+        target_iso = to_iso3(main.iso) or main.iso
+        clashing = sorted({c.name for c in sources if (to_iso3(c.iso) or c.iso) == target_iso})
+        if not clashing and self._prior_iso is None:
             return main
-        synthetic = prior_iso or synthesize_trg_iso(to_iso3(main.iso) or main.iso, self._real_isos)
+        synthetic = self._prior_iso or synthesize_trg_iso(target_iso, self._real_isos)
         new_stem = f"{synthetic}-{main.name}"
-        if not (self._scripture_dir / f"{main.stem}.txt").is_file() and not self._copy_path(new_stem).is_file():
-            raise OnboardingError(f"Neither {main.stem}.txt nor {new_stem}.txt is in {self._scripture_dir}.")
+        self._copy_stem = new_stem
+        original, copy = self._path(main.stem), self._path(new_stem)
         if clashing:
             print(
                 f"{', '.join(clashing)} share(s) iso code '{main.iso}' with the target; the target uses '{synthetic}'."
             )
         else:
             print(f"The target uses synthetic iso code '{synthetic}' from an earlier copy of its extract.")
-        self._pending = (main.stem, new_stem)
-        self._describe(main.stem, new_stem)
+        if self._reuse_prior:
+            print(f"  Reusing {copy} (a copy of {original}).")
+        elif copy.is_file():
+            print(
+                f"  {copy} is older than {original}: it will be renamed to {self._backup(new_stem)} and copied again."
+            )
+        else:
+            print(f"  Will copy {original} to {copy}; the original is kept.")
+        print("  Matching MT/terms renderings copies will be overwritten with the current ones.")
         return dataclasses.replace(main, iso=synthetic, stem=new_stem)
 
     def execute(self) -> None:
-        if self._pending is None:
+        if self._copy_stem is None:
             return
-        old_stem, new_stem = self._pending
-        old_path, new_path = self._scripture_dir / f"{old_stem}.txt", self._copy_path(new_stem)
-        if new_path.is_file() and self._is_outdated(old_path, new_path):
-            renamed = self._free_backup(new_stem)
-            new_path.rename(renamed)
-            print(f"Warning: renamed the outdated copy {new_path} to {renamed}.")
-        if not new_path.is_file():
-            shutil.copyfile(old_path, new_path)
-            print(f"Copied {old_path} to {new_path}.")
+        old_stem, new_stem = self._original.stem, self._copy_stem
+        original, copy = self._path(old_stem), self._path(new_stem)
+        if not self._reuse_prior:
+            if copy.is_file():
+                renamed = self._backup(new_stem)
+                copy.rename(renamed)
+                print(f"Warning: renamed the outdated copy {copy} to {renamed}.")
+            shutil.copyfile(original, copy)
+            print(f"Copied {original} to {copy}.")
         if self._terms_dir.is_dir():
             for path in sorted(self._terms_dir.glob(f"{old_stem}-*-renderings.txt")):
                 target = self._terms_dir / f"{new_stem}{path.name[len(old_stem):]}"
                 shutil.copyfile(path, target)
                 print(f"Copied {path} to {target}.")
-        self._pending = None
+        self._copy_stem = None
 
-    def _describe(self, old_stem: str, new_stem: str) -> None:
-        old_path, new_path = self._scripture_dir / f"{old_stem}.txt", self._copy_path(new_stem)
-        if not new_path.is_file():
-            print(f"  Will copy {old_path} to {new_path}; the original is kept.")
-        elif self._is_outdated(old_path, new_path):
-            print(
-                f"  {new_path} is older than {old_path}: it will be renamed to {self._free_backup(new_stem)}"
-                " and copied again."
-            )
-        else:
-            print(f"  Reusing {new_path} (a copy of {old_path}).")
-        print("  Matching MT/terms renderings copies will be overwritten with the current ones.")
-
-    def _copy_path(self, stem: str) -> Path:
+    def _path(self, stem: str) -> Path:
         return self._scripture_dir / f"{stem}.txt"
 
-    def _is_outdated(self, original: Path, copy: Path) -> bool:
-        return original.is_file() and original.stat().st_mtime > copy.stat().st_mtime
-
-    def _free_backup(self, stem: str) -> Path:
+    def _backup(self, stem: str) -> Path:
         index = 1
-        while (self._scripture_dir / f"{stem}_{index}.txt").is_file():
+        while self._path(f"{stem}_{index}").is_file():
             index += 1
-        return self._scripture_dir / f"{stem}_{index}.txt"
+        return self._path(f"{stem}_{index}")
 
 
 class Confirmer:
@@ -455,7 +590,6 @@ class AutoOnboarding:
         request = OnboardingRequest(folder, self._paths.experiments_dir)
         sign_up = request.sign_up()
         main, candidates = request.corpus_stats(sign_up.main_project)
-        verse_counts = request.verse_counts()
         lang_dir, language_entries = self._language_dir(main)
         print(f"Target: {main.name} ({main.stem}); planned books: {';'.join(sign_up.planned_books)}")
         print(f"Experiment location: {lang_dir}")
@@ -468,35 +602,56 @@ class AutoOnboarding:
         if not choices:
             return []
 
-        coverage = BookCoverage(verse_counts, self._paths.scripture_dir, self._paths.assets_dir)
-        target_books = {book for book, count in (coverage.counts(main.stem) or {}).items() if count > 0}
-        training = TrainingBooks(coverage)
-        drafts = DraftBookChooser(sign_up.planned_books, target_books, ParatextBooks(self._paths.projects_dir))
-        copier = TargetExtractCopy(
-            self._paths.scripture_dir, self._paths.terms_dir, {entry["isoCode"] for entry in language_entries}
+        try:
+            vref_books = load_vref_books(self._paths.assets_dir)
+        except FileNotFoundError as e:
+            raise OnboardingError(str(e)) from e
+        extracts = ExtractFiles(self._paths.scripture_dir, vref_books)
+        real_isos = {entry["isoCode"] for entry in language_entries}
+        copier = TargetExtractCopy(self._paths.scripture_dir, self._paths.terms_dir, real_isos, main)
+        target_stem = copier.extract_to_read()
+        books = ExperimentBooks(
+            sign_up,
+            extracts.books_present(target_stem),
+            dict(Counter(vref_books)),
+            ParatextBooks(self._paths.projects_dir),
+            BookThresholds(),
         )
-        counts_stem = main.stem
-        main = copier.apply(main, [source for sources in choices for source in sources])
 
-        planned: List[PlannedExperiment] = []
         print()
+        chosen: List[Tuple[str, List[Candidate], BookChoice]] = []
         for sources in choices:
             label = " + ".join(source.name for source in sources)
-            training_books = training.books([s.stem for s in sources] + [counts_stem])
-            if not training_books:
-                print(f"Skipped {label}: no book is complete in the target and every source.")
+            problems = [problem for problem in (extracts.problem(source.stem) for source in sources) if problem]
+            if problems:
+                print(f"Skipped {label}: {' '.join(problems)}")
                 continue
-            books = drafts.choose(sources[0].name, set(training_books))
-            config = build_config(sources, main, compact_canons(training_books))
-            translate_config = build_translate_config([sources[0].name], ";".join(books)) if books else None
+            choice = books.choose(sources[0].name, extracts.parallel_verses(target_stem, sources[0].stem))
+            if not choice.training:
+                print(f"Skipped {label}: {choice.reason}.")
+                continue
+            chosen.append((label, sources, choice))
+
+        if not chosen:
+            print("Nothing created.")
+            return []
+        main = copier.apply([source for _, sources, _ in chosen for source in sources])
+        planned: List[PlannedExperiment] = []
+        for label, sources, choice in chosen:
+            training_books = compact_canons(choice.training)
+            config = build_config(sources, main, training_books)
+            translate_config = (
+                build_translate_config([sources[0].name], ";".join(choice.drafts)) if choice.drafts else None
+            )
             prefix = "_".join([source.name for source in sources] + [main.iso])
             folder = lang_dir / f"{prefix}_{self._next_index(lang_dir, prefix)}"
             planned.append(PlannedExperiment(sources, folder, config, translate_config))
-            print(f"{label}: train on {compact_canons(training_books)}")
-            if books:
-                print(f"  draft {';'.join(books)} from {sources[0].name}")
+            print(f"{label}: {choice.reason}")
+            print(f"  train on {training_books}")
+            if choice.drafts:
+                print(f"  draft {';'.join(choice.drafts)} from {sources[0].name}")
             else:
-                print(f"  Warning: {sources[0].name} has no eligible book to draft; training only.")
+                print(f"  Warning: {sources[0].name} has no book available to draft; training only.")
             print(f"  in {folder}")
 
         if not planned or not self._confirmer.confirm("\nCreate these experiments?"):
