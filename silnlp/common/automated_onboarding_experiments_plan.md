@@ -31,9 +31,9 @@ All read from `<folder>`:
 
 | File | Used for |
 |---|---|
-| `onboarding_config.yml` | `main_project`, `planned_books`, `draft_source`, `bt_project` |
+| `onboarding_config.yml` | `main_project`, `planned_books`, `completed_books`, `draft_source`, `bt_project` |
 | `corpus-stats.csv` (or `alignments/corpus-stats.csv`) | candidate sources: stems, parallel counts, alignment scores |
-| `verse_counts.csv` (falling back to `MT/experiments/verse_counts/verse_counts.csv`) | how complete each book is in the target and the sources |
+| `verse_counts.csv` (falling back to `MT/experiments/verse_counts/verse_counts.csv`) | which books the target contains |
 
 - `planned_books` and `draft_source` are required. If either is missing or
   empty, or a required file is missing, the script stops and says what is
@@ -41,9 +41,9 @@ All read from `<folder>`:
   them to book IDs.
 - `bt_project` is optional. Missing, empty or null means the team has no
   written back translation.
-- `completed_books` and `ref_projects` are not used. Declared completed books
-  have proved unreliable, so completeness is always measured from
-  `verse_counts.csv`.
+- `completed_books` is the team's own training specification (rule 5). It may
+  be empty, which counts as no parallel verses.
+- `ref_projects` is not used.
 - `onboarding.log` is not read.
 
 The target is `main_project`, matched to its stem in `corpus-stats.csv`. The
@@ -56,7 +56,10 @@ experiments go in `MT/experiments/<Country>/<Language>/`, named exactly as
 |---|---|
 | Source thresholds | at least 1000 parallel verses and alignment ≥ 0.2 |
 | Back translation thresholds | at least 400 parallel verses and alignment ≥ 0.25 |
-| Book completeness for training | ≥ 98% of the book's verses, in the target and every source |
+| Training books: use only the declared books (rule 5) | at least 4000 parallel verses with the first source |
+| Training left after removing a planned book to draft it | at least 3500 parallel verses |
+| Minimum training data, except for the gospel exception | 1500 parallel verses |
+| Complete gospel | parallel verses for at least 90% of its verses |
 | Test set | the default random 250 verses |
 | "Close" alignment, for choosing between sources (rule 3a) | within 0.025 |
 | Model, checkpoint, seed | as in `create_onboarding_experiments.py` |
@@ -162,11 +165,7 @@ with 0.2561. LBS21 (French, 0.2507) is close to BSB and better than
 `draft_source` been English, step 4 would have taken NIV11R (0.2504), which comes
 before BSB in the English list.
 
-### 4. Books to draft
-
-Each experiment's training books (rule 5) are chosen first. The books to draft
-are then chosen per experiment, so different experiments may draft different
-books; that needs no warning.
+### 4. Ordered list of books
 
 The ordered list:
 
@@ -183,25 +182,71 @@ The ordered list:
 The list runs from easier to harder books. Drafting in this order lets the team
 build up more translation, and so more training data, before the harder books.
 
-If no planned book is in the NT, the NT books are left out of the list.
+### 5. Training and drafting books
 
-A book is eligible for an experiment when it is in the list, is not one of that
-experiment's training books, and the drafting source's Paratext project contains
-it (checked as `create_onboarding_experiments.py` checks a translate source). An
-experiment drafts from its first source only.
+Training and drafting books are chosen together, per experiment, so different
+experiments may differ; that needs no warning.
 
-1. Take up to two eligible planned books, in list order.
-2. If that gives fewer than two, add the first eligible books from the list
-   until there are two. So a single planned book is drafted with the next
-   eligible book from the list.
-3. If no book is eligible, warn and run the experiment without `--translate`.
-   We'll add more handling if this turns out to be common.
+**Parallel verses** are the verses that are non-blank in both the target's
+extract and the experiment's first source's extract, counted verse by verse.
+A back translation in a pair adds training data but is not counted here.
 
-### 5. Training books
+A book is **available** to draft when it is in the ordered list (rule 4), is not
+a training book, and the first source's Paratext project contains it (checked as
+`create_onboarding_experiments.py` checks a translate source).
 
-The books that are ≥ 98% complete in the target and in every source of the
-experiment. Compact full testaments to `OT`/`NT` as the existing script does.
-If nothing remains, skip the experiment and say why.
+A **complete gospel** is a gospel with parallel verses for at least 90% of its
+verses.
+
+A book on both `completed_books` and `planned_books` counts as planned: the
+sign-up form allows both, and the extract shows such books may be complete,
+partly translated or empty.
+
+**1. Training books.** Start with the declared `completed_books`. If they give
+fewer than 4000 parallel verses, add every other book with parallel verses,
+planned books included, to train on as much data as possible.
+
+**2. Gospel exception.** If the training books give fewer than 1500 parallel
+verses but include a complete gospel, draft one other gospel and nothing else:
+the first planned gospel the source contains, otherwise the first available
+gospel in list order (MAT, MRK, LUK, JHN). The training books stay as they are.
+
+**3. Too little data.** Otherwise, if the training books give fewer than 1500
+parallel verses, create no experiment and say why. The team should look at their
+data.
+
+**4. Planned books.** Draft up to two planned books, in list order, that the
+first source contains. A planned book with parallel verses is removed from the
+training books, but only if at least 3500 parallel verses remain; otherwise it
+stays in training and is not drafted. A planned book with no parallel verses
+costs no training data, so it can always be drafted.
+
+**5. Second book.** If fewer than two books are drafted, add available books
+from the training books' testaments, in list order:
+- If the training books include both testaments, draft one book from each: add
+  the first available book from the testament not yet drafted.
+- If they include one testament, add the first available books from it.
+- If that testament has no available book, use the other one.
+Deuterocanonical books count as OT.
+
+**6. Nothing to draft.** If no book can be drafted, warn and run the experiment
+without `--translate`.
+
+Full testaments are compacted to `OT`/`NT` as the existing script does.
+
+#### Examples
+
+| # | Declared complete (parallel verses) | Planned | Train on | Draft |
+|---|---|---|---|---|
+| A | NT (7,957) | GEN, EXO | NT | GEN, EXO |
+| B | MAT (1,071) | MRK | MAT | MRK only (step 2) |
+| C | MRK (678) | MAT | MRK | MAT only (step 2) |
+| D | NT epistles (2,000) | GEN, not started | the epistles | GEN, and the first available NT book |
+| E | 2,000 NT verses; GEN complete in the extract but undeclared | GEN | the 2,000 plus GEN | RUT and the first available NT book; GEN stays in training |
+| F | 3,600, with 1,000 more undeclared; RUT complete in the extract | RUT | 4,515 | RUT, and the first available NT book if training has NT, otherwise the next OT book |
+| G | the NT, but only MAT is in the extract | MRK | MAT | MRK only (step 2) |
+| H | RUT, JON, EST (300) | GEN | — | no experiment (step 3) |
+| I | GEN, RUT, JON and the NT (about 9,600); the whole Bible in the extract | EXO | the declared books | EXO, then JOS: the NT has no available book |
 
 ### 6. Iso clash
 
@@ -256,7 +301,7 @@ A likely split:
 - `OnboardingRequest` reads and validates the folder's files.
 - `BackTranslationCheck` decides whether `bt_project` is usable.
 - `ExperimentChooser` applies rules 1 and 3.
-- `DraftBookChooser` applies rule 4.
+- `DraftBookChooser` applies rules 4 and 5.
 - `TargetExtractCopy` handles rule 6.
 - `run()` connects them and holds the two prompts.
 
@@ -287,13 +332,17 @@ Write one test per case, without `pytest.mark.parametrize`:
 - Experiments: four when everything qualifies; one when `draft_source` is the
   best-aligned candidate and there is no back translation, two when there is; the two best-aligned
   candidates when `draft_source` fails the thresholds.
-- Books: two planned books drafted in ordered-list order, not planned order; a
-  planned book that is a training book is skipped; the source lacks a planned
-  book and the next planned book replaces it; the source lacks it and no planned
-  book is left, so the ordered list supplies one; every planned book is a training
-  book; no eligible book, so the experiment runs without `--translate`;
-  deuterocanonical books skipped when the target has none, and considered when it
-  has one; two experiments with different sources drafting different books.
+- Parallel verses: counted verse by verse from the two extracts; a verse blank
+  on either side doesn't count.
+- One test per example A to I in rule 5.
+- A book on both lists counts as planned; declared books that are empty add no
+  training data; an empty `completed_books` uses all parallel data.
+- Gospel exception: a gospel at 90% counts as complete, one below doesn't; a
+  planned gospel is preferred to the first in list order.
+- Planned books: a third planned book is not drafted; a planned book the source
+  lacks is skipped; removal stopped at 3500.
+- Second book: one of each testament; the other testament when one has nothing
+  available; deuterocanonical books count as OT, and only when the target has one.
 - Books to draft never include a training book.
 - Iso clash: a fresh copy; a reused copy; an outdated copy renamed to `_1`, then
   `_2`.
