@@ -702,7 +702,7 @@ class AutoOnboarding:
         for experiment in planned:
             translate = experiment.translate_config is not None
             name = experiment.folder.relative_to(self._paths.experiments_dir).as_posix()
-            print(f"  poetry run python {' '.join(self._runner.arguments(translate))} {name}")
+            print(f"  uv run python {' '.join(self._runner.arguments(translate))} {name}")
         if not self._confirmer.confirm("\nRun them now?"):
             return
         for experiment in planned:
