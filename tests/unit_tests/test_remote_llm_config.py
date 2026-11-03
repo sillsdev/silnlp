@@ -1924,6 +1924,41 @@ def test_estimated_usage_counts_the_tokens_of_the_whole_chat():
     assert fake.counted == [_prompt()]
 
 
+def _check_lookups_of(model: str) -> None:
+    client = LiteLLMCompletionClient(model, CompletionSettings(0.0, 16, 0, 10), litellm=FakeLiteLLMPrices())
+    client.ensure_lookups_need_no_sign_in()
+
+
+def test_looking_up_a_chatgpt_subscription_model_would_sign_in():
+    with pytest.raises(RuntimeError, match="signs in to an account through its 'chatgpt' provider"):
+        _check_lookups_of("chatgpt/gpt-5")
+
+
+def test_looking_up_a_github_copilot_model_would_sign_in():
+    with pytest.raises(RuntimeError, match="signs in to an account through its 'github_copilot' provider"):
+        _check_lookups_of("github_copilot/gpt-4o")
+
+
+def test_a_sign_in_provider_inside_an_openrouter_model_name_is_pointed_out_as_a_naming_mistake():
+    with pytest.raises(RuntimeError, match="the part of its name after 'openrouter/' must be openrouter's own name"):
+        _check_lookups_of("openrouter/chatgpt/gpt-6.1-sol")
+
+
+def test_looking_up_an_openrouter_model_needs_no_sign_in():
+    _check_lookups_of("openrouter/openai/gpt-6.1-sol")
+
+
+def test_looking_up_a_model_merely_named_after_chatgpt_needs_no_sign_in():
+    _check_lookups_of("openai/chatgpt-4o-latest")
+
+
+def test_the_retrying_client_refuses_lookups_its_wrapped_client_would_sign_in_for():
+    inner = LiteLLMCompletionClient("chatgpt/gpt-5", CompletionSettings(0.0, 16, 0, 10), litellm=FakeLiteLLMPrices())
+
+    with pytest.raises(RuntimeError, match="signs in to an account"):
+        RetryingCompletionClient(inner, RetryPolicy(0)).ensure_lookups_need_no_sign_in()
+
+
 def _warns_that_reasoning_is_left_out(client: LiteLLMCompletionClient, caplog) -> bool:
     with caplog.at_level("WARNING"):
         client.estimate_usage(_prompt(), 100)
@@ -2487,6 +2522,17 @@ def test_a_dry_run_warns_once_that_reasoning_would_crowd_out_replies(tmp_path: P
         list(model.translate(["one", "two"], "en", "es"))
 
     assert caplog.text.count("cut short or blank") == 1
+
+
+def test_a_dry_run_of_a_model_litellm_signs_in_to_look_up_stops_before_looking_anything_up(tmp_path: Path):
+    write_training_corpus(tmp_path)
+    fake = FakeLiteLLMPrices()
+    client = LiteLLMCompletionClient("openrouter/chatgpt/gpt-6.1-sol", CompletionSettings(0.0, 16, 0, 10), litellm=fake)
+
+    with pytest.raises(RuntimeError, match="signs in to an account"):
+        DryRunRemoteLLMModel(make_config(tmp_path), ScriptedClientFactory(client))
+
+    assert fake.counted == []
 
 
 def test_a_dry_run_fails_when_the_model_tokens_cannot_be_counted(tmp_path: Path):

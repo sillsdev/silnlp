@@ -312,6 +312,9 @@ class CompletionClient(TokenCounter):
         """None means the caller skips its size check rather than run it against a guess."""
         return None
 
+    def ensure_lookups_need_no_sign_in(self) -> None:
+        """Raises if merely looking the model up, as counting and estimating do, would sign in to an account."""
+
     def estimate_usage(
         self, messages: List[Dict[str, str]], reply_tokens: int, cached_prompt_tokens: int = 0
     ) -> EstimatedLLMUsageStatistics:
@@ -344,6 +347,9 @@ class CompletionClient(TokenCounter):
 
 
 class LiteLLMCompletionClient(CompletionClient):
+    # LiteLLM providers that sign in to an account, interactively if need be, whenever a model is looked up.
+    _SIGN_IN_PROVIDERS = ("chatgpt", "github_copilot")
+
     def __init__(
         self, model: str, settings: CompletionSettings, extra_kwargs: Optional[dict] = None, litellm: Any = None
     ) -> None:
@@ -377,6 +383,22 @@ class LiteLLMCompletionClient(CompletionClient):
                 "Could not count tokens for '%s'; skipping the prompt size check.", self._model, exc_info=True
             )
             return None
+
+    def ensure_lookups_need_no_sign_in(self) -> None:
+        *providers, _ = self._model.split("/")
+        signing_in = [provider for provider in providers if provider in self._SIGN_IN_PROVIDERS]
+        if len(signing_in) == 0:
+            return
+        message = (
+            f"LiteLLM signs in to an account through its '{signing_in[0]}' provider whenever it looks up "
+            f"{self._model}, so its usage can't be estimated without contacting anyone."
+        )
+        if providers[0] != signing_in[0]:
+            message += (
+                f" If it is meant to be served by {providers[0]}, the part of its name after '{providers[0]}/' "
+                f"must be {providers[0]}'s own name for it."
+            )
+        raise RuntimeError(message)
 
     def _count_message_tokens(self, messages: List[Dict[str, str]]) -> Optional[int]:
         try:
@@ -533,6 +555,9 @@ class RetryingCompletionClient(CompletionClient):
 
     def count_tokens(self, text: str) -> Optional[int]:
         return self._client.count_tokens(text)
+
+    def ensure_lookups_need_no_sign_in(self) -> None:
+        self._client.ensure_lookups_need_no_sign_in()
 
     def estimate_usage(
         self, messages: List[Dict[str, str]], reply_tokens: int, cached_prompt_tokens: int = 0
@@ -1584,6 +1609,8 @@ class DryRunRemoteLLMModel(RemoteLLMModel):
         completion_client_factory: Optional[CompletionClientFactory] = None,
     ) -> None:
         super().__init__(config, completion_client_factory)
+        # Checked before any step runs, since even looking the model up could sign in to an account.
+        self._get_client().ensure_lookups_need_no_sign_in()
         self._estimator: Optional[UsageEstimator] = None
         self._run_usage = UsageTotals()
         self._translations_reported = 0
