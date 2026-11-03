@@ -76,6 +76,9 @@ class NMTTranslator(Translator):
     ) -> Generator[SentenceTranslationGroup, None, None]:
         yield from self._model.translate(sentences, src_iso, trg_iso, produce_multiple_translations, self._checkpoint)
 
+    def produces_translations(self) -> bool:
+        return self._model.produces_translations()
+
     def __exit__(
         self, exc_type, exc_value, traceback  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType]
     ) -> None:
@@ -91,6 +94,7 @@ class TranslationTask:
     clearml_tag: Optional[str] = None
     model: Optional[NMTModel] = None
     environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
+    dry_run: bool = False
 
     def translate_books(
         self,
@@ -142,7 +146,8 @@ class TranslationTask:
                 output_dir = config.exp_dir / "infer" / "base" / src_project
             if trg_project is not None:
                 output_dir = output_dir / trg_project
-            output_dir.mkdir(exist_ok=True, parents=True)
+            if translator.produces_translations():
+                output_dir.mkdir(exist_ok=True, parents=True)
 
             src_training_rows = list(load_corpus(config.exp_dir / config.train_src_detok_filename()))
             trg_training_rows = list(load_corpus(config.exp_dir / config.train_trg_detok_filename()))
@@ -168,7 +173,7 @@ class TranslationTask:
                         config.corpus_pairs,
                         tags,
                     )
-                    if vref:
+                    if vref and translator.produces_translations():
                         num_drafts = config.infer.get("num_drafts", 1)
                         export_vref_for_output(output_path, produce_multiple_translations, num_drafts)
                     if save_confidences:
@@ -180,7 +185,7 @@ class TranslationTask:
             if len(translation_failed) > 0:
                 raise RuntimeError(f"Some books failed to translate: {' '.join(translation_failed)}")
 
-        if linregress_path is not None:
+        if linregress_path is not None and translator.produces_translations():
             LOGGER.info("Running quality estimation...")
             estimate_quality(linregress_path, confidence_files)
             LOGGER.info("Quality estimation completed.")
@@ -226,7 +231,8 @@ class TranslationTask:
                 trg_path = config.exp_dir / "infer" / step_str
                 if not config.model_dir.exists():
                     trg_path = config.exp_dir / "infer" / "base"
-                trg_path.mkdir(exist_ok=True, parents=True)
+                if translator.produces_translations():
+                    trg_path.mkdir(exist_ok=True, parents=True)
 
             if src_path.is_file():
                 src_file_paths = [src_path]
@@ -243,10 +249,12 @@ class TranslationTask:
                     else:
                         relative_path = src_file_path.relative_to(src_path)
                         trg_file_path = trg_path / relative_path
-                        trg_file_path.parent.mkdir(exist_ok=True, parents=True)
+                        if translator.produces_translations():
+                            trg_file_path.parent.mkdir(exist_ok=True, parents=True)
                         src_name = str(relative_path)
                 else:
-                    trg_path.parent.mkdir(parents=True, exist_ok=True)
+                    if translator.produces_translations():
+                        trg_path.parent.mkdir(parents=True, exist_ok=True)
                     trg_file_path = trg_path
                     src_name = src_file_path.name
 
@@ -283,14 +291,14 @@ class TranslationTask:
                         training_corpus_pairs=config.corpus_pairs,
                         tags=tags,
                     )
-                    if vref:
+                    if vref and translator.produces_translations():
                         num_drafts = config.infer.get("num_drafts", 1)
                         export_vref_for_output(trg_file_path, produce_multiple_translations, num_drafts)
 
                 if save_confidences:
                     confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.stem}*{CONFIDENCE_SUFFIX}"))
 
-        if linregress_path is not None:
+        if linregress_path is not None and translator.produces_translations():
             LOGGER.info("Running quality estimation...")
             estimate_quality(linregress_path, confidence_files)
             LOGGER.info("Quality estimation completed.")
@@ -309,7 +317,12 @@ class TranslationTask:
 
         clearml.config.set_seed()
 
-        model = self.model if self.model is not None else clearml.config.create_model()
+        if self.model is not None:
+            model = self.model
+        elif self.dry_run:
+            model = clearml.config.create_dry_run_model()
+        else:
+            model = clearml.config.create_model()
         translator = NMTTranslator(model, self.checkpoint, self.environment)
         if clearml.config.model_dir.exists():
             _, step = model.get_checkpoint_path(self.checkpoint)
@@ -450,6 +463,13 @@ def main() -> None:
         + "If not provided, the experiment directory will be searched for a linregress.*.json file.",
     )
     parser.add_argument(
+        "--dry-run",
+        default=False,
+        action="store_true",
+        help="For a remote LLM experiment, build every request and log the tokens and cost it would take, "
+        + "without sending it or writing any translations.",
+    )
+    parser.add_argument(
         "--debug",
         default=False,
         action="store_true",
@@ -485,6 +505,7 @@ def main() -> None:
         commit=args.commit,
         clearml_tag=args.clearml_tag,
         environment=environment,
+        dry_run=args.dry_run,
     )
 
     postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args), environment)], environment=environment)

@@ -9,9 +9,19 @@ from unittest.mock import Mock
 import pytest
 import yaml
 
+import silnlp.nmt.test as test_step
+from silnlp.common.environment import SilNlpEnv
 from silnlp.nmt.config import Language
-from silnlp.nmt.config_utils import is_local_llm_config, is_remote_llm_config
+from silnlp.nmt.config_utils import is_local_llm_config, is_remote_llm_config, load_config
 from silnlp.nmt.example_retrieval import Example, TargetLanguageProfile
+from silnlp.nmt.llm_usage import LLMUsageStatistics
+from silnlp.nmt.reasoning_estimate import (
+    MeasuredReasoning,
+    NoReasoning,
+    ReasoningBudget,
+    ReasoningEstimate,
+    UnknownReasoning,
+)
 from silnlp.nmt.remote_llm_config import (
     BatchReplyReader,
     CodeFenceRemover,
@@ -19,8 +29,10 @@ from silnlp.nmt.remote_llm_config import (
     CompletionClient,
     CompletionClientFactory,
     CompletionSettings,
+    DryRunRemoteLLMModel,
     LiteLLMCompletionClient,
     LiteLLMResponse,
+    ReadOnlySavedReplies,
     RemoteLLMConfig,
     RemoteLLMModel,
     ReplyReusingClient,
@@ -32,6 +44,7 @@ from silnlp.nmt.remote_llm_config import (
     TranslationLabelRemover,
     UsageTotals,
 )
+from silnlp.nmt.translate import TranslationTask
 
 EN = Language("en", "English")
 ES = Language("es", "Spanish")
@@ -452,6 +465,14 @@ def test_back_translation_guidance_alone_replaces_an_empty_system_message(tmp_pa
 _NUMBERED_SOURCE = re.compile(r"^\d+\. ")
 
 
+def priced(prompt_tokens: int, completion_tokens: int, cost: float) -> LLMUsageStatistics:
+    return LLMUsageStatistics.of_priced_request(prompt_tokens, completion_tokens, cost)
+
+
+def unpriced(prompt_tokens: int = 0, completion_tokens: int = 0) -> LLMUsageStatistics:
+    return LLMUsageStatistics.of_unpriced_request(prompt_tokens, completion_tokens)
+
+
 class ScriptedClient(CompletionClient):
     """A completion client that answers with a scripted function instead of a network call."""
 
@@ -461,11 +482,13 @@ class ScriptedClient(CompletionClient):
         logprobs_supported: bool = False,
         token_logprobs: Optional[List[TokenLogprob]] = None,
         tokens_per_word: Optional[int] = 1,
+        usage: Optional[LLMUsageStatistics] = None,
     ) -> None:
         self._responder = responder
         self._logprobs_supported = logprobs_supported
         self._token_logprobs = token_logprobs
         self._tokens_per_word = tokens_per_word
+        self._usage = usage if usage is not None else unpriced()
         self.calls: List[List[Dict[str, str]]] = []
         self.logprobs_requested: List[bool] = []
 
@@ -474,8 +497,8 @@ class ScriptedClient(CompletionClient):
         self.logprobs_requested.append(logprobs)
         text = self._responder(messages)
         if logprobs and self._token_logprobs is not None:
-            return Completion(text, list(self._token_logprobs))
-        return Completion(text)
+            return Completion(text, list(self._token_logprobs), self._usage)
+        return Completion(text, usage=self._usage)
 
     def supports_logprobs(self) -> bool:
         return self._logprobs_supported
@@ -849,26 +872,33 @@ def test_token_logprobs_skip_incomplete_entries():
     assert _response_with(choice).token_logprobs() == [TokenLogprob("la", -0.4)]
 
 
+class _Pricing:
+    def __init__(self, cost: Optional[float]) -> None:
+        self._cost = cost
+
+    def completion_cost(self, completion_response) -> float:
+        if self._cost is None:
+            raise Exception("no pricing")
+        return self._cost
+
+
 def test_response_reads_the_text_and_usage_from_either_shape():
     raw = {"choices": [{"message": {"content": "hola"}}], "usage": {"prompt_tokens": 7, "completion_tokens": 3}}
-    assert LiteLLMResponse(raw, litellm=None).text() == "hola"
-    assert LiteLLMResponse(raw, litellm=None).prompt_tokens() == 7
+    assert LiteLLMResponse(raw, _Pricing(0.01)).text() == "hola"
+    assert LiteLLMResponse(raw, _Pricing(0.01)).usage() == priced(7, 3, 0.01)
 
     obj = _Obj(choices=[_Obj(message=_Obj(content="hola"))], usage=_Obj(prompt_tokens=7, completion_tokens=3))
-    assert LiteLLMResponse(obj, litellm=None).completion_tokens() == 3
+    assert LiteLLMResponse(obj, _Pricing(0.01)).usage() == priced(7, 3, 0.01)
 
 
 def test_response_tolerates_a_missing_usage_block():
     raw = {"choices": [{"message": {"content": "hola"}}]}
-    assert LiteLLMResponse(raw, litellm=None).prompt_tokens() == 0
+    assert LiteLLMResponse(raw, _Pricing(0.0)).usage() == priced(0, 0, 0.0)
 
 
 def test_response_reports_an_unknown_cost_when_litellm_has_no_pricing():
-    class _NoPricing:
-        def completion_cost(self, completion_response):
-            raise Exception("no pricing")
-
-    assert LiteLLMResponse({"choices": []}, _NoPricing()).cost() is None
+    raw = {"choices": [{"message": {"content": "hola"}}], "usage": {"prompt_tokens": 7, "completion_tokens": 3}}
+    assert LiteLLMResponse(raw, _Pricing(None)).usage() == unpriced(7, 3)
 
 
 def test_confidence_scores_come_from_the_token_logprobs(tmp_path: Path):
@@ -1077,49 +1107,39 @@ def test_a_client_that_cannot_count_tokens_makes_the_caller_skip_the_size_check(
 
 def test_usage_totals_accumulate():
     totals = UsageTotals()
-    totals.add(Completion("a", [], prompt_tokens=100, completion_tokens=10, cost=0.01))
-    totals.add(Completion("b", [], prompt_tokens=200, completion_tokens=20, cost=0.02))
+    totals.add(Completion("a", usage=priced(100, 10, 0.01)))
+    totals.add(Completion("b", usage=priced(200, 20, 0.02)))
 
-    assert (totals.requests, totals.prompt_tokens, totals.completion_tokens) == (2, 300, 30)
-    assert totals.cost == pytest.approx(0.03)
     assert "2 requests, 300 prompt + 30 completion tokens, $0.0300" == totals.describe()
 
 
 def test_usage_totals_report_an_unpriced_model_rather_than_calling_it_free():
     totals = UsageTotals()
-    totals.add(Completion("a", [], prompt_tokens=100, completion_tokens=10, cost=None))
+    totals.add(Completion("a", usage=unpriced(100, 10)))
     assert "cost unavailable" in totals.describe()
     assert "$" not in totals.describe()
 
 
 def test_usage_totals_flag_a_partial_cost():
     totals = UsageTotals()
-    totals.add(Completion("a", [], prompt_tokens=100, completion_tokens=10, cost=0.01))
-    totals.add(Completion("b", [], prompt_tokens=100, completion_tokens=10, cost=None))
+    totals.add(Completion("a", usage=priced(100, 10, 0.01)))
+    totals.add(Completion("b", usage=unpriced(100, 10)))
 
     assert "$0.0100 excluding 1 unpriced requests" in totals.describe()
 
 
 def test_usage_totals_are_thread_safe():
     totals = UsageTotals()
-    completion = Completion("a", [], prompt_tokens=1, completion_tokens=1, cost=0.001)
+    completion = Completion("a", usage=priced(1, 1, 0.001))
 
     with ThreadPoolExecutor(max_workers=8) as executor:
         list(executor.map(lambda _: totals.add(completion), range(2000)))
 
-    assert totals.requests == 2000
-    assert totals.prompt_tokens == 2000
+    assert totals.describe().startswith("2,000 requests, 2,000 prompt + 2,000 completion tokens")
 
 
 def test_translating_logs_the_usage_and_cost(tmp_path: Path, caplog):
-    def priced(messages):
-        return "hola"
-
-    client = ScriptedClient(priced)
-    # The scripted client reports no usage, so patch in a priced reply.
-    client.complete = lambda messages, logprobs=False: Completion(  # type: ignore[method-assign]
-        "hola", [], prompt_tokens=500, completion_tokens=5, cost=0.002
-    )
+    client = ScriptedClient(lambda messages: "hola", usage=priced(500, 5, 0.002))
     write_training_corpus(tmp_path)
     config = make_config(tmp_path, infer={"concurrency": 1})
     model = RemoteLLMModel(config, ScriptedClientFactory(client))
@@ -1286,21 +1306,14 @@ def test_an_empty_reply_is_retried():
 
 
 def test_a_retried_reply_is_billed_for_the_discarded_attempt():
-    client, _ = retrying(
-        [
-            Completion("", prompt_tokens=100, completion_tokens=5, cost=0.01),
-            Completion("hola", prompt_tokens=100, completion_tokens=2, cost=0.01),
-        ]
-    )
-    completion = client.complete([])
+    client, _ = retrying([Completion("", usage=priced(100, 5, 0.01)), Completion("hola", usage=priced(100, 2, 0.02))])
 
-    assert (completion.prompt_tokens, completion.completion_tokens) == (200, 7)
-    assert completion.cost == pytest.approx(0.02)
+    assert client.complete([]).usage == priced(200, 7, 0.03)
 
 
 def test_an_unpriced_attempt_leaves_the_cost_unknown():
-    client, _ = retrying([Completion("", cost=None), Completion("hola", cost=0.01)])
-    assert client.complete([]).cost is None
+    client, _ = retrying([Completion("", usage=unpriced(100, 5)), Completion("hola", usage=priced(100, 2, 0.01))])
+    assert client.complete([]).usage == unpriced(200, 7)
 
 
 def test_an_empty_reply_is_returned_once_the_retries_run_out():
@@ -1423,6 +1436,14 @@ def test_the_retrying_client_reports_what_the_wrapped_client_supports():
     assert client.count_tokens("two words") == 4
 
 
+def test_the_retrying_client_estimates_with_the_wrapped_client():
+    inner = PricedClient(reasoning=ReasoningBudget("a-model", 4096, 1024))
+    client = RetryingCompletionClient(inner, RetryPolicy(0))
+    messages = [{"role": "user", "content": "two words"}]
+
+    assert client.estimate_usage(messages, 100, 1).describe() == inner.estimate_usage(messages, 100, 1).describe()
+
+
 class FakeLiteLLM:
     """LiteLLM's module interface, narrowed to what LiteLLMCompletionClient calls."""
 
@@ -1469,6 +1490,10 @@ def test_importing_litellm_turns_off_its_feedback_banner():
 # --- saved replies -------------------------------------------------------------------------
 
 
+def reply(text: str) -> Completion:
+    return Completion(text, usage=unpriced())
+
+
 def save_reply(saved: SavedReplies, key: str, completion: Completion) -> None:
     occurrence, _ = saved.claim(key)
     saved.save(key, occurrence, completion)
@@ -1476,7 +1501,7 @@ def save_reply(saved: SavedReplies, key: str, completion: Completion) -> None:
 
 def test_a_saved_reply_comes_back_whole_in_a_later_run(tmp_path: Path):
     saved = SavedReplies(tmp_path / "replies.jsonl")
-    original = Completion("hola", [TokenLogprob("hola", -0.5)], prompt_tokens=10, completion_tokens=2, cost=0.003)
+    original = Completion("hola", [TokenLogprob("hola", -0.5)], priced(10, 2, 0.003))
     with saved.session():
         save_reply(saved, "request", original)
 
@@ -1497,22 +1522,22 @@ def test_a_saved_reply_comes_back_in_a_later_session_of_the_same_run(tmp_path: P
 def test_a_reply_with_a_unicode_line_separator_comes_back_whole(tmp_path: Path):
     saved = SavedReplies(tmp_path / "replies.jsonl")
     with saved.session():
-        save_reply(saved, "request", Completion("one\u2028two\u0085three"))
+        save_reply(saved, "request", reply("one\u2028two\u0085three"))
 
     resumed = SavedReplies(tmp_path / "replies.jsonl")
     with resumed.session():
-        assert resumed.claim("request")[1] == Completion("one\u2028two\u0085three")
+        assert resumed.claim("request")[1] == reply("one\u2028two\u0085three")
 
 
 def test_identical_requests_in_one_session_are_told_apart(tmp_path: Path):
     saved = SavedReplies(tmp_path / "replies.jsonl")
     with saved.session():
-        save_reply(saved, "request", Completion("first"))
-        save_reply(saved, "request", Completion("second"))
+        save_reply(saved, "request", reply("first"))
+        save_reply(saved, "request", reply("second"))
 
     resumed = SavedReplies(tmp_path / "replies.jsonl")
     with resumed.session():
-        assert [resumed.claim("request")[1] for _ in range(3)] == [Completion("first"), Completion("second"), None]
+        assert [resumed.claim("request")[1] for _ in range(3)] == [reply("first"), reply("second"), None]
 
 
 def test_nothing_is_saved_outside_a_session(tmp_path: Path):
@@ -1528,31 +1553,31 @@ def test_a_partly_written_last_line_does_not_spoil_the_next_reply(tmp_path: Path
     path = tmp_path / "replies.jsonl"
     saved = SavedReplies(path)
     with saved.session():
-        save_reply(saved, "kept", Completion("hola"))
+        save_reply(saved, "kept", reply("hola"))
     with path.open("a", encoding="utf-8") as file:
         file.write('{"key": "interrupted", "occ')
 
     with saved.session():
-        save_reply(saved, "after", Completion("adios"))
+        save_reply(saved, "after", reply("adios"))
 
     resumed = SavedReplies(path)
     with resumed.session():
-        assert resumed.claim("kept")[1] == Completion("hola")
+        assert resumed.claim("kept")[1] == reply("hola")
         assert resumed.claim("interrupted")[1] is None
-        assert resumed.claim("after")[1] == Completion("adios")
+        assert resumed.claim("after")[1] == reply("adios")
 
 
 def test_a_last_line_cut_inside_a_character_does_not_spoil_the_earlier_replies(tmp_path: Path):
     path = tmp_path / "replies.jsonl"
     saved = SavedReplies(path)
     with saved.session():
-        save_reply(saved, "kept", Completion("ŋa'a"))
+        save_reply(saved, "kept", reply("ŋa'a"))
     with path.open("ab") as file:
         file.write('{"key": "interrupted", "text": "ŋ'.encode("utf-8")[:-1])
 
     resumed = SavedReplies(path)
     with resumed.session():
-        assert resumed.claim("kept")[1] == Completion("ŋa'a")
+        assert resumed.claim("kept")[1] == reply("ŋa'a")
 
 
 def test_a_failed_run_resumes_without_repeating_the_finished_requests(tmp_path: Path):
@@ -1739,10 +1764,837 @@ def test_missing_test_predictions_are_unfinished(tmp_path: Path):
 
 def test_usage_totals_count_reused_replies_without_billing_them_again():
     totals = UsageTotals()
-    totals.add(Completion("hola", prompt_tokens=100, cost=0.01, reused=True))
-    totals.add(Completion("adios", prompt_tokens=100, cost=0.01))
+    totals.add(Completion("hola", usage=priced(100, 0, 0.01), reused=True))
+    totals.add(Completion("adios", usage=priced(100, 0, 0.01)))
 
     described = totals.describe()
     assert "1 requests, 100 prompt" in described
     assert "$0.0100" in described
     assert "replies reused from an earlier run: 1" in described
+
+
+def test_usage_totals_include_the_totals_of_another_translation():
+    totals = UsageTotals()
+    totals.add(Completion("a", usage=priced(100, 10, 0.01)))
+    other = UsageTotals()
+    other.add(Completion("b", usage=unpriced(200, 20)))
+    other.add(Completion("c", usage=priced(300, 0, 0.03), reused=True))
+    other.add_copied_translation()
+
+    totals.include(other)
+
+    assert "2 requests, 300 prompt + 30 completion tokens, $0.0100 excluding 1 unpriced requests" in totals.describe()
+    assert "replies reused from an earlier run: 1" in totals.describe()
+    assert "translations copied from the training corpus: 1" in totals.describe()
+
+
+# --- read-only saved replies ---------------------------------------------------------------
+
+
+def test_read_only_saved_replies_find_a_reply_an_earlier_run_saved(tmp_path: Path):
+    saved = SavedReplies(tmp_path / "replies.jsonl")
+    with saved.session():
+        save_reply(saved, "request", reply("hola"))
+
+    read_only = ReadOnlySavedReplies(tmp_path / "replies.jsonl")
+    with read_only.session():
+        assert read_only.claim("request")[1] == reply("hola")
+
+
+def test_read_only_saved_replies_save_nothing(tmp_path: Path):
+    read_only = ReadOnlySavedReplies(tmp_path / "replies.jsonl")
+    with read_only.session():
+        save_reply(read_only, "request", Completion("hola"))
+        assert read_only.claim("request")[1] is None
+
+    assert not (tmp_path / "replies.jsonl").exists()
+
+
+def test_read_only_saved_replies_leave_a_partly_written_last_line_alone(tmp_path: Path):
+    saved = SavedReplies(tmp_path / "replies.jsonl")
+    with saved.session():
+        save_reply(saved, "request", Completion("hola"))
+    with (tmp_path / "replies.jsonl").open("a", encoding="utf-8") as file:
+        file.write('{"key": "cut sh')
+    before = (tmp_path / "replies.jsonl").read_bytes()
+
+    read_only = ReadOnlySavedReplies(tmp_path / "replies.jsonl")
+    with read_only.session():
+        read_only.claim("request")
+
+    assert (tmp_path / "replies.jsonl").read_bytes() == before
+
+
+def test_read_only_saved_replies_forget_but_keep_the_file_when_discarded(tmp_path: Path):
+    saved = SavedReplies(tmp_path / "replies.jsonl")
+    with saved.session():
+        save_reply(saved, "request", Completion("hola"))
+
+    read_only = ReadOnlySavedReplies(tmp_path / "replies.jsonl")
+    read_only.discard()
+    with read_only.session():
+        assert read_only.claim("request")[1] is None
+    assert (tmp_path / "replies.jsonl").is_file()
+
+
+# --- estimating with LiteLLM ------------------------------------------------------------------
+
+
+class FakeLiteLLMPrices:
+    """LiteLLM's token counting and price list, for a model it prices per token, or for one it does not know."""
+
+    def __init__(self, model_info: Optional[dict] = None, supports_reasoning: bool = False) -> None:
+        self._model_info = model_info
+        self._supports_reasoning = supports_reasoning
+        self.counted: List[List[Dict[str, str]]] = []
+
+    def token_counter(self, model: str, messages: List[Dict[str, str]]) -> int:
+        self.counted.append(messages)
+        return 1000
+
+    def get_model_info(self, model: str) -> dict:
+        if self._model_info is None:
+            raise Exception("This model isn't mapped yet.")
+        return self._model_info
+
+    def cost_per_token(
+        self, model: str, prompt_tokens: int, completion_tokens: int, cache_read_input_tokens: int = 0
+    ) -> Tuple[float, float]:
+        info = self.get_model_info(model)
+        # Like LiteLLM, a model with no cache price has its cached tokens billed at nothing.
+        cache_price = info.get("cache_read_input_token_cost") or 0.0
+        uncached_tokens = prompt_tokens - cache_read_input_tokens
+        prompt_cost = uncached_tokens * info["input_cost_per_token"] + cache_read_input_tokens * cache_price
+        return prompt_cost, completion_tokens * info["output_cost_per_token"]
+
+    def supports_reasoning(self, model: str) -> bool:
+        return self._supports_reasoning
+
+
+def _priced_litellm(cache_price: Optional[float] = 0.0001, supports_reasoning: bool = False) -> FakeLiteLLMPrices:
+    info = {"input_cost_per_token": 0.001, "output_cost_per_token": 0.002}
+    if cache_price is not None:
+        info["cache_read_input_token_cost"] = cache_price
+    return FakeLiteLLMPrices(info, supports_reasoning)
+
+
+def _litellm_client(fake: FakeLiteLLMPrices, extra_kwargs: Optional[dict] = None) -> LiteLLMCompletionClient:
+    return LiteLLMCompletionClient("gpt-4o", CompletionSettings(0.0, 16, 0, 10), extra_kwargs, litellm=fake)
+
+
+def _prompt() -> List[Dict[str, str]]:
+    return [{"role": "system", "content": "translate"}, {"role": "user", "content": "hello"}]
+
+
+def test_estimated_usage_adds_the_prompt_and_completion_prices():
+    usage = _litellm_client(_priced_litellm()).estimate_usage(_prompt(), 100)
+    assert usage.describe() == "1 requests, 1,000 prompt + 100 completion tokens, $1.2000"
+
+
+def test_estimated_usage_bills_cached_prompt_tokens_at_the_cache_price():
+    usage = _litellm_client(_priced_litellm()).estimate_usage(_prompt(), 100, 800)
+    assert usage.describe().endswith("; $0.4800 if the provider caches the system message the requests share")
+
+
+def test_estimated_usage_says_nothing_of_caching_for_a_model_without_a_cache_price():
+    usage = _litellm_client(_priced_litellm(cache_price=None)).estimate_usage(_prompt(), 100, 800)
+    assert usage.describe() == "1 requests, 1,000 prompt + 100 completion tokens, $1.2000"
+
+
+def test_estimated_usage_is_unpriced_for_a_model_litellm_has_no_price_for():
+    usage = _litellm_client(FakeLiteLLMPrices()).estimate_usage(_prompt(), 100)
+    assert usage.describe().endswith("; cost unavailable (no pricing for this model)")
+
+
+def test_estimated_usage_counts_the_tokens_of_the_whole_chat():
+    fake = _priced_litellm()
+
+    _litellm_client(fake).estimate_usage(_prompt(), 100)
+
+    assert fake.counted == [_prompt()]
+
+
+def _warns_that_reasoning_is_left_out(client: LiteLLMCompletionClient, caplog) -> bool:
+    with caplog.at_level("WARNING"):
+        client.estimate_usage(_prompt(), 100)
+    return "leaves out" in caplog.text
+
+
+def test_reasoning_is_left_out_with_a_warning_for_a_model_that_litellm_says_supports_it(caplog):
+    assert _warns_that_reasoning_is_left_out(_litellm_client(_priced_litellm(supports_reasoning=True)), caplog)
+
+
+def test_reasoning_is_left_out_with_a_warning_for_a_model_asked_to_reason_by_its_litellm_params(caplog):
+    client = _litellm_client(_priced_litellm(), {"reasoning": {"effort": "minimal"}})
+    assert _warns_that_reasoning_is_left_out(client, caplog)
+
+
+def test_there_is_no_reasoning_to_leave_out_for_a_model_that_neither_supports_nor_is_asked_to_reason(caplog):
+    assert not _warns_that_reasoning_is_left_out(_litellm_client(_priced_litellm()), caplog)
+
+
+class UncountingLiteLLM:
+    """LiteLLM failing to count a model's tokens."""
+
+    def token_counter(self, model: str, messages: List[Dict[str, str]]) -> int:
+        raise ValueError("no tokenizer")
+
+
+def test_estimated_usage_fails_for_a_model_litellm_cannot_count():
+    client = LiteLLMCompletionClient("made-up", CompletionSettings(0.0, 16, 0, 10), litellm=UncountingLiteLLM())
+
+    with pytest.raises(RuntimeError, match="could not be counted"):
+        client.estimate_usage(_prompt(), 100)
+
+
+class UnrecognizingLiteLLM(FakeLiteLLMPrices):
+    """LiteLLM failing to look up a model it does not recognize, though it can still count the model's tokens."""
+
+    def supports_reasoning(self, model: str) -> bool:
+        raise ValueError("unrecognized model")
+
+
+def test_a_model_litellm_cannot_look_up_has_no_reasoning_to_leave_out(caplog):
+    client = LiteLLMCompletionClient("made-up", CompletionSettings(0.0, 16, 0, 10), litellm=UnrecognizingLiteLLM())
+    assert not _warns_that_reasoning_is_left_out(client, caplog)
+
+
+class FakeLiteLLMReasoning(FakeLiteLLMPrices):
+    """LiteLLM translating reasoning settings into the parameters it would send, or failing to."""
+
+    def __init__(self, optional_params: Optional[dict] = None, supports_reasoning: bool = False) -> None:
+        super().__init__(supports_reasoning=supports_reasoning)
+        self._optional_params = optional_params
+        self.translated: List[dict] = []
+
+    def get_llm_provider(self, model: str) -> Tuple[str, str, None, None]:
+        provider, _, name = model.partition("/")
+        return name, provider, None, None
+
+    def get_optional_params(self, **settings) -> dict:
+        self.translated.append(settings)
+        if self._optional_params is None:
+            raise ValueError("unsupported parameters")
+        return self._optional_params
+
+
+def _reasoning_client(model: str, litellm_options: dict, fake: FakeLiteLLMReasoning) -> LiteLLMCompletionClient:
+    return LiteLLMCompletionClient(model, CompletionSettings(0.0, 4096, 0, 10), litellm_options, litellm=fake)
+
+
+def _reasoning_tokens(model: str, litellm_options: dict, fake: FakeLiteLLMReasoning, reply_tokens: int = 100) -> int:
+    usage = _reasoning_client(model, litellm_options, fake).estimate_usage(_prompt(), reply_tokens)
+    return usage.to_record()["completion_tokens"] - reply_tokens
+
+
+def test_a_thinking_budget_litellm_would_send_is_estimated_in_full():
+    fake = FakeLiteLLMReasoning({"thinking": {"type": "enabled", "budget_tokens": 1024}})
+
+    assert _reasoning_tokens("anthropic/claude-sonnet-4-5", {"reasoning_effort": "low"}, fake) == 1024
+
+
+def test_a_gemini_thinking_budget_litellm_would_send_is_estimated_in_full():
+    fake = FakeLiteLLMReasoning({"thinkingConfig": {"thinkingBudget": 2048, "includeThoughts": True}})
+
+    assert _reasoning_tokens("gemini/gemini-2.5-pro", {"reasoning_effort": "medium"}, fake) == 2048
+
+
+def test_litellm_is_asked_about_only_the_reasoning_settings_and_max_new_tokens():
+    fake = FakeLiteLLMReasoning({"thinking": {"type": "enabled", "budget_tokens": 3000}})
+    options = {"thinking": {"type": "enabled", "budget_tokens": 3000}, "api_base": "https://example.org"}
+
+    _reasoning_tokens("anthropic/claude-sonnet-4-5", options, fake)
+
+    assert fake.translated == [
+        {
+            "model": "claude-sonnet-4-5",
+            "custom_llm_provider": "anthropic",
+            "max_tokens": 4096,
+            "thinking": {"type": "enabled", "budget_tokens": 3000},
+        }
+    ]
+
+
+def test_a_budget_the_model_decides_for_itself_is_left_out_with_a_warning(caplog):
+    fake = FakeLiteLLMReasoning({"thinkingConfig": {"thinkingBudget": -1}}, supports_reasoning=True)
+
+    with caplog.at_level("WARNING"):
+        tokens = _reasoning_tokens("gemini/gemini-2.5-pro", {"reasoning_effort": "high"}, fake)
+
+    assert tokens == 0
+    assert "leaves out" in caplog.text
+
+
+def test_adaptive_thinking_without_a_budget_is_left_out_with_a_warning(caplog):
+    fake = FakeLiteLLMReasoning({"thinking": {"type": "adaptive"}}, supports_reasoning=True)
+
+    with caplog.at_level("WARNING"):
+        tokens = _reasoning_tokens("anthropic/claude-opus-4-6", {"reasoning_effort": "high"}, fake)
+
+    assert tokens == 0
+    assert "leaves out" in caplog.text
+
+
+def test_gpt_6_without_a_litellm_budget_reasons_at_its_measured_rate():
+    fake = FakeLiteLLMReasoning({"reasoning_effort": "high"}, supports_reasoning=True)
+
+    assert _reasoning_tokens("openrouter/openai/gpt-6.1-sol", {"reasoning_effort": "high"}, fake) == 570
+
+
+def test_gpt_6_whose_reasoning_settings_litellm_rejects_reasons_at_its_measured_rate():
+    fake = FakeLiteLLMReasoning()
+
+    assert _reasoning_tokens("openrouter/openai/gpt-6.1-sol", {"reasoning_effort": "high"}, fake) == 570
+
+
+def test_gpt_6_reasons_at_its_measured_rate_within_max_new_tokens():
+    tokens = _reasoning_tokens("openai/gpt-6.1-sol", {"reasoning_effort": "xhigh"}, FakeLiteLLMReasoning(), 600)
+
+    assert tokens == 4096 - 600
+
+
+def test_litellm_is_not_asked_about_a_model_without_reasoning_settings():
+    fake = FakeLiteLLMReasoning({"thinkingConfig": {"thinkingBudget": 2048}}, supports_reasoning=True)
+
+    tokens = _reasoning_tokens("gemini/gemini-2.5-pro", {}, fake)
+
+    assert fake.translated == []
+    assert tokens == 0
+
+
+def test_a_model_that_cannot_reason_has_no_reasoning_to_estimate(caplog):
+    with caplog.at_level("INFO"):
+        tokens = _reasoning_tokens("gpt-4o", {}, FakeLiteLLMReasoning())
+
+    assert tokens == 0
+    assert caplog.text == ""
+
+
+def test_a_client_works_out_its_reasoning_estimate_once_for_all_its_requests(caplog):
+    fake = FakeLiteLLMReasoning({"thinking": {"type": "enabled", "budget_tokens": 1024}})
+    client = _reasoning_client("anthropic/claude-sonnet-4-5", {"reasoning_effort": "low"}, fake)
+
+    with caplog.at_level("INFO"):
+        client.estimate_usage(_prompt(), 100)
+        client.estimate_usage(_prompt(), 100)
+
+    assert len(fake.translated) == 1
+    assert caplog.text.count("thinking budget") == 1
+
+
+@pytest.mark.slow
+def test_estimated_usage_prices_a_known_model_with_litellm_and_bills_cached_tokens_for_less():
+    pytest.importorskip("litellm")
+    client = LiteLLMCompletionClient("gpt-4o", CompletionSettings(0.0, 16, 0, 10))
+
+    described = client.estimate_usage([{"role": "user", "content": "word " * 10000}], 1000, 8000).describe()
+
+    assert "cost unavailable" not in described
+    assert "if the provider caches" in described
+
+
+@pytest.mark.slow
+def test_estimated_usage_is_unpriced_for_a_model_missing_from_litellms_price_list():
+    pytest.importorskip("litellm")
+    client = LiteLLMCompletionClient("openrouter/made-up/nonexistent", CompletionSettings(0.0, 16, 0, 10))
+
+    assert client.estimate_usage(_prompt(), 1000).to_record()["cost"] is None
+
+
+@pytest.mark.slow
+def test_litellm_gives_claude_a_thinking_budget_for_a_reasoning_effort():
+    pytest.importorskip("litellm")
+    settings = CompletionSettings(0.0, 8192, 0, 10)
+    client = LiteLLMCompletionClient("anthropic/claude-sonnet-4-5", settings, {"reasoning_effort": "low"})
+
+    assert client.estimate_usage(_prompt(), 100).to_record()["completion_tokens"] == 100 + 1024
+
+
+@pytest.mark.slow
+def test_litellm_gives_gemini_a_thinking_budget_for_a_reasoning_effort():
+    pytest.importorskip("litellm")
+    settings = CompletionSettings(0.0, 8192, 0, 10)
+    client = LiteLLMCompletionClient("gemini/gemini-2.5-pro", settings, {"reasoning_effort": "high"})
+
+    assert client.estimate_usage(_prompt(), 100).to_record()["completion_tokens"] == 100 + 4096
+
+
+# --- dry runs -------------------------------------------------------------------------------
+
+
+class PricedClient(ScriptedClient):
+    """A scripted client with flat per-token prices, which bills cached prompt tokens at a tenth of the price."""
+
+    def __init__(self, prices_cached_prompts: bool = True, reasoning: Optional[ReasoningEstimate] = None) -> None:
+        super().__init__(lambda messages: "hola")
+        self._prices_cached_prompts = prices_cached_prompts
+        self._reasoning = reasoning if reasoning is not None else NoReasoning()
+
+    def _price(self, prompt_tokens: int, completion_tokens: int, cached_prompt_tokens: int = 0) -> LLMUsageStatistics:
+        if cached_prompt_tokens > 0 and not self._prices_cached_prompts:
+            return unpriced(prompt_tokens, completion_tokens)
+        uncached_tokens = prompt_tokens - cached_prompt_tokens
+        cost = uncached_tokens * 0.001 + cached_prompt_tokens * 0.0001 + completion_tokens * 0.002
+        return priced(prompt_tokens, completion_tokens, cost)
+
+    def _reasoning_estimate(self) -> ReasoningEstimate:
+        return self._reasoning
+
+
+def make_dry_run_model(
+    tmp_path: Path, client: Optional[ScriptedClient] = None, with_corpus: bool = True, **overrides
+) -> Tuple[DryRunRemoteLLMModel, ScriptedClient]:
+    if with_corpus and not (tmp_path / "train.src.txt").is_file():
+        write_training_corpus(tmp_path)
+    if client is None:
+        client = ScriptedClient(lambda messages: "hola")
+    return DryRunRemoteLLMModel(make_config(tmp_path, **overrides), ScriptedClientFactory(client)), client
+
+
+def write_large_training_corpus(exp_dir: Path) -> None:
+    """Enough examples that, sent whole, they make a system message long enough for a provider to cache."""
+    (exp_dir / "train.src.txt").write_text("".join(f"verse {i} of the source\n" for i in range(300)), encoding="utf-8")
+    (exp_dir / "train.trg.txt").write_text("".join(f"versículo {i} del texto\n" for i in range(300)), encoding="utf-8")
+
+
+def words_in_the_first_request(exp_dir: Path, sources: List[str], **overrides) -> Tuple[int, int]:
+    """The words a real run sends in its first request, and in that request's system message."""
+    exp_dir.mkdir(exist_ok=True)
+    model, client = make_model(exp_dir, lambda messages: "hola", **overrides)
+    list(model.translate(sources, "en", "es"))
+    messages = client.calls[0]
+    system_message_words = len(messages[0]["content"].split()) if messages[0]["role"] == "system" else 0
+    return sum(len(message["content"].split()) for message in messages), system_message_words
+
+
+def dollars_in(text: str) -> List[float]:
+    return [float(amount) for amount in re.findall(r"\$(\d+\.\d{4})", text)]
+
+
+def test_a_dry_run_sends_no_request(tmp_path: Path):
+    model, client = make_dry_run_model(tmp_path)
+
+    list(model.translate(["one", "two"], "en", "es"))
+
+    assert client.calls == []
+
+
+def test_a_dry_run_yields_a_blank_translation_for_each_segment(tmp_path: Path):
+    model, _ = make_dry_run_model(tmp_path)
+
+    assert translations_of(list(model.translate(["one", "two"], "en", "es"))) == ["", ""]
+
+
+def test_a_dry_run_model_produces_no_translations(tmp_path: Path):
+    model, _ = make_dry_run_model(tmp_path)
+    assert not model.produces_translations()
+
+
+def test_a_remote_model_produces_translations(tmp_path: Path):
+    model, _ = make_model(tmp_path, lambda messages: "hola")
+    assert model.produces_translations()
+
+
+def test_a_remote_llm_config_creates_a_dry_run_model(tmp_path: Path):
+    client = ScriptedClient(lambda messages: "hola")
+    model = make_config(tmp_path).create_dry_run_model(ScriptedClientFactory(client))
+    assert not model.produces_translations()
+
+
+def test_a_dry_run_counts_the_tokens_of_the_prompt_a_real_run_would_send(tmp_path: Path, caplog):
+    prompt_words, _ = words_in_the_first_request(tmp_path / "real", ["one"])
+    model, _ = make_dry_run_model(tmp_path)
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one"], "en", "es"))
+
+    assert f"1 requests, {prompt_words:,} prompt" in caplog.text
+
+
+def test_a_dry_run_estimates_a_reply_from_the_corpus_length_ratio(tmp_path: Path, caplog):
+    # The corpus has 6 target words for its 7 source words.
+    model, _ = make_dry_run_model(tmp_path)
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one two three four five six seven"], "en", "es"))
+
+    assert "+ 6 completion tokens" in caplog.text
+    assert "0.86 target tokens per source token" in caplog.text
+
+
+def test_a_dry_run_estimates_a_batched_reply_with_its_line_numbers(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path, infer={"infer_batch_size": 2})
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one two three four five six seven", "a b c d e f g"], "en", "es"))
+
+    # 12 words for the 14 source words, and 2 for the line numbers.
+    assert "1 requests" in caplog.text
+    assert "+ 14 completion tokens" in caplog.text
+
+
+def test_a_dry_run_without_a_training_corpus_estimates_a_reply_as_long_as_its_source(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path, with_corpus=False, infer={"prompt": {"num_examples": 0}})
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one two three"], "en", "es"))
+
+    assert "+ 3 completion tokens" in caplog.text
+    assert "no training corpus" in caplog.text
+
+
+def test_a_dry_run_reports_the_estimated_cost(tmp_path: Path, caplog):
+    prompt_words, _ = words_in_the_first_request(tmp_path / "real", ["one"])
+    model, _ = make_dry_run_model(tmp_path, PricedClient())
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one"], "en", "es"))
+
+    # "one" is estimated to need one completion token.
+    assert f"${prompt_words * 0.001 + 0.002:.4f}" in caplog.text
+
+
+def test_a_dry_run_of_a_model_without_a_price_reports_no_cost(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path)
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one"], "en", "es"))
+
+    assert "cost unavailable" in caplog.text
+
+
+def test_a_dry_run_reports_what_caching_the_shared_system_message_would_save(tmp_path: Path, caplog):
+    settings = {"infer": {"prompt": {"num_examples": 1000}, "concurrency": 1}}
+    (tmp_path / "real").mkdir()
+    write_large_training_corpus(tmp_path / "real")
+    _, system_message_words = words_in_the_first_request(tmp_path / "real", ["one"], **settings)
+    write_large_training_corpus(tmp_path)
+    model, _ = make_dry_run_model(tmp_path, PricedClient(), **settings)
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one", "two"], "en", "es"))
+
+    total_line = [line for line in caplog.text.splitlines() if "total so far" in line][-1]
+    uncached, cached = dollars_in(total_line)
+    assert system_message_words >= 1024
+    # The second request reads the system message from the cache at a tenth of the price.
+    assert uncached - cached == pytest.approx(system_message_words * 0.0009, abs=0.0002)
+    assert "if the provider caches the system message" in total_line
+
+
+def test_a_dry_run_reports_no_cached_cost_for_a_system_message_too_short_to_cache(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path, PricedClient())
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one", "two"], "en", "es"))
+
+    assert "caches" not in caplog.text
+
+
+def test_a_dry_run_reports_no_cached_cost_for_a_model_without_a_cache_price(tmp_path: Path, caplog):
+    write_large_training_corpus(tmp_path)
+    model, _ = make_dry_run_model(
+        tmp_path, PricedClient(prices_cached_prompts=False), infer={"prompt": {"num_examples": 1000}}
+    )
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one", "two"], "en", "es"))
+
+    assert "caches" not in caplog.text
+
+
+def test_a_dry_run_counts_a_request_for_each_draft(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path, infer={"num_drafts": 2, "temperature": 0.8})
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one"], "en", "es", produce_multiple_translations=True))
+
+    assert "2 requests" in caplog.text
+
+
+def test_a_dry_run_bills_nothing_for_a_segment_the_corpus_already_translates(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path)
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["let there be light"], "en", "es"))
+
+    assert "0 requests" in caplog.text
+    assert "translations copied from the training corpus: 1" in caplog.text
+
+
+def test_a_dry_run_keeps_a_running_total_across_translations(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path)
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one"], "en", "es"))
+        list(model.translate(["two"], "en", "es"))
+
+    assert "the estimated total so far is 2 requests" in caplog.text
+
+
+def test_a_dry_run_does_not_warn_of_blank_translations(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path)
+
+    with caplog.at_level("WARNING"):
+        list(model.translate(["one"], "en", "es"))
+
+    assert "left blank" not in caplog.text
+
+
+def test_a_dry_run_warns_that_its_estimate_leaves_out_reasoning(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path, PricedClient(reasoning=UnknownReasoning("a-model")))
+
+    with caplog.at_level("WARNING"):
+        list(model.translate(["one"], "en", "es"))
+
+    assert "reasoning" in caplog.text
+
+
+def test_a_dry_run_of_a_model_that_cannot_reason_says_nothing_of_reasoning(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path, PricedClient())
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one"], "en", "es"))
+
+    assert "reasoning" not in caplog.text
+
+
+def test_a_dry_run_adds_estimated_reasoning_to_the_completion_tokens(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path, PricedClient(reasoning=MeasuredReasoning("a-model", 4096, 2.0, "a test")))
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one two three four five six seven"], "en", "es"))
+
+    # A 6-token reply, and twice that in reasoning.
+    assert "+ 18 completion tokens" in caplog.text
+
+
+def test_a_dry_run_bills_estimated_reasoning_as_output(tmp_path: Path, caplog):
+    prompt_words, _ = words_in_the_first_request(tmp_path / "real", ["one"])
+    model, _ = make_dry_run_model(tmp_path, PricedClient(reasoning=MeasuredReasoning("a-model", 4096, 2.0, "a test")))
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one"], "en", "es"))
+
+    # A 1-token reply and 2 tokens of reasoning.
+    assert f"${prompt_words * 0.001 + 3 * 0.002:.4f}" in caplog.text
+
+
+def test_a_dry_run_reports_how_much_of_its_total_is_measured_reasoning(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path, PricedClient(reasoning=MeasuredReasoning("a-model", 4096, 2.0, "a test")))
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one two three four five six seven"], "en", "es"))
+        list(model.translate(["one"], "en", "es"))
+
+    total_line = [line for line in caplog.text.splitlines() if "total so far" in line][-1]
+    assert "includes about 14 reasoning tokens" in total_line
+
+
+def test_a_dry_run_with_a_thinking_budget_reports_an_upper_bound(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path, PricedClient(reasoning=ReasoningBudget("a-model", 4096, 100)))
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one"], "en", "es"))
+
+    total_line = [line for line in caplog.text.splitlines() if "total so far" in line][-1]
+    assert "+ 101 completion tokens" in total_line
+    assert "up to 100 reasoning tokens, so the cost is an upper bound" in total_line
+
+
+def test_a_dry_run_announces_how_it_estimates_reasoning(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path, PricedClient(reasoning=MeasuredReasoning("a-model", 4096, 2.0, "a test")))
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one"], "en", "es"))
+
+    assert "2 tokens per reply token, as measured for a test" in caplog.text
+
+
+def test_a_dry_run_warns_once_that_reasoning_would_crowd_out_replies(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(
+        tmp_path, PricedClient(reasoning=ReasoningBudget("a-model", 50, 100)), infer={"concurrency": 1}
+    )
+
+    with caplog.at_level("WARNING"):
+        list(model.translate(["one", "two"], "en", "es"))
+
+    assert caplog.text.count("cut short or blank") == 1
+
+
+def test_a_dry_run_fails_when_the_model_tokens_cannot_be_counted(tmp_path: Path):
+    model, _ = make_dry_run_model(tmp_path, ScriptedClient(lambda messages: "hola", tokens_per_word=None))
+
+    with pytest.raises(RuntimeError, match="could not be counted"):
+        list(model.translate(["one"], "en", "es"))
+
+
+def test_estimated_usage_fails_for_a_client_that_cannot_count_tokens():
+    client = ScriptedClient(lambda messages: "hola", tokens_per_word=None)
+
+    with pytest.raises(RuntimeError, match="could not be counted"):
+        client.estimate_usage([{"role": "user", "content": "hello"}], 10)
+
+
+def test_a_dry_run_bills_nothing_for_a_reply_an_earlier_run_saved(tmp_path: Path, caplog):
+    real, _ = make_model(tmp_path, lambda messages: "hola", infer={"concurrency": 1})
+    list(real.translate(["one"], "en", "es"))
+    model, _ = make_dry_run_model(tmp_path, infer={"concurrency": 1})
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one", "two"], "en", "es"))
+
+    assert "1 requests" in caplog.text
+    assert "replies reused from an earlier run: 1" in caplog.text
+
+
+def test_a_dry_run_leaves_an_earlier_runs_saved_replies_as_it_found_them(tmp_path: Path):
+    real, _ = make_model(tmp_path, lambda messages: "hola")
+    list(real.translate(["one"], "en", "es"))
+    before = (tmp_path / "remote_llm_replies.jsonl").read_bytes()
+    model, _ = make_dry_run_model(tmp_path)
+
+    list(model.translate(["one", "two"], "en", "es"))
+
+    assert (tmp_path / "remote_llm_replies.jsonl").read_bytes() == before
+
+
+def test_a_dry_run_saves_no_replies(tmp_path: Path):
+    model, _ = make_dry_run_model(tmp_path)
+
+    list(model.translate(["one"], "en", "es"))
+
+    assert list(tmp_path.glob("*.jsonl")) == []
+
+
+def test_a_forced_dry_run_bills_every_request_but_keeps_the_saved_replies(tmp_path: Path, caplog):
+    real, _ = make_model(tmp_path, lambda messages: "hola")
+    list(real.translate(["one"], "en", "es"))
+    model, _ = make_dry_run_model(tmp_path)
+
+    model.discard_saved_inference()
+    with caplog.at_level("INFO"):
+        list(model.translate(["one"], "en", "es"))
+
+    assert "1 requests" in caplog.text
+    assert "reused" not in caplog.text
+    assert (tmp_path / "remote_llm_replies.jsonl").is_file()
+
+
+def test_a_dry_run_of_test_files_writes_no_predictions(tmp_path: Path):
+    (tmp_path / "test.src.txt").write_text("one\ntwo\n", encoding="utf-8")
+    model, client = make_dry_run_model(tmp_path)
+
+    model.translate_test_files([tmp_path / "test.src.txt"], [tmp_path / "out.txt"])
+
+    assert not (tmp_path / "out.txt").exists()
+    assert client.calls == []
+
+
+def test_a_dry_run_still_rejects_confidences_the_provider_cannot_give(tmp_path: Path):
+    (tmp_path / "test.src.txt").write_text("one\n", encoding="utf-8")
+    model, _ = make_dry_run_model(tmp_path)
+
+    with pytest.raises(RuntimeError, match="log probabilities"):
+        model.translate_test_files([tmp_path / "test.src.txt"], [tmp_path / "out.txt"], save_confidences=True)
+
+
+def test_a_dry_run_of_the_test_step_writes_no_predictions_or_scores(tmp_path: Path):
+    (tmp_path / "test.src.txt").write_text("one\ntwo\n", encoding="utf-8")
+    (tmp_path / "test.trg.detok.txt").write_text("uno\ndos\n", encoding="utf-8")
+    (tmp_path / "test.vref.txt").write_text("MAT 1:1\nMAT 1:2\n", encoding="utf-8")
+    write_training_corpus(tmp_path)
+    config = make_config(tmp_path)
+    client = ScriptedClient(lambda messages: "hola")
+
+    test_step.test(config, scorers={"bleu"}, model=DryRunRemoteLLMModel(config, ScriptedClientFactory(client)))
+
+    assert list(tmp_path.glob("test.trg-predictions*")) == []
+    assert list(tmp_path.glob("scores-*")) == []
+    assert client.calls == []
+
+
+def write_experiment(mt_experiments_dir: Path) -> Path:
+    exp_dir = mt_experiments_dir / "exp"
+    exp_dir.mkdir()
+    config = {
+        "model_type": "remote_llm",
+        "model": "gpt-4o",
+        "data": {"corpus_pairs": [], "lang_codes": {"en": "English", "es": "Spanish"}},
+        "infer": {"prompt": {"num_examples": 10}},
+    }
+    (exp_dir / "config.yml").write_text(yaml.dump(config), encoding="utf-8")
+    write_training_corpus(exp_dir)
+    for side in ("src", "trg"):
+        (exp_dir / f"train.{side}.detok.txt").write_text((exp_dir / f"train.{side}.txt").read_text(encoding="utf-8"))
+    return exp_dir
+
+
+def dry_run_translation_task(mt_experiments_dir: Path, client: ScriptedClient) -> TranslationTask:
+    environment = SilNlpEnv.create_environment_with_mt_experiments_dir(mt_experiments_dir)
+    config = load_config("exp", environment)
+    assert isinstance(config, RemoteLLMConfig)
+    model = DryRunRemoteLLMModel(config, ScriptedClientFactory(client))
+    return TranslationTask(name="exp", model=model, environment=environment)
+
+
+def test_a_dry_run_translation_of_a_text_file_writes_nothing(tmp_path: Path):
+    exp_dir = write_experiment(tmp_path)
+    (exp_dir / "source.txt").write_text("one\ntwo\n", encoding="utf-8")
+    client = ScriptedClient(lambda messages: "hola")
+
+    dry_run_translation_task(tmp_path, client).translate_files("source.txt", None, "en", "es")
+
+    assert not (exp_dir / "infer").exists()
+    assert client.calls == []
+
+
+def test_a_dry_run_translation_of_a_usfm_file_writes_nothing(tmp_path: Path):
+    exp_dir = write_experiment(tmp_path)
+    (exp_dir / "source.SFM").write_text("\\id MAT\n\\c 1\n\\v 1 one\n\\v 2 two\n", encoding="utf-8")
+    client = ScriptedClient(lambda messages: "hola")
+
+    dry_run_translation_task(tmp_path, client).translate_files("source.SFM", "out.SFM", "en", "es", vref=True)
+
+    assert not (exp_dir / "out.SFM").exists()
+    assert not (exp_dir / "out.txt").exists()
+    assert client.calls == []
+
+
+def test_a_dry_run_translation_of_a_docx_file_writes_nothing(tmp_path: Path):
+    docx = pytest.importorskip("docx")
+    exp_dir = write_experiment(tmp_path)
+    document = docx.Document()
+    document.add_paragraph("One. Two.")
+    document.save(str(exp_dir / "source.docx"))
+    client = ScriptedClient(lambda messages: "hola")
+
+    dry_run_translation_task(tmp_path, client).translate_files("source.docx", "out.docx", "en", "es")
+
+    assert not (exp_dir / "out.docx").exists()
+    assert client.calls == []
+
+
+def test_a_dry_run_translation_of_a_folder_creates_no_output_folders(tmp_path: Path):
+    exp_dir = write_experiment(tmp_path)
+    (exp_dir / "sources" / "part").mkdir(parents=True)
+    (exp_dir / "sources" / "part" / "source.txt").write_text("one\n", encoding="utf-8")
+    client = ScriptedClient(lambda messages: "hola")
+
+    dry_run_translation_task(tmp_path, client).translate_files("sources", "out", "en", "es")
+
+    assert not (exp_dir / "out").exists()
+    assert client.calls == []
+
+
+def test_a_dry_run_translation_does_not_estimate_quality(tmp_path: Path):
+    exp_dir = write_experiment(tmp_path)
+    (exp_dir / "source.txt").write_text("one\n", encoding="utf-8")
+    client = ScriptedClient(lambda messages: "hola")
+
+    # Quality estimation would fail on the missing linregress file and confidences.
+    dry_run_translation_task(tmp_path, client).translate_files(
+        "source.txt", None, "en", "es", linregress_path=exp_dir / "linregress.json"
+    )
+
+    assert not (exp_dir / "infer").exists()

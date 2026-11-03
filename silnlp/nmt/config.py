@@ -248,6 +248,10 @@ class NMTModel(ABC):
     def discard_saved_inference(self) -> None:
         """Only a model that saves its inference, so that a rerun resumes, has anything to discard."""
 
+    def produces_translations(self) -> bool:
+        """False for a dry run, whose translations are blank placeholders that must not be written or scored."""
+        return True
+
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         return resolve_checkpoint_path(self._config.model_dir, ckpt)
 
@@ -442,6 +446,12 @@ class Config(ABC):
     def create_model(
         self, mixed_precision: bool = True, num_devices: int = 1, clearml_queue: Optional[str] = None
     ) -> NMTModel: ...
+
+    def create_dry_run_model(self) -> NMTModel:
+        raise ValueError(
+            "A dry run estimates what the requests to a hosted LLM would cost, so it needs an experiment "
+            "with model_type: remote_llm."
+        )
 
     @abstractmethod
     def create_tokenizer(self) -> Tokenizer: ...

@@ -627,6 +627,8 @@ def test_checkpoint(
             save_confidences,
             step if checkpoint_type is CheckpointType.OTHER else checkpoint_type,
         )
+    if not model.produces_translations():
+        return []
 
     if produce_multiple_translations:
         num_drafts = model.get_num_drafts()
@@ -922,6 +924,9 @@ def test(
             save_confidences,
         )
 
+    if not model.produces_translations():
+        return
+
     for step in sorted(results.keys()):
         num_refs = results[step][0].num_refs
         if num_refs == 0:
@@ -1008,6 +1013,13 @@ def main() -> None:
         type=str,
         help=f"Tag to add to the ClearML Task - {TAGS_LIST}",
     )
+    parser.add_argument(
+        "--dry-run",
+        default=False,
+        action="store_true",
+        help="For a remote LLM experiment, build every request and log the tokens and cost it would take, "
+        + "without sending it, writing predictions or scoring.",
+    )
     args = parser.parse_args()
     experiment = args.experiment
     environment = SilNlpEnv.create_standard_environment()
@@ -1042,6 +1054,7 @@ def main() -> None:
         produce_multiple_translations=args.multiple_translations,
         save_confidences=args.save_confidences,
         clearml_queue=args.clearml_queue,
+        model=config.create_dry_run_model() if args.dry_run else None,
     )
 
 

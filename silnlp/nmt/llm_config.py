@@ -25,9 +25,11 @@ from .example_retrieval import (
     ExampleRetriever,
     ExampleRetrieverFactory,
     FixedCorpusPairProvider,
+    LengthRatio,
     TargetLanguageProfile,
     TranslationMemory,
 )
+from .token_counter import TokenCounter
 from .tokenizer import NullTokenizer, Tokenizer
 
 LOGGER = logging.getLogger(__name__)
@@ -293,6 +295,11 @@ class PromptBuilder(Generic[TPromptMessages]):
         if self._pool is None:
             return TranslationMemory([], rng)
         return self._pool.create_translation_memory(rng)
+
+    def create_length_ratio(self, token_counter: TokenCounter) -> LengthRatio:
+        if self._pool is None:
+            return LengthRatio([], token_counter)
+        return self._pool.create_length_ratio(token_counter)
 
 
 @dataclass(frozen=True)

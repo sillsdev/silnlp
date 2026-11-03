@@ -302,6 +302,9 @@ class Translator(AbstractContextManager["Translator"], ABC):
     ) -> Generator[SentenceTranslationGroup, None, None]:
         pass
 
+    def produces_translations(self) -> bool:
+        return True
+
     def translate_text(
         self,
         src_file_path: Path,
@@ -317,6 +320,8 @@ class Translator(AbstractContextManager["Translator"], ABC):
         sentence_translation_groups: List[SentenceTranslationGroup] = list(
             self.translate(sentences, src_iso, trg_iso, produce_multiple_translations)
         )
+        if not self.produces_translations():
+            return
         draft_set = DraftGroup(sentence_translation_groups)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
             if produce_multiple_translations:
@@ -430,6 +435,8 @@ class Translator(AbstractContextManager["Translator"], ABC):
                 produce_multiple_translations,
             )
         )
+        if not self.produces_translations():
+            return
 
         text_behavior = (
             UpdateUsfmTextBehavior.PREFER_NEW if trg_project is not None else UpdateUsfmTextBehavior.STRIP_EXISTING
@@ -581,6 +588,8 @@ class Translator(AbstractContextManager["Translator"], ABC):
         draft_set: DraftGroup = DraftGroup(
             list(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations))
         )
+        if not self.produces_translations():
+            return
 
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
             for para, group in groupby(zip(translated_draft.get_all_translations(), paras), key=lambda t: t[1]):

@@ -207,7 +207,7 @@ def main() -> None:
         "--multiple-translations",
         default=False,
         action="store_true",
-        help='Produce multiple translations of each verse. '
+        help="Produce multiple translations of each verse. "
         + 'These will be saved in separate files with suffixes like ".1.txt", ".2.txt", etc.',
     )
     parser.add_argument(
@@ -222,6 +222,12 @@ def main() -> None:
         default=False,
         action="store_true",
         help="Infer again even where test predictions exist, without reusing replies an earlier run saved",
+    )
+    parser.add_argument(
+        "--dry-run",
+        default=False,
+        action="store_true",
+        help="Only for remote LLM: run every step but instead of sending queries, estimate the number of tokens and cost",
     )
     parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")
     parser.add_argument(
@@ -275,11 +281,14 @@ def main() -> None:
         tag=args.clearml_tag,
         environment=environment,
     )
-    model = clearml.config.create_model(
-        mixed_precision=not args.disable_mixed_precision,
-        num_devices=args.num_devices,
-        clearml_queue=args.clearml_queue,
-    )
+    if args.dry_run:
+        model = clearml.config.create_dry_run_model()
+    else:
+        model = clearml.config.create_model(
+            mixed_precision=not args.disable_mixed_precision,
+            num_devices=args.num_devices,
+            clearml_queue=args.clearml_queue,
+        )
 
     exp = SILExperiment(
         name=clearml.name,
