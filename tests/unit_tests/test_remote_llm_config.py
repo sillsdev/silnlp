@@ -208,6 +208,7 @@ def test_config_defaults(tmp_path: Path):
     assert config.infer["num_retries"] == 8
     assert config.infer["reuse_saved_replies"] is True
     assert config.infer["copy_exact_matches"] is True
+    assert config.get_prompt()["back_translation"] is False
     # The hosted model tokenizes for itself, so preprocessing writes raw text.
     assert config.data["tokenize"] is False
     assert config.model_dir == tmp_path / "run"
@@ -402,6 +403,48 @@ def test_full_corpus_block_goes_in_the_system_message(tmp_path: Path):
     assert first[0]["content"] == second[0]["content"]
     assert corpus_block in first[0]["content"]
     assert corpus_block not in first[1]["content"]
+
+
+def test_a_back_translation_prompt_asks_for_the_source_wording_rendered_faithfully(tmp_path: Path):
+    config = make_config(tmp_path, infer={"prompt": {"back_translation": True}})
+    system = config.build_messages(["hola"], [], ES, EN)[0]["content"]
+
+    assert system.startswith("Translate the final Spanish Bible verse into English")
+    assert system.endswith(
+        "alternative translations.\nA back-translation shows what the Spanish text ACTUALLY says, so a reviewer "
+        "who does not read Spanish can check it. Render the Spanish wording faithfully, including anything "
+        "unexpected, unusual, added, missing or apparently mistaken — do NOT smooth it toward a familiar or "
+        "expected wording, and do not supply content that is not in the Spanish."
+    )
+
+
+def test_a_back_translation_batch_prompt_also_asks_for_the_source_wording_rendered_faithfully(tmp_path: Path):
+    config = make_config(tmp_path, infer={"prompt": {"back_translation": True}})
+    system = config.build_messages(["uno", "dos"], [], ES, EN)[0]["content"]
+
+    assert "alternative translations.\nA back-translation shows what the Spanish text ACTUALLY says" in system
+
+
+def test_back_translation_guidance_follows_a_custom_system_message(tmp_path: Path):
+    config = make_config(tmp_path, infer={"prompt": {"system_message": "Be terse.", "back_translation": True}})
+    system = config.build_messages(["hola"], [], ES, EN)[0]["content"]
+
+    assert system.startswith("Be terse.\nA back-translation shows what the Spanish text ACTUALLY says")
+
+
+def test_back_translation_guidance_follows_a_custom_batch_system_message(tmp_path: Path):
+    config = make_config(tmp_path, infer={"prompt": {"batch_system_message": "Number them.", "back_translation": True}})
+    system = config.build_messages(["uno", "dos"], [], ES, EN)[0]["content"]
+
+    assert system.startswith("Number them.\nA back-translation shows what the Spanish text ACTUALLY says")
+
+
+def test_back_translation_guidance_alone_replaces_an_empty_system_message(tmp_path: Path):
+    config = make_config(tmp_path, infer={"prompt": {"system_message": "", "back_translation": True}})
+    system = config.build_messages(["hola"], [], ES, EN)[0]
+
+    assert system["role"] == "system"
+    assert system["content"].startswith("A back-translation shows what the Spanish text ACTUALLY says")
 
 
 # --- model ------------------------------------------------------------------------------
@@ -934,6 +977,26 @@ def test_the_effective_config_records_the_prompts_actually_used(tmp_path: Path):
     assert "one numbered line per source passage" in prompt["batch_system_message"]
     assert "{source}" in prompt["instruction_template"]
     assert "{num_segments}" in prompt["batch_instruction_template"]
+
+
+def test_the_effective_config_records_the_back_translation_guidance(tmp_path: Path):
+    model, _ = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"back_translation": True}})
+    path = tmp_path / "effective-config.yml"
+    model.save_effective_config(path)
+
+    prompt = yaml.safe_load(path.read_text(encoding="utf-8"))["infer"]["prompt"]
+    assert "A back-translation shows what the {src_lang} text ACTUALLY says" in prompt["system_message"]
+    assert "A back-translation shows what the {src_lang} text ACTUALLY says" in prompt["batch_system_message"]
+
+
+def test_an_effective_config_run_again_does_not_repeat_the_back_translation_guidance(tmp_path: Path):
+    model, _ = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"back_translation": True}})
+    path = tmp_path / "effective-config.yml"
+    model.save_effective_config(path)
+
+    rerun = RemoteLLMConfig(tmp_path, yaml.safe_load(path.read_text(encoding="utf-8")), Mock())
+    assert rerun.build_messages(["hola"], [], ES, EN)[0]["content"].count("A back-translation shows") == 1
+    assert rerun.build_messages(["uno", "dos"], [], ES, EN)[0]["content"].count("A back-translation shows") == 1
 
 
 # --- token counting -----------------------------------------------------------------------

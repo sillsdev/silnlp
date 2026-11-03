@@ -981,7 +981,7 @@ def submit_experiments(
     names = [experiment.folder.relative_to(experiments_dir).as_posix() for experiment in experiments]
     print("\nTo run the experiments:")
     for name in names:
-        print(f"  poetry run python {' '.join(experiment_args)} {name}")
+        print(f"  uv run python {' '.join(experiment_args)} {name}")
     if submit is None:
         try:
             reply = input(f"\nRun {len(names)} experiment(s) now? [y/N]: ").strip().lower()

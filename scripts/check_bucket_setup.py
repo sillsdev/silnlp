@@ -6,7 +6,7 @@ the rclone configuration and mount, and ClearML credentials, then prints a repor
 with a remediation hint for every failure.
 
 The script uses only the Python standard library so that it runs even when the
-poetry/conda environment is broken or missing:
+uv/conda environment is broken or missing:
 
     python scripts/check_bucket_setup.py
 
