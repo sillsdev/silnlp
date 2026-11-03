@@ -647,6 +647,16 @@ def test_translate_test_files_writes_one_line_per_source(tmp_path: Path):
     assert (tmp_path / "out.txt").read_text(encoding="utf-8").splitlines() == ["hola", "hola"]
 
 
+def test_translating_test_files_reports_the_usage_of_each_file_by_name(tmp_path: Path, caplog):
+    (tmp_path / "test.src.txt").write_text("one\ntwo\n", encoding="utf-8")
+    model, _ = make_model(tmp_path, lambda messages: "hola", infer={"concurrency": 1})
+
+    with caplog.at_level("INFO"):
+        model.translate_test_files([tmp_path / "test.src.txt"], [tmp_path / "out.txt"])
+
+    assert "Translated test.src.txt (2 segments) using" in caplog.text
+
+
 def test_a_reply_with_an_aside_still_writes_one_line_per_source(tmp_path: Path):
     (tmp_path / "test.src.txt").write_text("one\ntwo\n", encoding="utf-8")
     model, _ = make_model(tmp_path, lambda messages: "Sure! Here it is:\nsea la luz", infer={"concurrency": 1})
@@ -2171,6 +2181,10 @@ def dollars_in(text: str) -> List[float]:
     return [float(amount) for amount in re.findall(r"\$(\d+\.\d{4})", text)]
 
 
+def estimates_logged(caplog) -> List[str]:
+    return [record.getMessage() for record in caplog.records if "would take" in record.getMessage()]
+
+
 def test_a_dry_run_sends_no_request(tmp_path: Path):
     model, client = make_dry_run_model(tmp_path)
 
@@ -2274,12 +2288,12 @@ def test_a_dry_run_reports_what_caching_the_shared_system_message_would_save(tmp
     with caplog.at_level("INFO"):
         list(model.translate(["one", "two"], "en", "es"))
 
-    total_line = [line for line in caplog.text.splitlines() if "total so far" in line][-1]
-    uncached, cached = dollars_in(total_line)
+    [estimate] = estimates_logged(caplog)
+    uncached, cached = dollars_in(estimate)
     assert system_message_words >= 1024
     # The second request reads the system message from the cache at a tenth of the price.
     assert uncached - cached == pytest.approx(system_message_words * 0.0009, abs=0.0002)
-    assert "if the provider caches the system message" in total_line
+    assert "if the provider caches the system message" in estimate
 
 
 def test_a_dry_run_reports_no_cached_cost_for_a_system_message_too_short_to_cache(tmp_path: Path, caplog):
@@ -2320,6 +2334,59 @@ def test_a_dry_run_bills_nothing_for_a_segment_the_corpus_already_translates(tmp
 
     assert "0 requests" in caplog.text
     assert "translations copied from the training corpus: 1" in caplog.text
+
+
+def test_a_dry_run_explains_how_to_estimate_a_segment_the_corpus_already_translates(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path)
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["let there be light"], "en", "es"))
+
+    assert "A real run would copy 1 translations from training examples" in caplog.text
+    assert "Set infer.copy_exact_matches to false to estimate requesting them." in caplog.text
+
+
+def test_a_dry_run_that_sends_every_request_explains_nothing_of_reuse_or_copies(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path)
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one"], "en", "es"))
+
+    assert "A real run would" not in caplog.text
+
+
+def test_a_dry_run_keeps_a_files_notes_in_the_same_record_as_its_estimate(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path)
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["let there be light"], "en", "es"))
+
+    [estimate] = estimates_logged(caplog)
+    assert "\n    A real run would copy 1 translations" in estimate
+
+
+def test_a_dry_run_of_a_single_translation_reports_no_separate_total(tmp_path: Path, caplog):
+    model, _ = make_dry_run_model(tmp_path)
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one"], "en", "es"))
+
+    assert "total so far" not in caplog.text
+
+
+def test_a_dry_run_names_the_test_file_each_estimate_is_for(tmp_path: Path, caplog):
+    (tmp_path / "test.en.es.src.txt").write_text("one\n", encoding="utf-8")
+    (tmp_path / "test.es.en.src.txt").write_text("uno\ndos\n", encoding="utf-8")
+    model, _ = make_dry_run_model(tmp_path)
+
+    with caplog.at_level("INFO"):
+        model.translate_test_files(
+            [tmp_path / "test.en.es.src.txt", tmp_path / "test.es.en.src.txt"], [tmp_path / "a.txt", tmp_path / "b.txt"]
+        )
+
+    first, second = estimates_logged(caplog)
+    assert first.startswith("Dry run: translating test.en.es.src.txt (1 segments) would take")
+    assert second.startswith("Dry run: translating test.es.en.src.txt (2 segments) would take")
 
 
 def test_a_dry_run_keeps_a_running_total_across_translations(tmp_path: Path, caplog):
@@ -2397,9 +2464,9 @@ def test_a_dry_run_with_a_thinking_budget_reports_an_upper_bound(tmp_path: Path,
     with caplog.at_level("INFO"):
         list(model.translate(["one"], "en", "es"))
 
-    total_line = [line for line in caplog.text.splitlines() if "total so far" in line][-1]
-    assert "+ 101 completion tokens" in total_line
-    assert "up to 100 reasoning tokens, so the cost is an upper bound" in total_line
+    [estimate] = estimates_logged(caplog)
+    assert "+ 101 completion tokens" in estimate
+    assert "up to 100 reasoning tokens, so the cost is an upper bound" in estimate
 
 
 def test_a_dry_run_announces_how_it_estimates_reasoning(tmp_path: Path, caplog):
@@ -2446,6 +2513,52 @@ def test_a_dry_run_bills_nothing_for_a_reply_an_earlier_run_saved(tmp_path: Path
 
     assert "1 requests" in caplog.text
     assert "replies reused from an earlier run: 1" in caplog.text
+
+
+def test_a_dry_run_explains_how_to_estimate_requests_whose_replies_an_earlier_run_saved(tmp_path: Path, caplog):
+    real, _ = make_model(tmp_path, lambda messages: "hola", infer={"concurrency": 1})
+    list(real.translate(["one"], "en", "es"))
+    model, _ = make_dry_run_model(tmp_path, infer={"concurrency": 1})
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one", "two"], "en", "es"))
+
+    assert "A real run would reuse 1 replies that an earlier run saved" in caplog.text
+    assert "Rerun with --force-infer, or set infer.reuse_saved_replies to false" in caplog.text
+
+
+def test_a_dry_run_estimates_test_predictions_that_are_already_complete(tmp_path: Path):
+    (tmp_path / "test.src.txt").write_text("one\n", encoding="utf-8")
+    (tmp_path / "predictions.txt").write_text("uno\n", encoding="utf-8")
+    model, _ = make_dry_run_model(tmp_path)
+
+    assert not model.has_completed_translation(tmp_path / "test.src.txt", tmp_path / "predictions.txt")
+
+
+def test_a_dry_run_says_beneath_a_files_estimate_that_a_real_run_would_skip_its_complete_predictions(
+    tmp_path: Path, caplog
+):
+    (tmp_path / "test.src.txt").write_text("one\n", encoding="utf-8")
+    (tmp_path / "predictions.txt").write_text("uno\n", encoding="utf-8")
+    model, _ = make_dry_run_model(tmp_path)
+
+    with caplog.at_level("INFO"):
+        model.has_completed_translation(tmp_path / "test.src.txt", tmp_path / "predictions.txt")
+        model.translate_test_files([tmp_path / "test.src.txt"], [tmp_path / "predictions.txt"])
+
+    [estimate] = estimates_logged(caplog)
+    assert "\n    predictions.txt already has every translation, so a real run would skip this file" in estimate
+
+
+def test_a_dry_run_says_nothing_of_complete_predictions_for_a_file_without_them(tmp_path: Path, caplog):
+    (tmp_path / "test.src.txt").write_text("one\n", encoding="utf-8")
+    model, _ = make_dry_run_model(tmp_path)
+
+    with caplog.at_level("INFO"):
+        model.has_completed_translation(tmp_path / "test.src.txt", tmp_path / "predictions.txt")
+        model.translate_test_files([tmp_path / "test.src.txt"], [tmp_path / "predictions.txt"])
+
+    assert "already has every translation" not in caplog.text
 
 
 def test_a_dry_run_leaves_an_earlier_runs_saved_replies_as_it_found_them(tmp_path: Path):

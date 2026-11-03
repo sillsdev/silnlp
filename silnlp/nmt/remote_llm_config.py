@@ -220,6 +220,23 @@ class UsageTotals:
                 summary = f"{summary}; translations copied from the training corpus: {self._copied_translations:,}"
             return summary
 
+    def describe_unsent_requests(self) -> List[str]:
+        with self._lock:
+            descriptions = []
+            if self._reused_replies > 0:
+                descriptions.append(
+                    f"A real run would reuse {self._reused_replies:,} replies that an earlier run saved instead of "
+                    "sending their requests again. Rerun with --force-infer, or set infer.reuse_saved_replies to "
+                    "false, to estimate sending them."
+                )
+            if self._copied_translations > 0:
+                descriptions.append(
+                    f"A real run would copy {self._copied_translations:,} translations from training examples with the "
+                    "same source instead of requesting them. Set infer.copy_exact_matches to false to estimate "
+                    "requesting them."
+                )
+            return descriptions
+
 
 @dataclass(frozen=True)
 class CompletionSettings:
@@ -1215,6 +1232,7 @@ class RemoteLLMModel(NMTModel):
                     self._config.language(trg_iso),
                     produce_multiple_translations,
                     save_confidences,
+                    input_path,
                 )
             )
             self._save_test_translations(groups, translation_path, produce_multiple_translations, save_confidences)
@@ -1289,6 +1307,7 @@ class RemoteLLMModel(NMTModel):
         trg_lang: Language,
         produce_multiple_translations: bool,
         want_logprobs: bool = False,
+        source: Optional[Path] = None,
     ) -> Generator[SentenceTranslationGroup, None, None]:
         num_drafts = self.get_num_drafts() if produce_multiple_translations else 1
         if self._config.drafts_would_be_identical(num_drafts):
@@ -1331,16 +1350,20 @@ class RemoteLLMModel(NMTModel):
                 LOGGER.error("Translation failed after %s.%s", usage.describe(), resume_hint)
                 raise
 
-        self._report_translation(sentences, results, usage)
+        self._report_translation(source, sentences, results, usage)
         for index in range(len(sentences)):
             yield SentenceTranslationGroup(
                 [(results[draft][index] or Completion("")).to_sentence_translation() for draft in range(num_drafts)]
             )
 
     def _report_translation(
-        self, sentences: Sequence[str], results: List[List[Optional[Completion]]], usage: UsageTotals
+        self,
+        source: Optional[Path],
+        sentences: Sequence[str],
+        results: List[List[Optional[Completion]]],
+        usage: UsageTotals,
     ) -> None:
-        LOGGER.info("Translated %s segments using %s.", f"{len(sentences):,}", usage.describe())
+        LOGGER.info("Translated %s using %s.", self._describe_translated(source, sentences), usage.describe())
         num_blank = sum(
             1
             for draft in results
@@ -1353,6 +1376,10 @@ class RemoteLLMModel(NMTModel):
                 f"{num_blank:,}",
                 " Rerunning sends only those again." if self._reply_reusing_client is not None else "",
             )
+
+    def _describe_translated(self, source: Optional[Path], sentences: Sequence[str]) -> str:
+        segments = f"{len(sentences):,} segments"
+        return segments if source is None else f"{source.name} ({segments})"
 
     def _translate_batch(
         self,
@@ -1559,8 +1586,19 @@ class DryRunRemoteLLMModel(RemoteLLMModel):
         super().__init__(config, completion_client_factory)
         self._estimator: Optional[UsageEstimator] = None
         self._run_usage = UsageTotals()
+        self._translations_reported = 0
+        # Keyed by source file, so that a file's estimate can say that its predictions are already complete.
+        self._finished_predictions: Dict[Path, Path] = {}
 
     def produces_translations(self) -> bool:
+        return False
+
+    def has_completed_translation(self, input_path: Path, translation_path: Path) -> bool:
+        if super().has_completed_translation(input_path, translation_path):
+            self._finished_predictions[input_path] = translation_path
+        else:
+            self._finished_predictions.pop(input_path, None)
+        # Even a finished file is estimated, so that the dry run can say what translating it again would take.
         return False
 
     def _create_saved_replies(self, path: Path) -> SavedReplies:
@@ -1576,11 +1614,26 @@ class DryRunRemoteLLMModel(RemoteLLMModel):
         pass
 
     def _report_translation(
-        self, sentences: Sequence[str], results: List[List[Optional[Completion]]], usage: UsageTotals
+        self,
+        source: Optional[Path],
+        sentences: Sequence[str],
+        results: List[List[Optional[Completion]]],
+        usage: UsageTotals,
     ) -> None:
         self._run_usage.include(usage)
-        LOGGER.info("Dry run: translating %s segments would take %s.", f"{len(sentences):,}", usage.describe())
-        LOGGER.info("Dry run: the estimated total so far is %s.", self._run_usage.describe())
+        self._translations_reported += 1
+        lines = [f"Dry run: translating {self._describe_translated(source, sentences)} would take {usage.describe()}."]
+        predictions = self._finished_predictions.get(source) if source is not None else None
+        if predictions is not None:
+            lines.append(
+                f"{predictions.name} already has every translation, so a real run would skip this file unless "
+                "--force-infer is added."
+            )
+        lines.extend(usage.describe_unsent_requests())
+        # One record per file, its notes indented beneath, so that they stay together however many files there are.
+        LOGGER.info("\n    ".join(lines))
+        if self._translations_reported > 1:
+            LOGGER.info("Dry run: the estimated total so far is %s.", self._run_usage.describe())
 
     def _complete_texts(
         self,
