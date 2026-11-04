@@ -19,10 +19,10 @@ from transformers.utils import SAFE_WEIGHTS_NAME
 from transformers.utils.generic import to_py_obj
 from transformers.utils.logging import tqdm
 
+from ..common.confidence_files import generate_confidence_files
 from ..common.corpus import count_lines
 from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
-from ..common.translator import generate_confidence_files
 from ..common.utils import merge_dict
 from .batch_size import indicates_out_of_memory
 from .checkpoints import CheckpointDirectory, CheckpointType

@@ -8,13 +8,14 @@ from typing import Generator, Iterable, List, Optional, Tuple, Union
 from machine.corpora import UsfmFileTextCorpus, create_versification_ref_corpus, extract_scripture_corpus
 from machine.scripture import book_number_to_id, get_chapters
 
-from silnlp.common.corpus import load_corpus
-
+from ..common.confidence_files import CONFIDENCE_SUFFIX
+from ..common.corpus import load_corpus
 from ..common.environment import SilNlpEnv
 from ..common.paratext import book_file_name_digits
 from ..common.postprocessor import PostprocessConfig, PostprocessHandler
 from ..common.translation_data_structures import SentenceTranslationGroup
-from ..common.translator import CONFIDENCE_SUFFIX, Translator
+from ..common.translator import Translator
+from ..common.usfm_draft_writer import UsfmDraftWriter
 from ..common.utils import get_git_revision_hash, show_attrs
 from .checkpoints import CheckpointType
 from .clearml_connection import TAGS_LIST, SILClearML
@@ -26,7 +27,9 @@ LOGGER = logging.getLogger((__package__ or "") + ".translate")
 
 
 def export_vref_for_output(output_path: Path, produce_multiple_translations: bool, num_drafts: int = 1) -> None:
-    if produce_multiple_translations:
+    # Drafts are only numbered when there is more than one, so a run that fell back to a single
+    # translation writes its draft under the plain name.
+    if produce_multiple_translations and num_drafts > 1:
         for i in range(1, num_drafts + 1):
             draft_path = output_path.with_suffix(f".{i}{output_path.suffix}")
             if draft_path.exists():
@@ -155,21 +158,23 @@ class TranslationTask:
                 try:
                     LOGGER.info(f"Translating {book} ...")
                     output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
-                    translator.translate_book(
+                    translated = translator.translate_book(
                         src_project,
                         book,
-                        output_path,
                         trg_iso,
-                        src_training_rows,
-                        trg_training_rows,
                         produce_multiple_translations,
-                        save_confidences,
                         chapters if chapters else None,
-                        trg_project,
-                        postprocess_handler,
-                        config.corpus_pairs,
                         tags,
                     )
+                    if translated is not None:
+                        UsfmDraftWriter(
+                            translated,
+                            self.environment,
+                            trg_project,
+                            config.corpus_pairs,
+                            src_training_rows,
+                            trg_training_rows,
+                        ).write(postprocess_handler, output_path, save_confidences)
                     if vref:
                         num_drafts = config.infer.get("num_drafts", 1)
                         export_vref_for_output(output_path, produce_multiple_translations, num_drafts)
@@ -272,19 +277,21 @@ class TranslationTask:
                     if src_training_rows is None or trg_training_rows is None:
                         src_training_rows = list(load_corpus(config.files.train_source_detokenized()))
                         trg_training_rows = list(load_corpus(config.files.train_target_detokenized()))
-                    translator.translate_usfm(
+                    translated = translator.translate_usfm(
                         src_file_path,
-                        trg_file_path,
                         src_iso,
                         trg_iso,
-                        src_training_rows=src_training_rows,
-                        trg_training_rows=trg_training_rows,
-                        produce_multiple_translations=produce_multiple_translations,
-                        save_confidences=save_confidences,
-                        postprocess_handler=postprocess_handler,
-                        training_corpus_pairs=config.corpus_pairs,
+                        produce_multiple_translations,
                         tags=tags,
                     )
+                    if translated is not None:
+                        UsfmDraftWriter(
+                            translated,
+                            self.environment,
+                            training_corpus_pairs=config.corpus_pairs,
+                            source_training_rows=src_training_rows,
+                            target_training_rows=trg_training_rows,
+                        ).write(postprocess_handler, trg_file_path, save_confidences)
                     if vref:
                         num_drafts = config.infer.get("num_drafts", 1)
                         export_vref_for_output(trg_file_path, produce_multiple_translations, num_drafts)
@@ -490,7 +497,7 @@ def main() -> None:
         environment=environment,
     )
 
-    postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args), environment)], environment=environment)
+    postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args))], environment=environment)
 
     if len(args.books) > 0:
         if args.debug:

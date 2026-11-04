@@ -13,9 +13,9 @@ from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_chapters
 from sacrebleu.metrics import BLEUScore
 from scipy.stats import gmean
 
+from ..common.confidence_files import TestConfidenceFile
 from ..common.environment import SilNlpEnv
 from ..common.linear_regression import perform_enhanced_linear_regression
-from ..common.translator import TestConfidenceFile
 from ..common.utils import get_git_revision_hash, set_seed
 from .checkpoints import CheckpointType
 from .clearml_connection import TAGS_LIST, SILClearML

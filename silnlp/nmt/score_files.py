@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from machine.scripture import book_number_to_id
 
-from ..common.translator import CONFIDENCE_SUFFIX
+from ..common.confidence_files import CONFIDENCE_SUFFIX
 from .corpus_inventory import CorpusInventory
 from .prediction_files import PredictionFile
 

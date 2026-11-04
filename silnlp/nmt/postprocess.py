@@ -22,12 +22,14 @@ from transformers.trainer_utils import get_last_checkpoint
 from ..common.corpus import load_corpus
 from ..common.environment import SilNlpEnv
 from ..common.paratext import get_book_path
-from ..common.postprocesser import (
+from ..common.postprocessor import (
     NoDetectedQuoteConventionException,
     PostprocessConfig,
     PostprocessHandler,
+    QuoteConventionSource,
     UnknownQuoteConventionException,
 )
+from ..common.translated_segment import TranslatedSegment
 from ..common.usfm_utils import PARAGRAPH_TYPE_EMBEDS
 from ..common.utils import get_git_revision_hash
 from .checkpoints import CheckpointDirectory
@@ -206,22 +208,23 @@ def postprocess_draft(
             )
             return
 
+    train_src_sentences = []
+    train_trg_sentences = []
+    if train_src_filepath is not None and train_trg_filepath is not None:
+        train_src_sentences = list(load_corpus(train_src_filepath))
+        train_trg_sentences = list(load_corpus(train_trg_filepath))
+
+    updates = postprocess_handler.construct_rows(
+        [
+            TranslatedSegment(source.ref, source.text, draft.text)
+            for source, draft in zip(src_sentences.sentences, draft_sentences.sentences)
+        ],
+        train_src_sentences,
+        train_trg_sentences,
+    )
+
     source_usfm = None
-    if any(config.is_marker_processing_required() for config in postprocess_handler.configs):
-        train_src_sentences = []
-        train_trg_sentences = []
-        if train_src_filepath is not None and train_trg_filepath is not None:
-            train_src_sentences = list(load_corpus(train_src_filepath))
-            train_trg_sentences = list(load_corpus(train_trg_filepath))
-
-        postprocess_handler.construct_rows(
-            [s.ref for s in src_sentences.sentences],
-            [s.text for s in src_sentences.sentences],
-            [s.text for s in draft_sentences.sentences],
-            train_src_sentences,
-            train_trg_sentences
-        )
-
+    if any(update.config.is_marker_processing_required() for update in updates):
         with draft_metadata.source_path.open(encoding=encoding) as f:
             source_usfm = f.read()
         if draft_chapters:
@@ -230,7 +233,8 @@ def postprocess_draft(
                 filter_tokens_by_chapter(tokenizer.tokenize(source_usfm), draft_chapters)
             )
 
-    for config in postprocess_handler.configs:
+    for update in updates:
+        config = update.config
         if config.is_marker_processing_required():
             place_markers_postprocessor = config.create_place_markers_postprocessor()
             source_remark_texts = {text.strip() for _, text in src_sentences.remarks}
@@ -240,7 +244,7 @@ def postprocess_draft(
                 if text.strip() not in source_remark_texts
             ]
             target_usfm = place_markers_postprocessor.postprocess_usfm(
-                source_usfm, config.rows, remarks, stylesheet=stylesheet
+                source_usfm, update.rows, remarks, stylesheet=stylesheet
             )
         else:
             with draft_metadata.draft_path.open(encoding=encoding) as f:
@@ -248,9 +252,11 @@ def postprocess_draft(
 
         if config.is_quotation_mark_denormalization_required():
             try:
-                quotation_denormalization_postprocessor = config.create_denormalize_quotation_marks_postprocessor(
-                    training_corpus_pairs,
-                )
+                quotation_denormalization_postprocessor = QuoteConventionSource(
+                    config.target_quote_convention(),
+                    config.is_quote_convention_detection_required(),
+                    environment,
+                ).create_postprocessor(training_corpus_pairs)
                 target_usfm = quotation_denormalization_postprocessor.postprocess_usfm(
                     target_usfm, stylesheet=stylesheet
                 )
@@ -287,7 +293,7 @@ def postprocess_experiment(
 
     with files.translate_config().open("r", encoding="utf-8") as file:
         translate_config = yaml.safe_load(file)
-        postprocess_configs = [PostprocessConfig(pc, environment) for pc in translate_config.get("postprocess", [])]
+        postprocess_configs = [PostprocessConfig(pc) for pc in translate_config.get("postprocess", [])]
 
     if postprocess_handler is None:
         postprocess_handler = PostprocessHandler(postprocess_configs, include_base=False, environment=environment)
