@@ -23,12 +23,11 @@ class DataSetFile:
 
 
 class DataSetFileOpener:
-    def __init__(self, exp_dir: Path, stack: ExitStack) -> None:
-        self._exp_dir = exp_dir
+    def __init__(self, stack: ExitStack) -> None:
         self._stack = stack
 
-    def open(self, *filenames: str) -> List[DataSetFile]:
-        return [self._stack.enter_context(DataSetFile(self._exp_dir / filename)) for filename in filenames]
+    def open(self, *paths: Path) -> List[DataSetFile]:
+        return [self._stack.enter_context(DataSetFile(path)) for path in paths]
 
 
 class SplitFiles:

@@ -17,7 +17,8 @@ from ..common.linear_regression import perform_enhanced_linear_regression
 from ..common.translator import CONFIDENCE_SUFFIX, TestConfidenceFile
 from ..common.utils import get_git_revision_hash
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import CheckpointType, Config, NMTModel, find_all_checkpoints
+from .checkpoints import CheckpointType
+from .config import Config, NMTModel
 from .config_utils import load_config
 from .tokenizer import Tokenizer
 
@@ -506,10 +507,10 @@ def load_test_data(
             if len(ref_projects) == 0:
                 # no refs specified, so randomly select verses from all available train refs to build one ref
                 select_rand_ref_line = True
-                ref_file_paths = [p for p in ref_file_paths if config.is_train_project(p)]
+                ref_file_paths = [p for p in ref_file_paths if config.inventory.is_train_reference(p)]
             else:
                 # use specified refs only
-                ref_file_paths = [p for p in ref_file_paths if config.is_ref_project(ref_projects, p)]
+                ref_file_paths = [p for p in ref_file_paths if config.inventory.references_one_of(ref_projects, p)]
         ref_files: List[TextIO] = []
         vref_file: Optional[TextIO] = None
         vref_file_path = config.exp_dir / vref_file_name
@@ -595,8 +596,8 @@ def test_checkpoint(
         translation_conf_file_names.append(f"{TEST_TRG_PREDICTIONS_PREFIX}.txt.{suffix_str}{CONFIDENCE_SUFFIX}")
     else:
         # test data is split into separate files
-        for src_iso in sorted(config.test_src_isos):
-            for trg_iso in sorted(config.test_trg_isos):
+        for src_iso in sorted(config.inventory.test_source_isos()):
+            for trg_iso in sorted(config.inventory.test_target_isos()):
                 if src_iso == trg_iso:
                     continue
                 prefix = f"test.{src_iso}.{trg_iso}"
@@ -689,8 +690,8 @@ def test_checkpoint(
         confidence_files,
         draft_indices,
     ):
-        src_iso = config.default_test_src_iso
-        trg_iso = config.default_test_trg_iso
+        src_iso = config.inventory.default_test_source_iso()
+        trg_iso = config.inventory.default_test_target_iso()
         split_by_pair = features_file_name != "test.src.txt"
         if split_by_pair:
             parts = features_file_name.split(".")
@@ -756,7 +757,7 @@ def test_checkpoint(
                 scores.extend(book_scores)
             else:
                 LOGGER.error("Error: book_dict did not load correctly. Not scoring individual books.")
-    if len(config.test_src_isos) > 1 or len(config.test_trg_isos) > 1:
+    if len(config.inventory.test_source_isos()) > 1 or len(config.inventory.test_target_isos()) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)
         scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), ref_projects))
 
@@ -828,7 +829,7 @@ def test(
         )
 
     if all_checkpoints:
-        all_steps = find_all_checkpoints(config.model_dir)
+        all_steps = model.checkpoint_steps()
         if len(all_steps) == 0:
             LOGGER.warning("No checkpoints found to test.")
         for step in all_steps:
@@ -869,8 +870,8 @@ def test(
             LOGGER.warning("No average checkpoint available.")
 
     best_step = 0
-    if best and config.has_best_checkpoint:
-        _, best_step = model.get_checkpoint_path(CheckpointType.BEST)
+    if best and model.has_best_checkpoint():
+        best_step = model.resolve_checkpoint(CheckpointType.BEST).step
         step = best_step
         if step not in results:
             results[step] = test_checkpoint(
@@ -888,8 +889,8 @@ def test(
                 save_confidences,
             )
 
-    if last or (not best and checkpoint is None and not avg and config.model_dir.exists()):
-        _, step = model.get_checkpoint_path(CheckpointType.LAST)
+    if last or (not best and checkpoint is None and not avg and model.has_been_trained()):
+        step = model.resolve_checkpoint(CheckpointType.LAST).step
         if step not in results:
             results[step] = test_checkpoint(
                 config,
@@ -906,7 +907,7 @@ def test(
                 save_confidences,
             )
 
-    if not config.model_dir.exists():
+    if not model.has_been_trained():
         results[0] = test_checkpoint(
             config,
             model,

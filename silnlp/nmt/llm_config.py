@@ -8,7 +8,7 @@ import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Generic, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Dict, Generic, List, Optional, Sequence, Set, Tuple, TypeVar, Union
 
 from ..common.environment import SilNlpEnv
 from ..common.utils import merge_dict
@@ -373,7 +373,7 @@ class LLMConfig(Config, Generic[TPromptMessages]):
 
         super().__init__(exp_dir, config, environment)
 
-        if len(self.src_isos) > 1 or len(self.trg_isos) > 1:
+        if len(self.inventory.source_isos()) > 1 or len(self.inventory.target_isos()) > 1:
             raise RuntimeError(
                 f"{type(self).__name__} experiments only support a single source language and a single "
                 "target language."
@@ -446,7 +446,7 @@ class LLMConfig(Config, Generic[TPromptMessages]):
         return FixedCorpusPairProvider(self._train_corpus_pair())
 
     def _train_corpus_pair(self) -> CorpusPair:
-        return CorpusPair(self.exp_dir / self.train_src_filename(), self.exp_dir / self.train_trg_filename())
+        return CorpusPair(self.files.train_source(), self.files.train_target())
 
     def get_infer_prompt_builder(self) -> PromptBuilder[TPromptMessages]:
         return self._infer_prompt_builder
@@ -475,10 +475,13 @@ class LLMConfig(Config, Generic[TPromptMessages]):
         return Language(iso=iso, name=self.lang_name(iso))
 
     def get_train_src_iso(self) -> str:
-        return self.default_test_src_iso or (next(iter(self.src_isos)) if len(self.src_isos) > 0 else "")
+        return self.inventory.default_test_source_iso() or self._any_iso(self.inventory.source_isos())
 
     def get_train_trg_iso(self) -> str:
-        return self.default_test_trg_iso or (next(iter(self.trg_isos)) if len(self.trg_isos) > 0 else "")
+        return self.inventory.default_test_target_iso() or self._any_iso(self.inventory.target_isos())
+
+    def _any_iso(self, isos: Set[str]) -> str:
+        return next(iter(isos)) if len(isos) > 0 else ""
 
     # We don't need to build a SentencePiece tokenizer for LLMs -- the vocabulary is built in
     def create_tokenizer(self) -> Tokenizer:

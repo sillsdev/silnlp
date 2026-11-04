@@ -34,7 +34,7 @@ from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config
 from .config_utils import load_config
 from .corpora import CorpusPair
-from .seq2seq_config import get_best_checkpoint
+from .checkpoints import CheckpointDirectory
 
 LOGGER = logging.getLogger(__package__ + ".postprocess")
 
@@ -110,11 +110,11 @@ def get_draft_paths_from_exp(config: Config, environment: SilNlpEnv) -> List[Dra
 
     draft_metadata_list = []
     for translate_request in translate_requests:
-        src_project = translate_request.get("src_project", next(iter(config.src_projects)))
+        src_project = translate_request.get("src_project", next(iter(config.inventory.source_projects())))
 
         ckpt = translate_request.get("checkpoint", "last")
         if ckpt == "best":
-            step_str = get_best_checkpoint(config.model_dir).name[11:]
+            step_str = str(CheckpointDirectory(config.model_dir).best().step)
         elif ckpt == "last":
             step_str = Path(get_last_checkpoint(config.model_dir)).name[11:]
         else:
@@ -278,8 +278,8 @@ def postprocess_experiment(
                 out_dir=out_dir,
                 training_corpus_pairs=config.corpus_pairs,
                 environment=environment,
-                train_src_filepath=config.exp_dir / config.train_src_detok_filename(),
-                train_trg_filepath=config.exp_dir / config.train_trg_detok_filename()
+                train_src_filepath=config.files.train_source_detokenized(),
+                train_trg_filepath=config.files.train_target_detokenized(),
             )
 
 

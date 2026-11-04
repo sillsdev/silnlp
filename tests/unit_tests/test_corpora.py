@@ -1,3 +1,6 @@
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from silnlp.nmt.corpora import read_parallel_text_pairs
@@ -20,3 +23,15 @@ def test_read_parallel_text_pairs_returns_aligned_rows(tmp_path):
 
 def test_read_parallel_text_pairs_returns_none_when_file_missing(tmp_path):
     assert read_parallel_text_pairs(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt") is None
+
+
+def test_importing_corpora_does_not_require_a_configured_data_directory():
+    # Unit tests have to import the corpus model without the bucket mounted.
+    environment = {key: value for key, value in os.environ.items() if key != "SIL_NLP_DATA_PATH"}
+    result = subprocess.run(
+        [sys.executable, "-c", "import silnlp.nmt.corpora"],
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr

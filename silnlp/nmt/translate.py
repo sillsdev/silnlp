@@ -17,7 +17,8 @@ from ..common.translation_data_structures import SentenceTranslationGroup
 from ..common.translator import CONFIDENCE_SUFFIX, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import CheckpointType, Config, NMTModel
+from .checkpoints import CheckpointType
+from .config import Config, NMTModel
 from .quality_estimation import estimate_quality
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
@@ -112,9 +113,9 @@ class TranslationTask:
         confidence_files: List[Path] = []
         with translator:
             if src_project is None:
-                if len(config.src_projects) != 1:
+                if len(config.inventory.source_projects()) != 1:
                     raise RuntimeError("A source project must be specified.")
-                src_project = next(iter(config.src_projects))
+                src_project = next(iter(config.inventory.source_projects()))
 
             src_project_dir = self.environment.get_paratext_project_dir(src_project)
             if not src_project_dir.is_dir():
@@ -131,9 +132,9 @@ class TranslationTask:
                 trg_project = None
 
             if trg_iso is None:
-                trg_iso = config.default_test_trg_iso
-                if trg_iso == "" and len(config.trg_isos) > 0:
-                    trg_iso = next(iter(config.trg_isos))
+                trg_iso = config.inventory.default_test_target_iso()
+                if trg_iso == "" and len(config.inventory.target_isos()) > 0:
+                    trg_iso = next(iter(config.inventory.target_isos()))
             if trg_iso == "":
                 LOGGER.warning("No language code was set for the target language")
 
@@ -144,8 +145,8 @@ class TranslationTask:
                 output_dir = output_dir / trg_project
             output_dir.mkdir(exist_ok=True, parents=True)
 
-            src_training_rows = list(load_corpus(config.exp_dir / config.train_src_detok_filename()))
-            trg_training_rows = list(load_corpus(config.exp_dir / config.train_trg_detok_filename()))
+            src_training_rows = list(load_corpus(config.files.train_source_detokenized()))
+            trg_training_rows = list(load_corpus(config.files.train_target_detokenized()))
 
             translation_failed: List[str] = []
             for book_num, chapters in book_nums.items():
@@ -204,15 +205,15 @@ class TranslationTask:
         confidence_files: List[Path] = []
         with translator:
             if src_iso is None:
-                src_iso = config.default_test_src_iso
-                if src_iso == "" and len(config.src_isos) > 0:
-                    src_iso = next(iter(config.src_isos))
+                src_iso = config.inventory.default_test_source_iso()
+                if src_iso == "" and len(config.inventory.source_isos()) > 0:
+                    src_iso = next(iter(config.inventory.source_isos()))
             if src_iso == "":
                 LOGGER.warning("No language code was set for the source language")
             if trg_iso is None:
-                trg_iso = config.default_test_trg_iso
-                if trg_iso == "" and len(config.trg_isos) > 0:
-                    trg_iso = next(iter(config.trg_isos))
+                trg_iso = config.inventory.default_test_target_iso()
+                if trg_iso == "" and len(config.inventory.target_isos()) > 0:
+                    trg_iso = next(iter(config.inventory.target_isos()))
             if trg_iso == "":
                 LOGGER.warning("No language code was set for the target language")
 
@@ -268,8 +269,8 @@ class TranslationTask:
                     )
                 elif ext == ".usfm" or ext == ".sfm":
                     if src_training_rows is None or trg_training_rows is None:
-                        src_training_rows = list(load_corpus(config.exp_dir / config.train_src_detok_filename()))
-                        trg_training_rows = list(load_corpus(config.exp_dir / config.train_trg_detok_filename()))
+                        src_training_rows = list(load_corpus(config.files.train_source_detokenized()))
+                        trg_training_rows = list(load_corpus(config.files.train_target_detokenized()))
                     translator.translate_usfm(
                         src_file_path,
                         trg_file_path,
@@ -312,7 +313,7 @@ class TranslationTask:
         model = self.model if self.model is not None else clearml.config.create_model()
         translator = NMTTranslator(model, self.checkpoint, self.environment)
         if clearml.config.model_dir.exists():
-            _, step = model.get_checkpoint_path(self.checkpoint)
+            step = model.resolve_checkpoint(self.checkpoint).step
             step_str = "avg" if step == -1 else str(step)
         else:
             step_str = "last"

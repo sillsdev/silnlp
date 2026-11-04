@@ -9,19 +9,21 @@ from datasets import Dataset
 from jinja2.exceptions import UndefinedError
 
 from silnlp.common.environment import SilNlpEnv
-from silnlp.nmt.config import CheckpointType
+from silnlp.nmt.checkpoints import Checkpoint, CheckpointType
 from silnlp.nmt.config import Language
 from silnlp.nmt.config_utils import is_local_llm_config
+from silnlp.nmt.corpus_inventory import CorpusInventory
 from silnlp.nmt.example_retrieval import Example, ExampleFormatterFactory
+from silnlp.nmt.experiment_files import ExperimentFiles
 from silnlp.nmt.llm_config import PromptBuilder, PromptMessages, PromptTemplate, PromptTemplateCollection
 from silnlp.nmt.local_llm_config import (
-    LocalLLMPromptMessages,
-    LocalLLMPromptMessagesFactory,
     DataCollatorForCausalLM,
     InterleavedEpochCallback,
     InterleavedTrainDataset,
     LocalLLMConfig,
     LocalLLMModel,
+    LocalLLMPromptMessages,
+    LocalLLMPromptMessagesFactory,
     OverlengthRowFilter,
     TranslateGemmaPromptMessages,
 )
@@ -466,6 +468,9 @@ class _InstructionDataStub(LocalLLMConfig):
         self.root = {"train": train}
         self._environment = _environment
         self.exp_dir = exp_dir
+        self.files = ExperimentFiles(
+            exp_dir, CorpusInventory([], include_glosses=False, environment=_environment), multi_ref_eval=False
+        )
 
 
 def test_instruction_datasets_defaults_to_empty():
@@ -829,8 +834,11 @@ class _InferenceModelStub:
 
     _create_inference_model = LocalLLMModel._create_inference_model
 
-    def get_checkpoint_path(self, ckpt):
-        return (Path("/fake/checkpoint-999"), 999)
+    def has_been_trained(self):
+        return self._config.model_dir.exists()
+
+    def resolve_checkpoint(self, ckpt):
+        return Checkpoint(Path("/fake/checkpoint-999"), 999)
 
 
 def test_create_inference_model_resolves_checkpoint_when_model_dir_exists(tmp_path):
