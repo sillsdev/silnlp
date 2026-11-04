@@ -1,7 +1,7 @@
 from typing import Any, Dict, Optional
 
 from silnlp.nmt.reasoning_estimate import (
-    GptSixReasoningRates,
+    GptReasoningRates,
     MeasuredReasoning,
     NoReasoning,
     ReasoningBudget,
@@ -147,59 +147,67 @@ def test_a_total_with_measured_reasoning_is_described_as_approximate():
     assert "about 1,234 reasoning tokens" in MeasuredReasoning("a-model", 4096, 0.5, "a test").describe_total(1234)
 
 
-# --- the rates measured for GPT-6 -------------------------------------------------------------
+# --- the rates measured for GPT-6.1 Sol -----------------------------------------------------
 
 
-def _gpt_six_tokens_for_a_100_token_reply(model: str, litellm_options: Dict[str, Any]) -> Optional[int]:
-    estimate = GptSixReasoningRates().estimate_for(model, litellm_options, 100_000)
+def _gpt_tokens_for_a_100_token_reply(model: str, litellm_options: Dict[str, Any]) -> Optional[int]:
+    estimate = GptReasoningRates().estimate_for(model, litellm_options, 100_000)
     return None if estimate is None else estimate.tokens_for(100)
 
 
 def test_gpt_6_at_its_default_effort_reasons_for_about_half_its_reply():
-    assert _gpt_six_tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {}) == 54
+    assert _gpt_tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {}) == 54
 
 
 def test_gpt_6_at_minimal_effort_barely_reasons():
-    assert _gpt_six_tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {"reasoning_effort": "minimal"}) == 3
+    assert _gpt_tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {"reasoning_effort": "minimal"}) == 3
 
 
 def test_gpt_6_at_high_effort_reasons_for_several_times_its_reply():
-    assert _gpt_six_tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {"reasoning_effort": "high"}) == 570
+    assert _gpt_tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {"reasoning_effort": "high"}) == 570
 
 
 def test_gpt_6_at_extra_high_effort_reasons_for_twelve_times_its_reply():
-    assert _gpt_six_tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {"reasoning_effort": "xhigh"}) == 1200
+    assert _gpt_tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {"reasoning_effort": "xhigh"}) == 1200
 
 
 def test_gpt_6_with_reasoning_turned_off_spends_nothing_on_it():
-    assert _gpt_six_tokens_for_a_100_token_reply("openai/gpt-6.1-terra", {"reasoning_effort": "none"}) == 0
+    assert _gpt_tokens_for_a_100_token_reply("openai/gpt-6.1-terra", {"reasoning_effort": "none"}) == 0
 
 
 def test_every_gpt_6_tier_reasons_at_the_measured_rate():
-    assert _gpt_six_tokens_for_a_100_token_reply("openrouter/openai/gpt-6-luna", {"reasoning_effort": "high"}) == 570
+    assert _gpt_tokens_for_a_100_token_reply("openrouter/openai/gpt-6-luna", {"reasoning_effort": "high"}) == 570
 
 
 def test_openrouters_form_of_the_effort_setting_is_read():
-    assert _gpt_six_tokens_for_a_100_token_reply("openrouter/openai/gpt-6.1-sol", {"reasoning": {"effort": "low"}}) == 6
+    assert _gpt_tokens_for_a_100_token_reply("openrouter/openai/gpt-6.1-sol", {"reasoning": {"effort": "low"}}) == 6
 
 
-def test_an_effort_that_was_not_measured_has_no_gpt_6_rate():
-    assert _gpt_six_tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {"reasoning_effort": "max"}) is None
+def test_an_effort_that_was_not_measured_has_no_gpt_rate():
+    assert _gpt_tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {"reasoning_effort": "max"}) is None
 
 
-def test_an_earlier_openai_model_has_no_gpt_6_rate():
-    assert _gpt_six_tokens_for_a_100_token_reply("openai/gpt-5", {"reasoning_effort": "high"}) is None
+def test_an_earlier_gpt_model_reasons_at_the_rate_measured_for_gpt_6_1_sol():
+    assert _gpt_tokens_for_a_100_token_reply("openai/gpt-5", {"reasoning_effort": "high"}) == 570
 
 
-def test_a_model_from_another_provider_has_no_gpt_6_rate():
-    assert _gpt_six_tokens_for_a_100_token_reply("anthropic/claude-sonnet-4-5", {}) is None
+def test_a_gpt_model_openrouter_lists_under_an_alias_reasons_at_the_measured_rate():
+    assert _gpt_tokens_for_a_100_token_reply("openrouter/~openai/gpt-sol-latest", {"reasoning_effort": "low"}) == 6
 
 
-def test_a_gpt_6_rate_is_announced_with_the_effort_it_was_measured_at(caplog):
-    estimate = GptSixReasoningRates().estimate_for("openai/gpt-6.1-sol", {"reasoning_effort": "medium"}, 4096)
+def test_an_openai_model_not_named_gpt_has_no_gpt_rate():
+    assert _gpt_tokens_for_a_100_token_reply("openai/o3", {"reasoning_effort": "high"}) is None
+
+
+def test_a_model_from_another_provider_has_no_gpt_rate():
+    assert _gpt_tokens_for_a_100_token_reply("anthropic/claude-sonnet-4-5", {}) is None
+
+
+def test_a_gpt_rate_is_announced_as_measured_on_gpt_6_1_sol_at_its_effort(caplog):
+    estimate = GptReasoningRates().estimate_for("openai/gpt-5", {"reasoning_effort": "medium"}, 4096)
     assert estimate is not None
 
     with caplog.at_level("INFO"):
         estimate.tokens_for(100)
 
-    assert "0.28 tokens per reply token, as measured for GPT-6 models at reasoning effort 'medium'" in caplog.text
+    assert "0.28 tokens per reply token, as measured for GPT-6.1 Sol at reasoning effort 'medium'" in caplog.text

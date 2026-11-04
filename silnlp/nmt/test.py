@@ -1038,6 +1038,7 @@ def main() -> None:
         books = args.books
 
     config = load_config(experiment, environment)
+    dry_run_model = config.create_dry_run_model() if args.dry_run else None
 
     test(
         config=config,
@@ -1054,8 +1055,10 @@ def main() -> None:
         produce_multiple_translations=args.multiple_translations,
         save_confidences=args.save_confidences,
         clearml_queue=args.clearml_queue,
-        model=config.create_dry_run_model() if args.dry_run else None,
+        model=dry_run_model,
     )
+    if dry_run_model is not None:
+        dry_run_model.report_estimate()
 
 
 if __name__ == "__main__":

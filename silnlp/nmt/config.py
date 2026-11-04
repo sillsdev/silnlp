@@ -263,6 +263,12 @@ class NMTModel(ABC):
         return self._config.infer.get("num_drafts", 1)
 
 
+class DryRunModel(NMTModel):
+    @abstractmethod
+    def report_estimate(self) -> None:
+        """Called once a run has finished, so that the whole run's estimate is logged as a single message."""
+
+
 class Config(ABC):
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
         self.exp_dir = exp_dir
@@ -447,7 +453,7 @@ class Config(ABC):
         self, mixed_precision: bool = True, num_devices: int = 1, clearml_queue: Optional[str] = None
     ) -> NMTModel: ...
 
-    def create_dry_run_model(self) -> NMTModel:
+    def create_dry_run_model(self) -> DryRunModel:
         raise ValueError(
             "A dry run estimates what the requests to a hosted LLM would cost, so it needs an experiment "
             "with model_type: remote_llm."

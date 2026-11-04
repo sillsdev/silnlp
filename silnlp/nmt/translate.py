@@ -17,7 +17,7 @@ from ..common.translation_data_structures import SentenceTranslationGroup
 from ..common.translator import CONFIDENCE_SUFFIX, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import CheckpointType, Config, NMTModel
+from .config import CheckpointType, Config, DryRunModel, NMTModel
 from .quality_estimation import estimate_quality
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
@@ -83,6 +83,27 @@ class NMTTranslator(Translator):
         self, exc_type, exc_value, traceback  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType]
     ) -> None:
         self._model.clear_cache()
+
+
+class DryRunTranslator(NMTTranslator):
+    """Logs the estimate once its translating is done, for a task that ran its own dry run."""
+
+    def __init__(
+        self,
+        model: DryRunModel,
+        checkpoint: Union[CheckpointType, str, int],
+        environment: SilNlpEnv,
+    ) -> None:
+        super().__init__(model, checkpoint, environment)
+        self._dry_run_model = model
+
+    def __exit__(
+        self, exc_type, exc_value, traceback  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType]
+    ) -> None:
+        super().__exit__(exc_type, exc_value, traceback)
+        # A failed run's partial estimate would understate what the whole run would take.
+        if exc_type is None:
+            self._dry_run_model.report_estimate()
 
 
 @dataclass
@@ -317,13 +338,17 @@ class TranslationTask:
 
         clearml.config.set_seed()
 
+        # A model passed in belongs to a larger run, which reports any estimate itself.
         if self.model is not None:
             model = self.model
+            translator = NMTTranslator(model, self.checkpoint, self.environment)
         elif self.dry_run:
-            model = clearml.config.create_dry_run_model()
+            dry_run_model = clearml.config.create_dry_run_model()
+            model = dry_run_model
+            translator = DryRunTranslator(dry_run_model, self.checkpoint, self.environment)
         else:
             model = clearml.config.create_model()
-        translator = NMTTranslator(model, self.checkpoint, self.environment)
+            translator = NMTTranslator(model, self.checkpoint, self.environment)
         if clearml.config.model_dir.exists():
             _, step = model.get_checkpoint_path(self.checkpoint)
             step_str = "avg" if step == -1 else str(step)

@@ -123,8 +123,8 @@ class MeasuredReasoning(LimitedReasoning):
         return round(reply_tokens * self._tokens_per_reply_token)
 
 
-class GptSixReasoningRates:
-    """Estimated reasoning for GPT 6.1 Sol, based on experimentation"""
+class GptReasoningRates:
+    """Rates measured on GPT-6.1 Sol, which stand in for every GPT model since a rough estimate beats none."""
 
     # Keyed by reasoning effort, where None is the provider's default.
     _TOKENS_PER_REPLY_TOKEN: Dict[Optional[str], float] = {
@@ -140,14 +140,14 @@ class GptSixReasoningRates:
     def estimate_for(
         self, model: str, litellm_options: Dict[str, Any], max_new_tokens: int
     ) -> Optional[ReasoningEstimate]:
-        if not model.split("/")[-1].lower().startswith("gpt-6"):
+        if not model.split("/")[-1].lower().startswith("gpt-"):
             return None
         effort = self._effort(litellm_options)
         if effort not in self._TOKENS_PER_REPLY_TOKEN:
             return None
         setting = "the default reasoning effort" if effort is None else f"reasoning effort '{effort}'"
         return MeasuredReasoning(
-            model, max_new_tokens, self._TOKENS_PER_REPLY_TOKEN[effort], f"GPT-6 models at {setting}"
+            model, max_new_tokens, self._TOKENS_PER_REPLY_TOKEN[effort], f"GPT-6.1 Sol at {setting}"
         )
 
     def _effort(self, litellm_options: Dict[str, Any]) -> Optional[str]:

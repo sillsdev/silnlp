@@ -10,7 +10,7 @@ from ..common.environment import SilNlpEnv
 from ..common.postprocessor import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import Config, NMTModel
+from .config import Config, DryRunModel, NMTModel
 from .test import SUPPORTED_SCORERS, test
 from .translate import TranslationTask
 
@@ -227,7 +227,8 @@ def main() -> None:
         "--dry-run",
         default=False,
         action="store_true",
-        help="Only for remote LLM: run every step but instead of sending queries, estimate the number of tokens and cost",
+        help="Only for remote LLM: run every step but instead of sending queries, "
+        "estimate the number of tokens and cost",
     )
     parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")
     parser.add_argument(
@@ -281,8 +282,10 @@ def main() -> None:
         tag=args.clearml_tag,
         environment=environment,
     )
+    dry_run_model: Optional[DryRunModel] = None
     if args.dry_run:
-        model = clearml.config.create_dry_run_model()
+        dry_run_model = clearml.config.create_dry_run_model()
+        model: NMTModel = dry_run_model
     else:
         model = clearml.config.create_model(
             mixed_precision=not args.disable_mixed_precision,
@@ -317,6 +320,8 @@ def main() -> None:
     if args.train and not args.save_checkpoints:
         environment.delete_path_on_exit(environment.get_mt_exp_dir(args.experiment) / "run")
     exp.run()
+    if dry_run_model is not None:
+        dry_run_model.report_estimate()
 
 
 if __name__ == "__main__":

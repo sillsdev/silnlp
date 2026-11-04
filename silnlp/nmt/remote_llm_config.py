@@ -26,6 +26,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Set,
     TextIO,
     Tuple,
     Union,
@@ -37,7 +38,7 @@ from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
 from ..common.utils import merge_dict
-from .config import CheckpointType, Language, NMTModel
+from .config import CheckpointType, DryRunModel, Language, NMTModel
 from .example_retrieval import (
     CorpusPair,
     CorpusPairProvider,
@@ -60,7 +61,8 @@ from .llm_config import (
     PromptTemplateCollection,
 )
 from .llm_usage import EstimatedLLMUsageStatistics, LLMUsageStatistics
-from .reasoning_estimate import GptSixReasoningRates, NoReasoning, ReasoningBudget, ReasoningEstimate, UnknownReasoning
+from .openrouter_models import OpenRouterListing, OpenRouterListings, OpenRouterModelList, OpenRouterRates
+from .reasoning_estimate import GptReasoningRates, NoReasoning, ReasoningBudget, ReasoningEstimate, UnknownReasoning
 from .token_counter import TokenCounter
 
 LOGGER = logging.getLogger(__name__)
@@ -359,7 +361,7 @@ class LiteLLMCompletionClient(CompletionClient):
         self._extra_kwargs: Dict[str, Any] = dict(extra_kwargs or {})
         self._litellm = litellm if litellm is not None else self._import_litellm()
         self._reasoning: Optional[ReasoningEstimate] = None
-        # Requests are estimated from several threads; guards the reasoning estimate, which is built on first use.
+        # Requests are estimated from several threads; guards what is worked out on first use.
         self._lock = threading.Lock()
 
     def _import_litellm(self):
@@ -391,7 +393,7 @@ class LiteLLMCompletionClient(CompletionClient):
             return
         message = (
             f"LiteLLM signs in to an account through its '{signing_in[0]}' provider whenever it looks up "
-            f"{self._model}, so its usage can't be estimated without contacting anyone."
+            f"{self._model}, so a dry run can't estimate its usage without signing in."
         )
         if providers[0] != signing_in[0]:
             message += (
@@ -438,10 +440,10 @@ class LiteLLMCompletionClient(CompletionClient):
         budget = self._reasoning_budget()
         if budget is not None:
             return ReasoningBudget(self._model, self._settings.max_new_tokens, budget)
-        measured = GptSixReasoningRates().estimate_for(self._model, self._extra_kwargs, self._settings.max_new_tokens)
-        if measured is not None:
-            return measured
-        return UnknownReasoning(self._model) if self._can_reason() else NoReasoning()
+        if not self._can_reason():
+            return NoReasoning()
+        measured = GptReasoningRates().estimate_for(self._model, self._extra_kwargs, self._settings.max_new_tokens)
+        return measured if measured is not None else UnknownReasoning(self._model)
 
     def _can_reason(self) -> bool:
         if any(option in self._extra_kwargs for option in ("reasoning_effort", "reasoning", "thinking")):
@@ -494,6 +496,44 @@ class LiteLLMCompletionClient(CompletionClient):
             LOGGER.warning("Could not determine which parameters %s supports.", self._model, exc_info=True)
             return False
         return "logprobs" in supported
+
+
+class OpenRouterCompletionClient(LiteLLMCompletionClient):
+    """LiteLLM lacks OpenRouter's prices and which of its models reason, so estimates use OpenRouter's own listing."""
+
+    def __init__(
+        self,
+        model: str,
+        settings: CompletionSettings,
+        listings: OpenRouterListings,
+        extra_kwargs: Optional[dict] = None,
+        litellm: Any = None,
+    ) -> None:
+        super().__init__(model, settings, extra_kwargs, litellm)
+        self._listings = listings
+        self._listing: Optional[OpenRouterListing] = None
+        self._rates: Optional[OpenRouterRates] = None
+        self._looked_up = False
+        # Not the base class's lock, which is already held when the reasoning estimate asks whether the model reasons.
+        self._listing_lock = threading.Lock()
+
+    def _price(self, prompt_tokens: int, completion_tokens: int, cached_prompt_tokens: int = 0) -> LLMUsageStatistics:
+        self._look_up()
+        if self._rates is None:
+            return LLMUsageStatistics.of_unpriced_request(prompt_tokens, completion_tokens)
+        return self._rates.price(prompt_tokens, completion_tokens, cached_prompt_tokens)
+
+    def _can_reason(self) -> bool:
+        self._look_up()
+        return (self._listing is not None and self._listing.can_reason()) or super()._can_reason()
+
+    def _look_up(self) -> None:
+        with self._listing_lock:
+            if self._looked_up:
+                return
+            self._looked_up = True
+            self._listing = self._listings.find(self._model.removeprefix("openrouter/"))
+            self._rates = None if self._listing is None else self._listing.rates()
 
 
 class RetryPolicy:
@@ -733,12 +773,21 @@ class CompletionClientFactory(ABC):
 
 
 class LiteLLMCompletionClientFactory(CompletionClientFactory):
+    def __init__(self, openrouter_models: Optional[OpenRouterModelList] = None, litellm: Any = None) -> None:
+        """Nothing is fetched from `openrouter_models` unless a request has to be estimated before it is sent."""
+        self._openrouter_models = openrouter_models if openrouter_models is not None else OpenRouterModelList()
+        self._litellm = litellm
+
     def create(self, config: "RemoteLLMConfig") -> CompletionClient:
         settings = config.create_completion_settings()
-        return RetryingCompletionClient(
-            LiteLLMCompletionClient(config.model, settings, config.get_litellm_options()),
-            RetryPolicy(settings.num_retries),
-        )
+        return RetryingCompletionClient(self._create_client(config, settings), RetryPolicy(settings.num_retries))
+
+    def _create_client(self, config: "RemoteLLMConfig", settings: CompletionSettings) -> LiteLLMCompletionClient:
+        options = config.get_litellm_options()
+        if config.model.startswith("openrouter/"):
+            listings = OpenRouterListings(self._openrouter_models)
+            return OpenRouterCompletionClient(config.model, settings, listings, options, self._litellm)
+        return LiteLLMCompletionClient(config.model, settings, options, self._litellm)
 
 
 class BatchPromptBuilder(PromptBuilder[PromptMessages]):
@@ -1074,7 +1123,9 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
             completion_client_factory = LiteLLMCompletionClientFactory()
         return RemoteLLMModel(self, completion_client_factory)
 
-    def create_dry_run_model(self, completion_client_factory: Optional[CompletionClientFactory] = None) -> NMTModel:
+    def create_dry_run_model(
+        self, completion_client_factory: Optional[CompletionClientFactory] = None
+    ) -> DryRunModel:
         if completion_client_factory is None:
             completion_client_factory = LiteLLMCompletionClientFactory()
         return DryRunRemoteLLMModel(self, completion_client_factory)
@@ -1600,7 +1651,7 @@ class EstimatingCompletionClient(CompletionClient):
         return self._estimator.estimate(messages, self._texts)
 
 
-class DryRunRemoteLLMModel(RemoteLLMModel):
+class DryRunRemoteLLMModel(RemoteLLMModel, DryRunModel):
     """Builds every request a run would send and estimates its cost, but sends nothing and writes no translations."""
 
     def __init__(
@@ -1613,18 +1664,14 @@ class DryRunRemoteLLMModel(RemoteLLMModel):
         self._get_client().ensure_lookups_need_no_sign_in()
         self._estimator: Optional[UsageEstimator] = None
         self._run_usage = UsageTotals()
-        self._translations_reported = 0
-        # Keyed by source file, so that a file's estimate can say that its predictions are already complete.
-        self._finished_predictions: Dict[Path, Path] = {}
+        self._sources_with_finished_predictions: Set[Path] = set()
 
     def produces_translations(self) -> bool:
         return False
 
     def has_completed_translation(self, input_path: Path, translation_path: Path) -> bool:
         if super().has_completed_translation(input_path, translation_path):
-            self._finished_predictions[input_path] = translation_path
-        else:
-            self._finished_predictions.pop(input_path, None)
+            self._sources_with_finished_predictions.add(input_path)
         # Even a finished file is estimated, so that the dry run can say what translating it again would take.
         return False
 
@@ -1648,19 +1695,18 @@ class DryRunRemoteLLMModel(RemoteLLMModel):
         usage: UsageTotals,
     ) -> None:
         self._run_usage.include(usage)
-        self._translations_reported += 1
-        lines = [f"Dry run: translating {self._describe_translated(source, sentences)} would take {usage.describe()}."]
-        predictions = self._finished_predictions.get(source) if source is not None else None
-        if predictions is not None:
+
+    def report_estimate(self) -> None:
+        lines = [f"Dry run: in total, a real run would take {self._run_usage.describe()}."]
+        finished_sources = len(self._sources_with_finished_predictions)
+        if finished_sources > 0:
             lines.append(
-                f"{predictions.name} already has every translation, so a real run would skip this file unless "
-                "--force-infer is added."
+                f"{finished_sources:,} test files already have every translation, so a real run would skip them "
+                "unless --force-infer is added."
             )
-        lines.extend(usage.describe_unsent_requests())
-        # One record per file, its notes indented beneath, so that they stay together however many files there are.
+        lines.extend(self._run_usage.describe_unsent_requests())
+        # One record, its notes indented beneath, so that nothing logged alongside can come between them.
         LOGGER.info("\n    ".join(lines))
-        if self._translations_reported > 1:
-            LOGGER.info("Dry run: the estimated total so far is %s.", self._run_usage.describe())
 
     def _complete_texts(
         self,
