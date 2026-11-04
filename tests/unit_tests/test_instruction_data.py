@@ -6,8 +6,8 @@ from typing import List
 import pytest
 
 from silnlp.nmt.corpus_inventory import CorpusInventory
+from silnlp.nmt.experiment_data_set_writer import DataSetWriter
 from silnlp.nmt.experiment_files import ExperimentFiles
-from silnlp.nmt.experiment_preprocessor import DataSetWriter
 from silnlp.nmt.instruction_data import InstructionData, InstructionDataSetWriter
 
 

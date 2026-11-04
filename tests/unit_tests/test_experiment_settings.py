@@ -1,4 +1,4 @@
-from silnlp.nmt.experiment_settings import EvaluationSettings, TrainingSettings
+from silnlp.nmt.experiment_settings import EvaluationSettings, ScoringSettings, TrainingSettings
 from silnlp.nmt.model_name import ModelName
 
 
@@ -79,3 +79,11 @@ def test_a_madlad_experiment_can_also_batch_automatically():
 
     assert config["max_source_length"] == 256
     assert config["per_device_train_batch_size"] == 64
+
+
+def test_sacrebleu_falls_back_to_its_own_default_tokenizer():
+    assert ScoringSettings({}).sacrebleu_tokenizer() == "13a"
+
+
+def test_a_configured_sacrebleu_tokenizer_is_used_instead():
+    assert ScoringSettings({"sacrebleu_tokenize": "flores200"}).sacrebleu_tokenizer() == "flores200"

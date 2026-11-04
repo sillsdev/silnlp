@@ -11,7 +11,7 @@ from machine.scripture import ALL_BOOK_IDS, VerseRef
 from ..common.environment import SilNlpEnv
 from ..common.linear_regression import LinearRegressionResult
 from ..common.translator import CONFIDENCE_SUFFIX, ConfidenceFile, TxtConfidenceFile, UsfmConfidenceFile
-from .test import LINREGRESS_PREFIX
+from .score_files import LINREGRESS_PREFIX
 
 LOGGER = logging.getLogger((__package__ or "") + ".quality_estimation")
 CANONICAL_ORDER = {book: i for i, book in enumerate(ALL_BOOK_IDS)}

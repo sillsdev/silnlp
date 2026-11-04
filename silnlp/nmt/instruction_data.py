@@ -3,8 +3,8 @@ from pathlib import Path
 from typing import List
 
 from ..common.corpus import split_corpus
+from .experiment_data_set_writer import DataSetWriter
 from .experiment_files import ExperimentFiles
-from .experiment_preprocessor import DataSetWriter
 
 LOGGER = logging.getLogger(__name__)
 

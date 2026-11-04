@@ -15,9 +15,14 @@ from .checkpoints import Checkpoint, CheckpointDirectory, CheckpointType
 from .corpora import parse_corpus_pairs
 from .corpus_inventory import CorpusInventory
 from .dictionary_writer import DictionaryWriter
+from .experiment_data_set_writer import (
+    DataSetWriter,
+    ExperimentDataSetWriter,
+    ScriptureDataSetWriterFactory,
+    TermsSettings,
+)
 from .experiment_files import ExperimentFiles
-from .experiment_preprocessor import DataSetWriter, ExperimentPreprocessor, ScriptureDataSetWriters, TermsSettings
-from .experiment_settings import EvaluationSettings
+from .experiment_settings import EvaluationSettings, ScoringSettings
 from .terms import GlossLanguage, TermCategories
 from .terms_data_set import TermsDataSet
 from .terms_writer import TermsWriter
@@ -117,12 +122,12 @@ class Config(ABC):
 
         data_config: dict = config["data"]
         self.corpus_pairs = parse_corpus_pairs(data_config.get("corpus_pairs", []), self._environment)
-        self.inventory = CorpusInventory(
+        self.corpus_inventory = CorpusInventory(
             self.corpus_pairs,
             include_glosses=data_config["terms"]["include_glosses"],
             environment=self._environment,
         )
-        self.files = ExperimentFiles(exp_dir, self.inventory, multi_ref_eval=config["eval"]["multi_ref_eval"])
+        self.files = ExperimentFiles(exp_dir, self.corpus_inventory, multi_ref_eval=config["eval"]["multi_ref_eval"])
 
     @property
     def model(self) -> str:
@@ -161,11 +166,17 @@ class Config(ABC):
         return "parent" in self.data
 
     def _disable_eval_if_no_val_split(self) -> None:
-        EvaluationSettings(self.root["eval"]).disable_unless(self.inventory.has_validation_split())
+        EvaluationSettings(self.root["eval"]).disable_unless(self.corpus_inventory.has_validation_split())
+
+    def create_scoring_settings(self) -> ScoringSettings:
+        return ScoringSettings(self.data)
+
+    @property
+    def seed(self) -> int:
+        return self.data["seed"]
 
     def set_seed(self) -> None:
-        seed = self.data["seed"]
-        set_seed(seed)
+        set_seed(self.seed)
 
     @abstractmethod
     def create_model(
@@ -178,12 +189,12 @@ class Config(ABC):
     def create_data_set_writer(self, force_align: bool) -> DataSetWriter:
         tokenizer = self.create_tokenizer()
         alignment_scores = AlignmentScores(self.exp_dir, self.data["aligner"], force=force_align)
-        return ExperimentPreprocessor(
+        return ExperimentDataSetWriter(
             self.corpus_pairs,
             self.files,
-            ScriptureDataSetWriters(
+            ScriptureDataSetWriterFactory(
                 self.files,
-                self.inventory,
+                self.corpus_inventory,
                 tokenizer,
                 alignment_scores,
                 self._environment,
@@ -191,7 +202,7 @@ class Config(ABC):
                 mirror=self.mirror,
                 multi_ref_eval=self.root["eval"]["multi_ref_eval"],
             ),
-            BasicDataSetWriter(self.files, self.inventory, tokenizer, alignment_scores, mirror=self.mirror),
+            BasicDataSetWriter(self.files, self.corpus_inventory, tokenizer, alignment_scores, mirror=self.mirror),
             TermsWriter(
                 TermsDataSet(self.files, tokenizer, mirror=self.mirror),
                 self._term_categories(),
@@ -214,7 +225,9 @@ class Config(ABC):
 
     def _gloss_language(self) -> GlossLanguage:
         return GlossLanguage(
-            self.data["terms"]["include_glosses"], self.inventory.source_isos(), self.inventory.target_isos()
+            self.data["terms"]["include_glosses"],
+            self.corpus_inventory.source_isos(),
+            self.corpus_inventory.target_isos(),
         )
 
     @abstractmethod

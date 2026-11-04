@@ -59,6 +59,7 @@ from .llm_config import (
     PromptTemplate,
     PromptTemplateCollection,
 )
+from .prediction_files import PredictionFile
 
 LOGGER = logging.getLogger(__name__)
 
@@ -1113,7 +1114,7 @@ class RemoteLLMModel(NMTModel):
             draft_group = DraftGroup(groups)
             for draft_index, translated_draft in enumerate(draft_group.get_drafts(), 1):
                 if produce_multiple_translations:
-                    draft_path = translation_path.with_suffix(f".{draft_index}{translation_path.suffix}")
+                    draft_path = PredictionFile(translation_path).draft(draft_index)
                 else:
                     draft_path = translation_path
                 with draft_path.open("w", encoding="utf-8", newline="\n") as out_file:
