@@ -11,8 +11,6 @@ from .eval_data_set import EvalDataSet
 from .experiment_files import ExperimentFiles
 from .tokenizer import Tokenizer
 
-_TARGET_COLUMN_PREFIX = "target_"
-
 
 class ScriptureValidationSetWriter:
     """Writes the validation set, with one target file per reference when several are kept."""
@@ -91,6 +89,8 @@ class ScriptureValidationSetWriter:
 class ScriptureTestSetWriter:
     """Writes the test set, with one target file per project that contributes a reference."""
 
+    _TARGET_COLUMN_PREFIX = "target_"
+
     def __init__(self, files: ExperimentFiles, inventory: CorpusInventory, tokenizer: Tokenizer) -> None:
         self._files = files
         self._inventory = inventory
@@ -114,7 +114,7 @@ class ScriptureTestSetWriter:
     def _write_targets(self, src_iso: str, trg_iso: str, corpus: pd.DataFrame) -> None:
         remaining = self._inventory.test_projects(src_iso, trg_iso)
         for column in [column for column in corpus.columns if column.startswith("target")]:
-            project = column[len(_TARGET_COLUMN_PREFIX) :]
+            project = column[len(self._TARGET_COLUMN_PREFIX) :]
             self._files.append(
                 self._files.test_target(src_iso, trg_iso, project),
                 self._tokenizer.normalize_all(Side.TARGET, corpus[column]),

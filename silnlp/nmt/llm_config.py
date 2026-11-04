@@ -8,12 +8,12 @@ import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Generic, List, Optional, Sequence, Set, Tuple, TypeVar, Union
+from typing import Dict, Generic, List, Optional, Sequence, Set, TypeVar, Union
 
 from ..common.environment import SilNlpEnv
 from ..common.utils import merge_dict
 from .config import Config, Language
-from .corpora import DataFile
+from .dictionary_writer import DictionaryWriter, NoDictionaryWriter
 from .example_retrieval import (
     CorpusPair,
     CorpusPairProvider,
@@ -490,10 +490,5 @@ class LLMConfig(Config, Generic[TPromptMessages]):
     def _build_vocabs(self, stats: bool = False) -> None:
         return
 
-    def _write_dictionary(
-        self,
-        tokenizer: Tokenizer,
-        src_terms_files: List[Tuple[DataFile, List[str]]],
-        trg_terms_files: List[Tuple[DataFile, List[str]]],
-    ) -> int:
-        return 0
+    def _dictionary_writer(self, tokenizer: Tokenizer) -> DictionaryWriter:
+        return NoDictionaryWriter()
