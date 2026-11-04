@@ -15,11 +15,13 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from ..common.utils import Side
 from .corpus_inventory import CorpusInventory
-from .huggingface_tokenizer import CustomNormalizerWrapper
+from .huggingface_tokenizer import CustomNormalizerWrapper, HuggingFaceTokenizer
 from .model_name import ModelName
 from .pretrained_tokenizer import PretrainedTokenizer
 from .token_occurrence_logger import TokenOccurrenceLogger
+from .tokenizer import Tokenizer
 from .tokenizer_settings import TokenizerSettings, TokenizerSource
+from .vocabulary_builder import VocabularyBuilder
 
 TrainedTokenizer = Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]
 
@@ -60,6 +62,7 @@ class MissingTokens:
     def __init__(
         self,
         pretrained: PretrainedTokenizer,
+        tokenizer: HuggingFaceTokenizer,
         source: TokenizerSource,
         settings: TokenizerSettings,
         inventory: CorpusInventory,
@@ -67,6 +70,7 @@ class MissingTokens:
         exp_dir: Path,
     ) -> None:
         self._pretrained = pretrained
+        self._tokenizer = tokenizer
         self._source = source
         self._settings = settings
         self._inventory = inventory
@@ -132,7 +136,7 @@ class MissingTokens:
         tokenizer = self._pretrained.build()
         settings = self._model_name.sentence_piece_settings()
         trained = SentencePieceBPETokenizer() if settings["type"] == "BPE" else SentencePieceUnigramTokenizer()
-        trained.normalizer = Normalizer.custom(CustomNormalizerWrapper(self._pretrained.sil_tokenizer()))
+        trained.normalizer = Normalizer.custom(CustomNormalizerWrapper(self._tokenizer))
 
         if settings["type"] == "BPE":
             trained.train(files, vocab_size=vocab_size, min_frequency=2, special_tokens=settings["special_tokens"])
@@ -148,12 +152,11 @@ class MissingTokens:
 
     def _uncovered_characters(self, corpus: List[Path]) -> List[str]:
         vocab = self._pretrained.build().get_vocab().keys()
-        sil_tokenizer = self._pretrained.sil_tokenizer()
         charset: Set[str] = set()
         for path in corpus:
             with path.open("r", encoding="utf-8-sig") as file:
                 for line in file:
-                    charset = charset | set(sil_tokenizer.normalize(Side.TARGET, line))
+                    charset = charset | set(self._tokenizer.normalize(Side.TARGET, line))
 
         charset = set(filter(None, {character.strip() for character in charset}))
         missing = sorted(charset - vocab)
@@ -281,34 +284,34 @@ class VocabularyStatistics:
         report.to_excel(self._exp_dir / "tokenization_stats.xlsx")
 
 
-class VocabularyBuilder:
+class TokenizerVocabularyBuilder(VocabularyBuilder):
     """Extends an experiment's pretrained tokenizer with the tokens, language codes and tags its corpora need."""
 
     def __init__(
         self,
         pretrained: PretrainedTokenizer,
+        tokenizer: Tokenizer,
         missing_tokens: MissingTokens,
         inventory: CorpusInventory,
         lang_codes: LanguageCodes,
         exp_dir: Path,
         add_new_lang_code: bool,
-        tokenize: bool,
     ) -> None:
         self._pretrained = pretrained
+        self._tokenizer = tokenizer
         self._missing_tokens = missing_tokens
         self._inventory = inventory
         self._lang_codes = lang_codes
         self._exp_dir = exp_dir
         self._add_new_lang_code = add_new_lang_code
-        self._tokenize = tokenize
 
-    def build(self, stats: bool = False) -> None:
+    def build(self, stats: bool = False) -> Tokenizer:
         # Unconditional, so that everything downstream shares this tokenizer rather than loading its own.
         self._pretrained.build()
         extension = self._missing_tokens.find()
         extension.add_to(TokenizerVocabulary(self._pretrained, self._exp_dir))
 
-        if stats and self._tokenize:
+        if stats:
             VocabularyStatistics(self._exp_dir).write(extension.counts_by_side())
 
         if self._add_new_lang_code:
@@ -317,3 +320,5 @@ class VocabularyBuilder:
         tags = self._inventory.tags()
         if len(tags) > 0:
             self._pretrained.build().add_tokens([AddedToken(tag, rstrip=True, special=True) for tag in tags])
+
+        return self._tokenizer

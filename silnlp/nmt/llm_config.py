@@ -29,6 +29,7 @@ from .example_retrieval import (
     TranslationMemory,
 )
 from .tokenizer import NullTokenizer, Tokenizer
+from .vocabulary_builder import NoVocabularyBuilder, VocabularyBuilder
 
 LOGGER = logging.getLogger(__name__)
 
@@ -487,8 +488,8 @@ class LLMConfig(Config, Generic[TPromptMessages]):
     def create_tokenizer(self) -> Tokenizer:
         return NullTokenizer()
 
-    def _build_vocabs(self, stats: bool = False) -> None:
-        return
+    def create_vocabulary_builder(self) -> VocabularyBuilder:
+        return NoVocabularyBuilder()
 
     def _dictionary_writer(self, tokenizer: Tokenizer) -> DictionaryWriter:
         return NoDictionaryWriter()

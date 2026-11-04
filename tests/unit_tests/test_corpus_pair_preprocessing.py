@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from silnlp.common.environment import SilNlpEnv
+from silnlp.nmt.preprocessor import Preprocessor
 from silnlp.nmt.seq2seq_config import Seq2SeqConfig
 
 
@@ -51,7 +52,9 @@ class PreprocessingExperiment:
         environment = SilNlpEnv.create_environment_with_mt_dir(self._mt_dir)
         config = Seq2SeqConfig(self._exp_dir, {"data": data, "eval": eval_settings or {}}, environment)
         config.set_seed()
-        config.preprocess(stats=False, force_align=force_align)
+        Preprocessor(
+            config.inventory, config.create_vocabulary_builder(), config.create_data_set_writer(force_align)
+        ).run(stats=False)
 
     def read_sources(self, split: str) -> List[str]:
         path = self._exp_dir / f"{split}.src.txt"

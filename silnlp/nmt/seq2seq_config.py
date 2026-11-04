@@ -64,13 +64,14 @@ from .training_arguments import TrainingArgumentsMapping
 from .config_keys import RenamedConfigKeys
 from .dictionary_writer import DictionaryWriter, TermDictionaryWriter
 from .decoder_inputs import DecoderInputs
-from .huggingface_tokenizer import PunctuationNormalizingTokenizer
+from .huggingface_tokenizer import HuggingFaceTokenizer, PunctuationNormalizingTokenizer
 from .experiment_settings import TrainingSettings
 from .model_name import ModelName
 from .parent_model import ParentModel
 from .pretrained_tokenizer import PretrainedTokenizer
 from .tokenizer_settings import TokenizerSettings, TokenizerSource
-from .vocabulary import LanguageCodes, MissingTokens, VocabularyBuilder
+from .vocabulary import LanguageCodes, MissingTokens, TokenizerVocabularyBuilder
+from .vocabulary_builder import NoVocabularyBuilder, VocabularyBuilder
 from .tokenizer import NullTokenizer, Tokenizer
 
 LOGGER = logging.getLogger(__name__)
@@ -325,10 +326,9 @@ class Seq2SeqConfig(Config):
             self.model,
             self._tokenizer_settings,
         )
-        self._pretrained_tokenizer = PretrainedTokenizer(
-            self._tokenizer_source,
-            self.model_name,
-            self.exp_dir,
+        self._pretrained_tokenizer = PretrainedTokenizer(self._tokenizer_source, self.model_name, self.exp_dir)
+        self._hugging_face_tokenizer = HuggingFaceTokenizer(
+            self._pretrained_tokenizer,
             self.data["lang_codes"],
             self.train["max_source_length"],
             self.train["max_target_length"],
@@ -370,13 +370,17 @@ class Seq2SeqConfig(Config):
     def create_tokenizer(self) -> Tokenizer:
         if not self.data["tokenize"]:
             return NullTokenizer()
-        return self._pretrained_tokenizer.sil_tokenizer()
+        return self._hugging_face_tokenizer
 
-    def _build_vocabs(self, stats: bool = False) -> None:
-        VocabularyBuilder(
+    def create_vocabulary_builder(self) -> VocabularyBuilder:
+        if not self.data["tokenize"]:
+            return NoVocabularyBuilder()
+        return TokenizerVocabularyBuilder(
             self._pretrained_tokenizer,
+            self.create_tokenizer(),
             MissingTokens(
                 self._pretrained_tokenizer,
+                self._hugging_face_tokenizer,
                 self._tokenizer_source,
                 self._tokenizer_settings,
                 self.inventory,
@@ -387,8 +391,7 @@ class Seq2SeqConfig(Config):
             LanguageCodes(self.data["lang_codes"], self.inventory, self.exp_dir),
             self.exp_dir,
             add_new_lang_code=self.data["add_new_lang_code"],
-            tokenize=self.data["tokenize"],
-        ).build(stats)
+        )
 
     def get_or_create_tokenizer(self) -> PreTrainedTokenizerBase:
         return self._pretrained_tokenizer.build()

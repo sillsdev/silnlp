@@ -1,4 +1,5 @@
 import logging
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Tuple
 
@@ -72,7 +73,12 @@ class ScriptureDataSetWriters:
         )
 
 
-class ExperimentPreprocessor:
+class DataSetWriter(ABC):
+    @abstractmethod
+    def write(self, stats: bool) -> int: ...
+
+
+class ExperimentPreprocessor(DataSetWriter):
     """Writes an experiment's corpora into the data sets a training run reads."""
 
     def __init__(
