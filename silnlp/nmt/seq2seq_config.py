@@ -283,9 +283,6 @@ class Seq2SeqConfig(Config):
             self.train["max_target_length"],
         )
 
-    def create_languages(self) -> ExperimentLanguages:
-        return ExperimentLanguages(self.data["lang_codes"], self.corpus_inventory)
-
     def create_model(
         self,
         mixed_precision: bool = True,

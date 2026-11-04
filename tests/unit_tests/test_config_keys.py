@@ -1,4 +1,4 @@
-from silnlp.nmt.config_keys import RenamedConfigKeys
+from silnlp.nmt.config_keys import DeprecatedAdapterKey, RenamedConfigKeys
 
 
 def test_a_renamed_key_is_warned_about(caplog):
@@ -35,3 +35,26 @@ def test_the_language_models_share_the_keys_renamed_for_every_model(caplog):
     RenamedConfigKeys.of_llm().warn_about({"params": {"warmup_ratio": 0.1}})
 
     assert "params.warmup_ratio was renamed to params.warmup_steps" in caplog.text
+
+
+def test_the_old_adapter_key_is_migrated_to_the_new_one():
+    config = {"params": {"finetune_method": "lora", "lora": {"rank": 8}}}
+    DeprecatedAdapterKey().apply_to(config)
+
+    assert "lora" not in config["params"]
+    assert config["params"]["adapter"] == {"rank": 8}
+
+
+def test_an_explicit_adapter_key_wins_and_the_old_one_is_left_alone():
+    config = {"params": {"lora": {"rank": 8}, "adapter": {"rank": 64}}}
+    DeprecatedAdapterKey().apply_to(config)
+
+    assert config["params"]["adapter"] == {"rank": 64}
+    assert config["params"]["lora"] == {"rank": 8}
+
+
+def test_a_config_with_no_parameters_section_is_left_alone():
+    config = {"data": {}}
+    DeprecatedAdapterKey().apply_to(config)
+
+    assert config == {"data": {}}

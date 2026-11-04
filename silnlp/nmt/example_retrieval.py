@@ -608,3 +608,12 @@ class ExamplePool:
                 return False
             self._fitted = True
             return True
+
+
+class ExamplePools:
+    def __init__(self, pools: List[ExamplePool]) -> None:
+        self._pools = pools
+
+    def ensure_available(self) -> None:
+        for pool in self._pools:
+            pool.ensure_available()

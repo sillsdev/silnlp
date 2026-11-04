@@ -3,16 +3,16 @@ import logging
 
 import pytest
 
-from silnlp.nmt.config import Language
 from silnlp.nmt.example_retrieval import Example, ExampleFormatterFactory
+from silnlp.nmt.experiment_languages import Language
 from silnlp.nmt.llm_config import (
     LLMConfig,
-    PromptBuilder,
-    PromptMessages,
-    PromptTemplate,
     PlainPromptMessagesFactory,
+    PromptBuilder,
     PromptConfig,
     PromptDefaults,
+    PromptMessages,
+    PromptTemplate,
     PromptTemplateCollection,
 )
 

@@ -22,6 +22,7 @@ from .experiment_data_set_writer import (
     TermsSettings,
 )
 from .experiment_files import ExperimentFiles
+from .experiment_languages import ExperimentLanguages
 from .experiment_settings import EvaluationSettings, ScoringSettings
 from .terms import GlossLanguage, TermCategories
 from .terms_data_set import TermsDataSet
@@ -30,12 +31,6 @@ from .tokenizer import Tokenizer
 from .vocabulary_builder import VocabularyBuilder
 
 LOGGER = logging.getLogger((__package__ or "") + ".config")
-
-
-@dataclass(frozen=True)
-class Language:
-    iso: str
-    name: str
 
 
 @dataclass
@@ -170,6 +165,9 @@ class Config(ABC):
 
     def create_scoring_settings(self) -> ScoringSettings:
         return ScoringSettings(self.data)
+
+    def create_languages(self) -> ExperimentLanguages:
+        return ExperimentLanguages(self.data["lang_codes"], self.corpus_inventory)
 
     @property
     def seed(self) -> int:

@@ -5,6 +5,7 @@ import yaml
 
 from ..common.environment import SilNlpEnv
 from .config import Config
+from .model_name import ModelName
 from .seq2seq_config import Seq2SeqConfig
 
 
@@ -59,29 +60,34 @@ def load_config_from_exp_dir(exp_dir: Path, environment: SilNlpEnv) -> Config:
     return create_config(exp_dir, config, environment)
 
 
-def is_local_llm_config(config: dict) -> bool:
-    model_type = config.get("model_type")
-    if model_type is not None:
-        # "local_llm" is the preferred label, but "llm" is supported for backward compatibility
-        return str(model_type).lower() in ("local_llm", "llm")
-    # Matching the model name is a fallback when "model_type" is not set.
-    model: str = config.get("model", "")
-    return model.startswith(
-        ("google/gemma", "google/translate-gemma", "google/translategemma", "tencent/Hunyuan", "Hunyuan-MT")
-    )
+class ConfiguredModelType:
+    """Which kind of model a config targets. An explicit model_type wins; otherwise the model name decides."""
 
+    # "local_llm" is the preferred label, but "llm" is supported for backward compatibility
+    _LOCAL_LLM_TYPES = ("local_llm", "llm")
+    _REMOTE_LLM_TYPE = "remote_llm"
 
-def is_remote_llm_config(config: dict) -> bool:
-    return str(config.get("model_type", "")).lower() == "remote_llm"
+    def __init__(self, config: dict) -> None:
+        self._config = config
+
+    def is_remote_llm(self) -> bool:
+        return str(self._config.get("model_type", "")).lower() == self._REMOTE_LLM_TYPE
+
+    def is_local_llm(self) -> bool:
+        model_type = self._config.get("model_type")
+        if model_type is not None:
+            return str(model_type).lower() in self._LOCAL_LLM_TYPES
+        return ModelName(self._config.get("model", "")).looks_decoder_only()
 
 
 def create_config(exp_dir: Path, config: dict, environment: SilNlpEnv) -> Config:
-    if is_remote_llm_config(config):
+    model_type = ConfiguredModelType(config)
+    if model_type.is_remote_llm():
         # Imported lazily so the litellm import cost is only paid for remote LLM experiments.
         from .remote_llm_config import RemoteLLMConfig
 
         return RemoteLLMConfig(exp_dir, config, environment)
-    if is_local_llm_config(config):
+    if model_type.is_local_llm():
         # Imported lazily so the peft/bitsandbytes import cost is only paid for LLM experiments.
         from .local_llm_config import LocalLLMConfig
 

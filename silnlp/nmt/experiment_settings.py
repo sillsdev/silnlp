@@ -75,3 +75,6 @@ class TrainerSettings:
 
     def accumulates_gradient_automatically(self) -> bool:
         return self._training.get("auto_grad_acc", False)
+
+    def checkpoints_gradients(self) -> bool:
+        return self._training["gradient_checkpointing"]

@@ -76,3 +76,30 @@ class InstructionDataSetWriter(DataSetWriter):
     def write(self, stats: bool) -> int:
         self._instruction_data.delete_previous()
         return self._data_sets.write(stats) + self._instruction_data.write()
+
+
+class InstructionDataSettings:
+    """The train.instruction_data section. Each setting is checked when it is read, so a bad value stops
+    only the step that uses it."""
+
+    def __init__(self, section: dict, mt_dir: Path) -> None:
+        self._section = section
+        self._mt_dir = mt_dir
+
+    def paths(self) -> List[Path]:
+        # Kept apart from the corpus files so instruction data never merges into the translation corpora.
+        return [self._mt_dir / "instructions" / f"{name}.jsonl" for name in self._section["datasets"]]
+
+    def size(self) -> int:
+        size = int(self._section["size"])
+        if size < 0:
+            raise ValueError(f"train.instruction_data.size must be non-negative, got {size}.")
+        return size
+
+    def mix_ratio(self) -> float:
+        ratio = float(self._section["mix_ratio"])
+        if ratio < 0:
+            raise ValueError(f"train.instruction_data.mix_ratio must be non-negative, got {ratio}.")
+        if ratio > 1:
+            raise ValueError(f"train.instruction_data.mix_ratio must be no greater than 1, got {ratio}.")
+        return ratio
