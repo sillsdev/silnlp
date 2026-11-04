@@ -37,6 +37,7 @@ from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
 from ..common.utils import merge_dict
+from .checkpoints import CheckpointDirectory
 from .config import CheckpointType, Language, NMTModel
 from .example_retrieval import (
     CorpusPair,
@@ -946,7 +947,7 @@ class RemoteLLMModel(NMTModel):
         config: RemoteLLMConfig,
         completion_client_factory: Optional[CompletionClientFactory] = None,
     ) -> None:
-        super().__init__(config)
+        super().__init__(CheckpointDirectory(config.model_dir), config.infer.get("num_drafts", 1))
         self._config: RemoteLLMConfig = config
         self._client_factory = completion_client_factory or LiteLLMCompletionClientFactory()
         self._client: Optional[CompletionClient] = None

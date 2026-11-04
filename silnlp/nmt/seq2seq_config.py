@@ -53,7 +53,7 @@ from ..common.corpus import count_lines
 from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
-from ..common.utils import NoiseMethod, ReplaceRandomToken, create_noise_methods, merge_dict
+from ..common.utils import NoiseMethod, ReplaceRandomToken, merge_dict
 from .checkpoints import CheckpointDirectory, CheckpointType
 from .config import (
     Config,
@@ -61,11 +61,14 @@ from .config import (
     NMTModel,
 )
 from .training_arguments import TrainingArgumentsMapping
+from .translation_settings import CheckpointRetention, ModelSettings, TranslationSettings
 from .config_keys import RenamedConfigKeys
 from .dictionary_writer import DictionaryWriter, TermDictionaryWriter
 from .decoder_inputs import DecoderInputs
+from .experiment_files import ExperimentFiles
+from .experiment_languages import ExperimentLanguages
 from .huggingface_tokenizer import HuggingFaceTokenizer, PunctuationNormalizingTokenizer
-from .experiment_settings import TrainingSettings
+from .experiment_settings import EvaluationSettings, TrainerSettings, TrainingSettings
 from .model_name import ModelName
 from .parent_model import ParentModel
 from .pretrained_tokenizer import PretrainedTokenizer
@@ -190,7 +193,12 @@ class PreTrainedModelProvider(ABC):
 class PreTrainedModelProviderFactory(ABC):
     @abstractmethod
     def create_pretrained_model_provider(
-        self, config: "Seq2SeqConfig", mixed_precision: bool = False
+        self,
+        model_settings: "ModelSettings",
+        model_name: ModelName,
+        pretrained_tokenizer: PretrainedTokenizer,
+        languages: ExperimentLanguages,
+        mixed_precision: bool = False,
     ) -> PreTrainedModelProvider:
         ...
 
@@ -221,13 +229,17 @@ class FilePreTrainedModelProvider(PreTrainedModelProvider):
 
 class FilePreTrainedModelProviderFactory(PreTrainedModelProviderFactory):
     def create_pretrained_model_provider(
-        self, config: "Seq2SeqConfig", mixed_precision: bool = False
+        self,
+        model_settings: "ModelSettings",
+        model_name: ModelName,
+        pretrained_tokenizer: PretrainedTokenizer,
+        languages: ExperimentLanguages,
+        mixed_precision: bool = False,
     ) -> PreTrainedModelProvider:
-        attention_implementation = config.params.get("attn_implementation", "sdpa")
-        dtype = torch.bfloat16 if config.model_name.is_t5() else torch.float16
+        dtype = torch.bfloat16 if model_name.is_t5() else torch.float16
         if not mixed_precision:
             dtype = "auto"
-        return FilePreTrainedModelProvider(attention_implementation, dtype)
+        return FilePreTrainedModelProvider(model_settings.attention_implementation(), dtype)
 
 
 class Seq2SeqConfig(Config):
@@ -334,29 +346,8 @@ class Seq2SeqConfig(Config):
             self.train["max_target_length"],
         )
 
-    @property
-    def val_src_lang(self) -> str:
-        lang_codes: Dict[str, str] = self.data["lang_codes"]
-        return lang_codes.get(
-            self.inventory.default_validation_source_iso(), self.inventory.default_validation_source_iso()
-        )
-
-    @property
-    def test_src_lang(self) -> str:
-        lang_codes: Dict[str, str] = self.data["lang_codes"]
-        return lang_codes.get(self.inventory.default_test_source_iso(), self.inventory.default_test_source_iso())
-
-    @property
-    def val_trg_lang(self) -> str:
-        lang_codes: Dict[str, str] = self.data["lang_codes"]
-        return lang_codes.get(
-            self.inventory.default_validation_target_iso(), self.inventory.default_validation_target_iso()
-        )
-
-    @property
-    def test_trg_lang(self) -> str:
-        lang_codes: Dict[str, str] = self.data["lang_codes"]
-        return lang_codes.get(self.inventory.default_test_target_iso(), self.inventory.default_test_target_iso())
+    def create_languages(self) -> ExperimentLanguages:
+        return ExperimentLanguages(self.data["lang_codes"], self.inventory)
 
     def create_model(
         self,
@@ -365,7 +356,27 @@ class Seq2SeqConfig(Config):
         clearml_queue: Optional[str] = None,
         pretrained_model_provider_factory: PreTrainedModelProviderFactory = FilePreTrainedModelProviderFactory(),
     ) -> NMTModel:
-        return Seq2SeqNMTModel(self, mixed_precision, num_devices, clearml_queue, pretrained_model_provider_factory)
+        return Seq2SeqNMTModel(
+            CheckpointDirectory(self.model_dir),
+            self.infer.get("num_drafts", 1),
+            self.create_languages(),
+            self.files,
+            self.model_name,
+            self._pretrained_tokenizer,
+            TranslationSettings(self.infer, self.params),
+            ModelSettings(self.params),
+            EvaluationSettings(self.eval),
+            TrainerSettings(self.train),
+            self._tokenizer_settings,
+            self.data["seed"],
+            self.model,
+            CheckpointRetention(self.train),
+            TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING, self.root),
+            mixed_precision,
+            num_devices,
+            clearml_queue,
+            pretrained_model_provider_factory,
+        )
 
     def create_tokenizer(self) -> Tokenizer:
         if not self.data["tokenize"]:
@@ -473,22 +484,47 @@ class ModelOutputGroup:
 class Seq2SeqNMTModel(NMTModel):
     def __init__(
         self,
-        config: Seq2SeqConfig,
+        checkpoints: CheckpointDirectory,
+        num_drafts: int,
+        languages: ExperimentLanguages,
+        files: ExperimentFiles,
+        model_name: ModelName,
+        pretrained_tokenizer: PretrainedTokenizer,
+        translation: TranslationSettings,
+        model_settings: ModelSettings,
+        evaluation: EvaluationSettings,
+        trainer_settings: TrainerSettings,
+        tokenizer_settings: TokenizerSettings,
+        seed: int,
+        model: str,
+        retention: CheckpointRetention,
+        training_arguments: TrainingArgumentsMapping,
         mixed_precision: bool,
         num_devices: int,
         clearml_queue: Optional[str] = None,
         pretrained_model_provider_factory: PreTrainedModelProviderFactory = FilePreTrainedModelProviderFactory(),
     ) -> None:
-        super().__init__(config)
-        self._config: Seq2SeqConfig = config
+        super().__init__(checkpoints, num_drafts)
+        self._languages = languages
+        self._files = files
+        self._model_name = model_name
+        self._pretrained_tokenizer = pretrained_tokenizer
+        self._translation = translation
+        self._model_settings = model_settings
+        self._evaluation = evaluation
+        self._trainer_settings = trainer_settings
+        self._tokenizer_settings = tokenizer_settings
+        self._model = model
+        self._retention = retention
+        self._training_arguments = training_arguments
         self._mixed_precision = mixed_precision
-        set_seed(self._config.data["seed"])
+        set_seed(seed)
         self._dictionary: Optional[Dict[VerseRef, Set[str]]] = None
-        self._is_t5 = self._config.model_name.is_t5()
+        self._is_t5 = self._model_name.is_t5()
         self._num_devices = num_devices
         self._clearml_queue = clearml_queue
         self._pretrained_model_provider = pretrained_model_provider_factory.create_pretrained_model_provider(
-            config, mixed_precision
+            model_settings, model_name, pretrained_tokenizer, languages, mixed_precision
         )
 
     def train(self) -> None:
@@ -505,18 +541,18 @@ class Seq2SeqNMTModel(NMTModel):
         transformers_logging.enable_explicit_format()
 
         model_config = AutoConfig.from_pretrained(
-            self._config.model,
+            self._model,
             use_cache=not training_args.gradient_checkpointing,
-            dropout=self._config.params["dropout"],
-            attention_dropout=self._config.params["attention_dropout"],
-            activation_dropout=self._config.params["activation_dropout"],
+            dropout=self._model_settings.dropout(),
+            attention_dropout=self._model_settings.attention_dropout(),
+            activation_dropout=self._model_settings.activation_dropout(),
             label2id={},
             id2label={},
             num_labels=0,
-            attn_implementation=self._config.params["attn_implementation"],
+            attn_implementation=self._model_settings.attention_implementation(),
             token=False,
         )
-        if self._num_devices == 2 and self._config.model_name.is_nllb():
+        if self._num_devices == 2 and self._model_name.is_nllb():
             device_map = {
                 "lm_head": 0,
                 "model.shared": 0,
@@ -529,15 +565,14 @@ class Seq2SeqNMTModel(NMTModel):
         else:
             device_map = None
         model = self._pretrained_model_provider.create_model_for_training(
-            self._config.model, model_config, device_map=device_map
+            self._model, model_config, device_map=device_map
         )
 
-        tokenizer = self._config.get_tokenizer()
+        tokenizer = self._pretrained_tokenizer.load()
 
         old_embeddings = model.get_input_embeddings()
         old_num_tokens = old_embeddings.weight.size(dim=0)
-        tok_dict = self._config.data.get("tokenizer")
-        if len(tokenizer) > old_num_tokens and tok_dict is not None and tok_dict.get("init_unk"):
+        if len(tokenizer) > old_num_tokens and self._tokenizer_settings.initializes_unknown():
             vocab = tokenizer.get_vocab()
             unk_embedding = old_embeddings.weight.data[vocab["<unk>"]]
             model.resize_token_embeddings(
@@ -555,8 +590,16 @@ class Seq2SeqNMTModel(NMTModel):
         model, tokenizer = self._configure_model(
             model,
             tokenizer,
-            self._config.val_src_lang if self._config.val_src_lang else self._config.test_src_lang,
-            self._config.val_trg_lang if self._config.val_trg_lang else self._config.test_trg_lang,
+            (
+                self._languages.validation_source()
+                if self._languages.validation_source()
+                else self._languages.test_source()
+            ),
+            (
+                self._languages.validation_target()
+                if self._languages.validation_target()
+                else self._languages.test_target()
+            ),
         )
 
         def load_text_dataset(src_path: Path, trg_path: Path) -> Optional[Dataset]:
@@ -572,13 +615,13 @@ class Seq2SeqNMTModel(NMTModel):
             return Dataset.from_dict({"translation": data})
 
         train_dataset = load_text_dataset(
-            self._config.files.train_source(),
-            self._config.files.train_target(),
+            self._files.train_source(),
+            self._files.train_target(),
         )
 
         eval_dataset = load_text_dataset(
-            self._config.files.validation_source(),
-            self._config.files.validation_target(),
+            self._files.validation_source(),
+            self._files.validation_target(),
         )
 
         def encode(examples: dict) -> dict:
@@ -608,7 +651,7 @@ class Seq2SeqNMTModel(NMTModel):
                     desc="Encoding validation dataset",
                 )
 
-        src_noise = create_noise_methods(self._config.train.get("src_noise", []))
+        src_noise = self._trainer_settings.source_noise()
         for noise_method in src_noise:
             if isinstance(noise_method, ReplaceRandomToken):
                 noise_method.filler_token = tokenizer.convert_tokens_to_ids(noise_method.filler_token)
@@ -621,9 +664,8 @@ class Seq2SeqNMTModel(NMTModel):
             src_noise=src_noise,
         )
 
-        metric_name = ""
-        if self._config.eval["metric_for_best_model"] is not None:
-            metric_name = self._config.eval["metric_for_best_model"].lower()
+        metric_name = self._evaluation.metric_for_best_model() or ""
+        if metric_name != "":
             if metric_name not in DEFAULT_METRICS:
                 metric_module = EVAL_METRICS_MODULES.get(metric_name)
                 if metric_module is None:
@@ -639,7 +681,7 @@ class Seq2SeqNMTModel(NMTModel):
             # Replace -100 in the labels as we can't decode them.
             preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
             labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
-            if self._config.eval["detokenize"]:
+            if self._evaluation.detokenizes():
                 decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
                 decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
 
@@ -668,7 +710,7 @@ class Seq2SeqNMTModel(NMTModel):
                     predictions=decoded_preds,
                     references=decoded_labels,
                     lowercase=True,
-                    force=not self._config.eval["detokenize"],
+                    force=not self._evaluation.detokenizes(),
                 )
             elif metric_module == "chrf":
                 result = metric.compute(
@@ -695,10 +737,10 @@ class Seq2SeqNMTModel(NMTModel):
             eval_dataset,
             processing_class=tokenizer,
             compute_metrics=None if metric_name in DEFAULT_METRICS else compute_metrics,
-            sequential_sampling=self._config.train.get("sequential_sampling", False),
-            auto_grad_acc=self._config.train.get("auto_grad_acc", False),
+            sequential_sampling=self._trainer_settings.samples_sequentially(),
+            auto_grad_acc=self._trainer_settings.accumulates_gradient_automatically(),
         )
-        early_stopping: Optional[dict] = self._config.eval["early_stopping"]
+        early_stopping: Optional[dict] = self._evaluation.early_stopping()
         if early_stopping:
             trainer.add_callback(
                 EarlyStoppingCallback(
@@ -716,18 +758,14 @@ class Seq2SeqNMTModel(NMTModel):
         trainer.save_metrics("train", metrics)
         trainer.save_state()
 
-        delete_checkpoint_optimizer_state = self._config.train["delete_checkpoint_optimizer_state"]
-        delete_checkpoint_tokenizer = self._config.train["delete_checkpoint_tokenizer"]
         written_checkpoints = CheckpointDirectory(Path(training_args.output_dir))
-        if delete_checkpoint_optimizer_state:
+        if not self._retention.keeps_optimizer_state():
             written_checkpoints.discard_optimizer_state()
-        if delete_checkpoint_tokenizer:
+        if not self._retention.keeps_tokenizers():
             written_checkpoints.discard_tokenizers()
 
     def save_effective_config(self, path: Path) -> None:
-        TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING).write_effective_config(
-            path, self._config.root, self._create_training_arguments()
-        )
+        self._training_arguments.write_effective_config(path, self._create_training_arguments())
 
     def translate_test_files(
         self,
@@ -737,8 +775,10 @@ class Seq2SeqNMTModel(NMTModel):
         save_confidences: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
-        tokenizer = self._config.get_tokenizer()
-        model = self._create_inference_model(ckpt, tokenizer, self._config.test_src_lang, self._config.test_trg_lang)
+        tokenizer = self._pretrained_tokenizer.load()
+        model = self._create_inference_model(
+            ckpt, tokenizer, self._languages.test_source(), self._languages.test_target()
+        )
         compiled_model = cast(PreTrainedModel, torch.compile(model))
 
         for input_path, translation_path in zip(
@@ -780,11 +820,11 @@ class Seq2SeqNMTModel(NMTModel):
         iso_specified_file_pattern = re.compile(r"^test\.([a-z]{2,3})\.([a-z]{2,3})\..*")
         if iso_specified_file_pattern.match(input_path.name):
             src_iso, trg_iso = iso_specified_file_pattern.match(input_path.name).groups()
-            src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
-            trg_lang = self._config.data["lang_codes"].get(trg_iso, trg_iso)
+            src_lang = self._languages.name_of(src_iso)
+            trg_lang = self._languages.name_of(trg_iso)
         else:
-            src_lang = self._config.test_src_lang
-            trg_lang = self._config.test_trg_lang
+            src_lang = self._languages.test_source()
+            trg_lang = self._languages.test_target()
 
         return PretokenizedTranslator(model=model, tokenizer=tokenizer, src_lang=src_lang, tgt_lang=trg_lang)
 
@@ -820,10 +860,10 @@ class Seq2SeqNMTModel(NMTModel):
         produce_multiple_translations: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Generator[SentenceTranslationGroup, None, None]:
-        src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
-        trg_lang = self._config.data["lang_codes"].get(trg_iso, trg_iso)
+        src_lang = self._languages.name_of(src_iso)
+        trg_lang = self._languages.name_of(trg_iso)
         inference_model_params = InferenceModelParams(ckpt, src_lang, trg_lang)
-        tokenizer = self._config.get_tokenizer()
+        tokenizer = self._pretrained_tokenizer.load()
         if self._inference_model_params == inference_model_params and self._cached_inference_model is not None:
             model = self._cached_inference_model
         else:
@@ -861,8 +901,7 @@ class Seq2SeqNMTModel(NMTModel):
             yield model_output_group.convert_to_sentence_translation_group(tokenizer)
 
     def _create_training_arguments(self) -> Seq2SeqTrainingArguments:
-        args = TrainingArgumentsMapping(_TRAINING_ARGS_CONFIG_MAPPING).collect(
-            self._config.root,
+        args = self._training_arguments.collect(
             # For context on floating point precision, see https://github.com/sillsdev/silnlp/issues/647
             {
                 "fp16": self._mixed_precision and not self._is_t5,
@@ -879,7 +918,7 @@ class Seq2SeqNMTModel(NMTModel):
         sentences: Iterable[TSent],
         produce_multiple_translations: bool = False,
     ) -> Iterable[ModelOutputGroup]:
-        batch_size: int = self._config.infer["infer_batch_size"]
+        batch_size = self._translation.batch_size()
 
         current_batch_size = batch_size
         for batch in batch_sentences(sentences, batch_size):
@@ -914,7 +953,7 @@ class Seq2SeqNMTModel(NMTModel):
     ) -> Iterable[ModelOutputGroup]:
         num_drafts = self.get_num_drafts()
         if produce_multiple_translations and num_drafts > 1:
-            multiple_translations_method: str = self._config.infer.get("multiple_translations_method")
+            multiple_translations_method: str = self._translation.multiple_translations_method()
 
             if multiple_translations_method == "hybrid":
                 beam_search_results: List[List[dict]] = self._translate_with_beam_search(
@@ -980,13 +1019,9 @@ class Seq2SeqNMTModel(NMTModel):
         sentences: Iterable[TSent],
         num_return_sequences: int = 1,
     ) -> List[List[dict]]:
-        num_beams: Optional[int] = self._config.infer.get("num_beams")
-        if num_beams is None:
-            num_beams = self._config.params.get("generation_num_beams")
-
         return translator(
             sentences,
-            num_beams=num_beams,
+            num_beams=self._translation.beam_count(),
             num_return_sequences=num_return_sequences,
         )
 
@@ -996,12 +1031,10 @@ class Seq2SeqNMTModel(NMTModel):
         sentences: Iterable[TSent],
         num_return_sequences: int = 1,
     ) -> List[List[dict]]:
-        temperature: Optional[int] = self._config.infer.get("temperature")
-
         return translator(
             sentences,
             do_sample=True,
-            temperature=temperature,
+            temperature=self._translation.temperature(),
             num_return_sequences=num_return_sequences,
         )
 
@@ -1017,7 +1050,7 @@ class Seq2SeqNMTModel(NMTModel):
             model_name = str(checkpoint_path)
         else:
             LOGGER.warning("Model has no checkpoints. Using base model.")
-            model_name = self._config.model
+            model_name = self._model
 
         model: PreTrainedModel = self._pretrained_model_provider.create_model_for_inference(model_name)
         model, tokenizer = self._configure_model(model, tokenizer, src_lang, trg_lang)
@@ -1035,7 +1068,7 @@ class Seq2SeqNMTModel(NMTModel):
         if trg_lang != "" and model.config.decoder_start_token_id is None and isinstance(tokenizer, MBartTokenizer):
             model.config.decoder_start_token_id = tokenizer.convert_tokens_to_ids(trg_lang)
 
-        if self._config.model_name.is_madlad():
+        if self._model_name.is_madlad():
             model.config.decoder_start_token_id = tokenizer.pad_token_id
             model.generation_config.decoder_start_token_id = tokenizer.pad_token_id
             model.generation_config.max_length = 256
