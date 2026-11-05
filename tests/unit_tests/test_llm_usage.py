@@ -1,7 +1,9 @@
 import json
+from typing import Dict, Tuple
 
 from silnlp.nmt.llm_usage import EstimatedLLMUsageStatistics, LLMUsageStatistics
 from silnlp.nmt.reasoning_estimate import MeasuredReasoning, NoReasoning, ReasoningBudget
+from silnlp.nmt.usage_summary_table import UsageSummaryTable
 
 
 def _priced(prompt_tokens: int, completion_tokens: int, cost: float) -> LLMUsageStatistics:
@@ -153,4 +155,82 @@ def test_real_usage_added_to_an_estimate_counts_without_reasoning():
 
     assert (estimate + _priced(100, 10, 0.01)).describe() == (
         "2 requests, 200 prompt + 40 completion tokens, $0.0200; this includes about 20 reasoning tokens"
+    )
+
+
+class RecordedTable(UsageSummaryTable):
+    """Keeps each row by its label, so that a test can check the rows apart from how they are laid out."""
+
+    def __init__(self) -> None:
+        super().__init__("")
+        self.rows: Dict[str, Tuple[str, str]] = {}
+
+    def add_row(self, label: str, value: str, note: str = "") -> None:
+        self.rows[label] = (value, note)
+
+
+def _rows(usage: LLMUsageStatistics) -> Dict[str, Tuple[str, str]]:
+    table = RecordedTable()
+    usage.add_requests_row_to(table)
+    usage.add_tokens_and_cost_rows_to(table)
+    return table.rows
+
+
+def test_usage_adds_its_requests_tokens_and_cost_to_a_table():
+    assert _rows(_priced(1000, 10, 0.01) + _priced(2000, 20, 0.02)) == {
+        "Requests": ("2", ""),
+        "Prompt tokens": ("3,000", ""),
+        "Completion tokens": ("30", ""),
+        "Cost": ("$0.0300", ""),
+    }
+
+
+def test_no_usage_adds_a_zero_cost_to_a_table():
+    assert _rows(LLMUsageStatistics())["Cost"] == ("$0.0000", "")
+
+
+def test_unpriced_usage_adds_an_unavailable_cost_to_a_table():
+    assert _rows(_unpriced(100, 10))["Cost"] == ("unavailable", "no pricing for this model")
+
+
+def test_partly_priced_usage_notes_its_unpriced_requests_beside_its_cost():
+    assert _rows(_priced(100, 10, 0.01) + _unpriced(200, 20))["Cost"] == ("$0.0100", "excluding 1 unpriced requests")
+
+
+def test_an_estimate_notes_its_measured_reasoning_beside_its_completion_tokens():
+    estimate = _estimated(_priced(100, 30, 0.01), reasoning_tokens=20, reasoning=_measured_reasoning())
+
+    assert _rows(estimate)["Completion tokens"] == ("30", "including about 20 reasoning tokens")
+
+
+def test_an_estimate_from_a_thinking_budget_notes_that_its_cost_is_an_upper_bound():
+    budget = ReasoningBudget("a-model", 4096, 100)
+    estimate = _estimated(_priced(100, 110, 0.01), reasoning_tokens=100, reasoning=budget)
+
+    assert _rows(estimate)["Completion tokens"] == (
+        "110",
+        "including up to 100 reasoning tokens, so the cost is an upper bound",
+    )
+
+
+def test_an_estimate_without_reasoning_has_no_note_beside_its_completion_tokens():
+    assert _rows(_estimated(_priced(100, 10, 0.01)))["Completion tokens"] == ("10", "")
+
+
+def test_an_estimate_notes_what_caching_would_save_beside_its_cost():
+    estimate = _estimated(_priced(2000, 10, 0.03), usage_if_cached=_priced(2000, 10, 0.01))
+
+    assert _rows(estimate)["Cost"] == (
+        "$0.0300",
+        "$0.0100 if the provider caches the system message the requests share",
+    )
+
+
+def test_an_estimate_notes_both_its_unpriced_requests_and_what_caching_would_save_beside_its_cost():
+    usage = _priced(2000, 10, 0.03) + _unpriced(100, 10)
+    estimate = _estimated(usage, usage_if_cached=_priced(2000, 10, 0.01) + _priced(100, 10, 0.0))
+
+    assert _rows(estimate)["Cost"] == (
+        "$0.0300",
+        "excluding 1 unpriced requests; $0.0100 if the provider caches the system message the requests share",
     )

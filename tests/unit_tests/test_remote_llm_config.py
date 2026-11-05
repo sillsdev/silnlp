@@ -2375,6 +2375,15 @@ def estimates_logged(caplog) -> List[str]:
     return [record.getMessage() for record in caplog.records if "would take" in record.getMessage()]
 
 
+def estimate_rows(caplog) -> Dict[str, Tuple[str, str]]:
+    [estimate] = estimates_logged(caplog)
+    rows = {}
+    for line in estimate.splitlines()[1:]:
+        label, value, *note = re.split(r"\s{2,}", line.strip(), maxsplit=2)
+        rows[label] = (value, note[0] if note else "")
+    return rows
+
+
 def test_a_dry_run_sends_no_request(tmp_path: Path):
     model, client = make_dry_run_model(tmp_path)
 
@@ -2413,7 +2422,9 @@ def test_a_dry_run_counts_the_tokens_of_the_prompt_a_real_run_would_send(tmp_pat
         list(model.translate(["one"], "en", "es"))
         model.report_estimate()
 
-    assert f"1 requests, {prompt_words:,} prompt" in caplog.text
+    rows = estimate_rows(caplog)
+    assert rows["Requests"] == ("1", "")
+    assert rows["Prompt tokens"] == (f"{prompt_words:,}", "")
 
 
 def test_a_dry_run_estimates_a_reply_from_the_corpus_length_ratio(tmp_path: Path, caplog):
@@ -2424,7 +2435,7 @@ def test_a_dry_run_estimates_a_reply_from_the_corpus_length_ratio(tmp_path: Path
         list(model.translate(["one two three four five six seven"], "en", "es"))
         model.report_estimate()
 
-    assert "+ 6 completion tokens" in caplog.text
+    assert estimate_rows(caplog)["Completion tokens"] == ("6", "")
     assert "0.86 target tokens per source token" in caplog.text
 
 
@@ -2436,8 +2447,9 @@ def test_a_dry_run_estimates_a_batched_reply_with_its_line_numbers(tmp_path: Pat
         model.report_estimate()
 
     # 12 words for the 14 source words, and 2 for the line numbers.
-    assert "1 requests" in caplog.text
-    assert "+ 14 completion tokens" in caplog.text
+    rows = estimate_rows(caplog)
+    assert rows["Requests"] == ("1", "")
+    assert rows["Completion tokens"] == ("14", "")
 
 
 def test_a_dry_run_without_a_training_corpus_estimates_a_reply_as_long_as_its_source(tmp_path: Path, caplog):
@@ -2447,7 +2459,7 @@ def test_a_dry_run_without_a_training_corpus_estimates_a_reply_as_long_as_its_so
         list(model.translate(["one two three"], "en", "es"))
         model.report_estimate()
 
-    assert "+ 3 completion tokens" in caplog.text
+    assert estimate_rows(caplog)["Completion tokens"] == ("3", "")
     assert "no training corpus" in caplog.text
 
 
@@ -2460,7 +2472,7 @@ def test_a_dry_run_reports_the_estimated_cost(tmp_path: Path, caplog):
         model.report_estimate()
 
     # "one" is estimated to need one completion token.
-    assert f"${prompt_words * 0.001 + 0.002:.4f}" in caplog.text
+    assert estimate_rows(caplog)["Cost"] == (f"${prompt_words * 0.001 + 0.002:.4f}", "")
 
 
 def test_a_dry_run_of_a_model_without_a_price_reports_no_cost(tmp_path: Path, caplog):
@@ -2470,7 +2482,7 @@ def test_a_dry_run_of_a_model_without_a_price_reports_no_cost(tmp_path: Path, ca
         list(model.translate(["one"], "en", "es"))
         model.report_estimate()
 
-    assert "cost unavailable" in caplog.text
+    assert estimate_rows(caplog)["Cost"] == ("unavailable", "no pricing for this model")
 
 
 def test_a_dry_run_reports_what_caching_the_shared_system_message_would_save(tmp_path: Path, caplog):
@@ -2523,7 +2535,7 @@ def test_a_dry_run_counts_a_request_for_each_draft(tmp_path: Path, caplog):
         list(model.translate(["one"], "en", "es", produce_multiple_translations=True))
         model.report_estimate()
 
-    assert "2 requests" in caplog.text
+    assert estimate_rows(caplog)["Requests"] == ("2", "")
 
 
 def test_a_dry_run_bills_nothing_for_a_segment_the_corpus_already_translates(tmp_path: Path, caplog):
@@ -2533,8 +2545,9 @@ def test_a_dry_run_bills_nothing_for_a_segment_the_corpus_already_translates(tmp
         list(model.translate(["let there be light"], "en", "es"))
         model.report_estimate()
 
-    assert "0 requests" in caplog.text
-    assert "translations copied from the training corpus: 1" in caplog.text
+    rows = estimate_rows(caplog)
+    assert rows["Requests"] == ("0", "")
+    assert rows["Translations copied"][0] == "1"
 
 
 def test_a_dry_run_explains_how_to_estimate_a_segment_the_corpus_already_translates(tmp_path: Path, caplog):
@@ -2544,29 +2557,41 @@ def test_a_dry_run_explains_how_to_estimate_a_segment_the_corpus_already_transla
         list(model.translate(["let there be light"], "en", "es"))
         model.report_estimate()
 
-    assert "A real run would copy 1 translations from training examples" in caplog.text
-    assert "Set infer.copy_exact_matches to false to estimate requesting them." in caplog.text
+    assert estimate_rows(caplog)["Translations copied"] == (
+        "1",
+        "from training data, no requests; disable with infer.copy_exact_matches: false",
+    )
 
 
-def test_a_dry_run_that_sends_every_request_explains_nothing_of_reuse_or_copies(tmp_path: Path, caplog):
+def test_a_dry_run_that_sends_every_request_reports_no_reuse_or_copies(tmp_path: Path, caplog):
     model, _ = make_dry_run_model(tmp_path)
 
     with caplog.at_level("INFO"):
         list(model.translate(["one"], "en", "es"))
         model.report_estimate()
 
-    assert "A real run would" not in caplog.text
+    rows = estimate_rows(caplog)
+    assert rows["Saved replies reused"] == ("0", "")
+    assert rows["Translations copied"] == ("0", "")
 
 
-def test_a_dry_run_keeps_its_notes_in_the_same_record_as_its_estimate(tmp_path: Path, caplog):
+def test_a_dry_run_logs_its_whole_estimate_as_one_table_naming_the_model(tmp_path: Path, caplog):
     model, _ = make_dry_run_model(tmp_path)
 
     with caplog.at_level("INFO"):
-        list(model.translate(["let there be light"], "en", "es"))
+        list(model.translate(["one"], "en", "es"))
         model.report_estimate()
 
     [estimate] = estimates_logged(caplog)
-    assert "\n    A real run would copy 1 translations" in estimate
+    assert estimate.splitlines()[0] == "Dry run: a real run with gpt-4o would take"
+    assert list(estimate_rows(caplog)) == [
+        "Requests",
+        "Saved replies reused",
+        "Translations copied",
+        "Prompt tokens",
+        "Completion tokens",
+        "Cost",
+    ]
 
 
 def test_a_dry_run_logs_no_estimate_until_asked_for_its_total(tmp_path: Path, caplog):
@@ -2586,8 +2611,7 @@ def test_a_dry_runs_total_covers_every_translation_in_one_estimate(tmp_path: Pat
         list(model.translate(["two"], "en", "es"))
         model.report_estimate()
 
-    [estimate] = estimates_logged(caplog)
-    assert estimate.startswith("Dry run: in total, a real run would take 2 requests")
+    assert estimate_rows(caplog)["Requests"] == ("2", "")
 
 
 def test_a_dry_run_of_several_test_files_reports_one_total(tmp_path: Path, caplog):
@@ -2610,8 +2634,10 @@ def test_a_dry_run_that_translates_nothing_reports_that_a_real_run_would_send_no
     with caplog.at_level("INFO"):
         model.report_estimate()
 
-    [estimate] = estimates_logged(caplog)
-    assert estimate.startswith("Dry run: in total, a real run would take 0 requests, 0 prompt + 0 completion tokens")
+    rows = estimate_rows(caplog)
+    assert rows["Requests"] == ("0", "")
+    assert rows["Prompt tokens"] == ("0", "")
+    assert rows["Completion tokens"] == ("0", "")
 
 
 def test_a_dry_run_does_not_warn_of_blank_translations(tmp_path: Path, caplog):
@@ -2650,7 +2676,7 @@ def test_a_dry_run_adds_estimated_reasoning_to_the_completion_tokens(tmp_path: P
         model.report_estimate()
 
     # A 6-token reply, and twice that in reasoning.
-    assert "+ 18 completion tokens" in caplog.text
+    assert estimate_rows(caplog)["Completion tokens"][0] == "18"
 
 
 def test_a_dry_run_bills_estimated_reasoning_as_output(tmp_path: Path, caplog):
@@ -2662,7 +2688,7 @@ def test_a_dry_run_bills_estimated_reasoning_as_output(tmp_path: Path, caplog):
         model.report_estimate()
 
     # A 1-token reply and 2 tokens of reasoning.
-    assert f"${prompt_words * 0.001 + 3 * 0.002:.4f}" in caplog.text
+    assert estimate_rows(caplog)["Cost"][0] == f"${prompt_words * 0.001 + 3 * 0.002:.4f}"
 
 
 def test_a_dry_run_reports_how_much_of_its_total_is_measured_reasoning(tmp_path: Path, caplog):
@@ -2673,8 +2699,7 @@ def test_a_dry_run_reports_how_much_of_its_total_is_measured_reasoning(tmp_path:
         list(model.translate(["one"], "en", "es"))
         model.report_estimate()
 
-    [estimate] = estimates_logged(caplog)
-    assert "includes about 14 reasoning tokens" in estimate
+    assert estimate_rows(caplog)["Completion tokens"][1] == "including about 14 reasoning tokens"
 
 
 def test_a_dry_run_with_a_thinking_budget_reports_an_upper_bound(tmp_path: Path, caplog):
@@ -2684,9 +2709,10 @@ def test_a_dry_run_with_a_thinking_budget_reports_an_upper_bound(tmp_path: Path,
         list(model.translate(["one"], "en", "es"))
         model.report_estimate()
 
-    [estimate] = estimates_logged(caplog)
-    assert "+ 101 completion tokens" in estimate
-    assert "up to 100 reasoning tokens, so the cost is an upper bound" in estimate
+    assert estimate_rows(caplog)["Completion tokens"] == (
+        "101",
+        "including up to 100 reasoning tokens, so the cost is an upper bound",
+    )
 
 
 def test_a_dry_run_announces_how_it_estimates_reasoning(tmp_path: Path, caplog):
@@ -2743,8 +2769,9 @@ def test_a_dry_run_bills_nothing_for_a_reply_an_earlier_run_saved(tmp_path: Path
         list(model.translate(["one", "two"], "en", "es"))
         model.report_estimate()
 
-    assert "1 requests" in caplog.text
-    assert "replies reused from an earlier run: 1" in caplog.text
+    rows = estimate_rows(caplog)
+    assert rows["Requests"] == ("1", "")
+    assert rows["Saved replies reused"][0] == "1"
 
 
 def test_a_dry_run_explains_how_to_estimate_requests_whose_replies_an_earlier_run_saved(tmp_path: Path, caplog):
@@ -2756,8 +2783,10 @@ def test_a_dry_run_explains_how_to_estimate_requests_whose_replies_an_earlier_ru
         list(model.translate(["one", "two"], "en", "es"))
         model.report_estimate()
 
-    assert "A real run would reuse 1 replies that an earlier run saved" in caplog.text
-    assert "Rerun with --force-infer, or set infer.reuse_saved_replies to false" in caplog.text
+    assert estimate_rows(caplog)["Saved replies reused"] == (
+        "1",
+        "no requests; disable with --force-infer or infer.reuse_saved_replies: false",
+    )
 
 
 def test_a_dry_run_estimates_test_predictions_that_are_already_complete(tmp_path: Path):
@@ -2768,7 +2797,7 @@ def test_a_dry_run_estimates_test_predictions_that_are_already_complete(tmp_path
     assert not model.has_completed_translation(tmp_path / "test.src.txt", tmp_path / "predictions.txt")
 
 
-def test_a_dry_run_says_beneath_its_estimate_how_many_test_files_a_real_run_would_skip(tmp_path: Path, caplog):
+def test_a_dry_run_reports_how_many_test_files_a_real_run_would_skip(tmp_path: Path, caplog):
     (tmp_path / "test.src.txt").write_text("one\n", encoding="utf-8")
     (tmp_path / "predictions.txt").write_text("uno\n", encoding="utf-8")
     model, _ = make_dry_run_model(tmp_path)
@@ -2778,8 +2807,10 @@ def test_a_dry_run_says_beneath_its_estimate_how_many_test_files_a_real_run_woul
         model.translate_test_files([tmp_path / "test.src.txt"], [tmp_path / "predictions.txt"])
         model.report_estimate()
 
-    [estimate] = estimates_logged(caplog)
-    assert "\n    1 test files already have every translation, so a real run would skip them" in estimate
+    assert estimate_rows(caplog)["Test files already done"] == (
+        "1",
+        "included above, but skipped by a real run without --force-infer",
+    )
 
 
 def test_a_dry_run_says_nothing_of_complete_predictions_for_a_file_without_them(tmp_path: Path, caplog):
@@ -2791,7 +2822,7 @@ def test_a_dry_run_says_nothing_of_complete_predictions_for_a_file_without_them(
         model.translate_test_files([tmp_path / "test.src.txt"], [tmp_path / "predictions.txt"])
         model.report_estimate()
 
-    assert "already have every translation" not in caplog.text
+    assert "Test files already done" not in estimate_rows(caplog)
 
 
 def test_a_dry_run_leaves_an_earlier_runs_saved_replies_as_it_found_them(tmp_path: Path):
@@ -2823,8 +2854,9 @@ def test_a_forced_dry_run_bills_every_request_but_keeps_the_saved_replies(tmp_pa
         list(model.translate(["one"], "en", "es"))
         model.report_estimate()
 
-    assert "1 requests" in caplog.text
-    assert "reused" not in caplog.text
+    rows = estimate_rows(caplog)
+    assert rows["Requests"] == ("1", "")
+    assert rows["Saved replies reused"] == ("0", "")
     assert (tmp_path / "remote_llm_replies.jsonl").is_file()
 
 
@@ -2886,8 +2918,7 @@ def test_a_dry_run_translator_reports_the_estimate_once_its_translating_is_done(
             list(translator.translate(["two"], "en", "es"))
             assert estimates_logged(caplog) == []
 
-    [estimate] = estimates_logged(caplog)
-    assert "2 requests" in estimate
+    assert estimate_rows(caplog)["Requests"] == ("2", "")
 
 
 def test_a_dry_run_translator_whose_translating_fails_reports_no_estimate(tmp_path: Path, caplog):

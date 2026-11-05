@@ -1,6 +1,7 @@
 from typing import Any, Dict, Optional
 
 from .reasoning_estimate import ReasoningEstimate
+from .usage_summary_table import UsageSummaryTable
 
 
 class LLMUsageStatistics:
@@ -72,6 +73,23 @@ class LLMUsageStatistics:
             return f"{summary}; cost unavailable (no pricing for this model)"
         return f"{summary}, ${self._cost:.4f} excluding {self._unpriced_requests:,} unpriced requests"
 
+    def add_requests_row_to(self, table: UsageSummaryTable) -> None:
+        table.add_row("Requests", f"{self._requests:,}")
+
+    def add_tokens_and_cost_rows_to(self, table: UsageSummaryTable) -> None:
+        table.add_row("Prompt tokens", f"{self._prompt_tokens:,}")
+        table.add_row("Completion tokens", f"{self._completion_tokens:,}", self._completion_note())
+        if 0 < self._unpriced_requests == self._requests:
+            table.add_row("Cost", "unavailable", "no pricing for this model")
+        else:
+            table.add_row("Cost", f"${self._cost:.4f}", self._cost_note())
+
+    def _completion_note(self) -> str:
+        return ""
+
+    def _cost_note(self) -> str:
+        return f"excluding {self._unpriced_requests:,} unpriced requests" if self._unpriced_requests > 0 else ""
+
     def _include(self, other: "LLMUsageStatistics") -> None:
         self._requests += other._requests
         self._unpriced_requests += other._unpriced_requests
@@ -113,10 +131,23 @@ class EstimatedLLMUsageStatistics(LLMUsageStatistics):
     __radd__ = __add__
 
     def describe(self) -> str:
-        return super().describe() + self._reasoning.describe_total(self._reasoning_tokens) + self._describe_caching()
+        reasoning = self._reasoning.describe_total(self._reasoning_tokens)
+        caching = self._caching_note()
+        return (
+            super().describe()
+            + (f"; this includes {reasoning}" if reasoning else "")
+            + (f"; {caching}" if caching else "")
+        )
 
-    def _describe_caching(self) -> str:
+    def _completion_note(self) -> str:
+        reasoning = self._reasoning.describe_total(self._reasoning_tokens)
+        return f"including {reasoning}" if reasoning else ""
+
+    def _cost_note(self) -> str:
+        return "; ".join(note for note in (super()._cost_note(), self._caching_note()) if note)
+
+    def _caching_note(self) -> str:
         cached = self._usage_if_cached
         if cached._unpriced_requests > 0 or cached._cost >= self._cost:
             return ""
-        return f"; ${cached._cost:.4f} if the provider caches the system message the requests share"
+        return f"${cached._cost:.4f} if the provider caches the system message the requests share"

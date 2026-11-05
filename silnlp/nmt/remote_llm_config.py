@@ -64,6 +64,7 @@ from .llm_usage import EstimatedLLMUsageStatistics, LLMUsageStatistics
 from .openrouter_models import OpenRouterListing, OpenRouterListings, OpenRouterModelList, OpenRouterRates
 from .reasoning_estimate import GptReasoningRates, NoReasoning, ReasoningBudget, ReasoningEstimate, UnknownReasoning
 from .token_counter import TokenCounter
+from .usage_summary_table import UsageSummaryTable
 
 LOGGER = logging.getLogger(__name__)
 
@@ -222,22 +223,28 @@ class UsageTotals:
                 summary = f"{summary}; translations copied from the training corpus: {self._copied_translations:,}"
             return summary
 
-    def describe_unsent_requests(self) -> List[str]:
+    def add_rows_to(self, table: UsageSummaryTable) -> None:
         with self._lock:
-            descriptions = []
-            if self._reused_replies > 0:
-                descriptions.append(
-                    f"A real run would reuse {self._reused_replies:,} replies that an earlier run saved instead of "
-                    "sending their requests again. Rerun with --force-infer, or set infer.reuse_saved_replies to "
-                    "false, to estimate sending them."
-                )
-            if self._copied_translations > 0:
-                descriptions.append(
-                    f"A real run would copy {self._copied_translations:,} translations from training examples with the "
-                    "same source instead of requesting them. Set infer.copy_exact_matches to false to estimate "
-                    "requesting them."
-                )
-            return descriptions
+            self._usage.add_requests_row_to(table)
+            table.add_row(
+                "Saved replies reused",
+                f"{self._reused_replies:,}",
+                (
+                    "no requests; disable with --force-infer or infer.reuse_saved_replies: false"
+                    if self._reused_replies
+                    else ""
+                ),
+            )
+            table.add_row(
+                "Translations copied",
+                f"{self._copied_translations:,}",
+                (
+                    "from training data, no requests; disable with infer.copy_exact_matches: false"
+                    if self._copied_translations
+                    else ""
+                ),
+            )
+            self._usage.add_tokens_and_cost_rows_to(table)
 
 
 @dataclass(frozen=True)
@@ -1123,9 +1130,7 @@ class RemoteLLMConfig(LLMConfig[PromptMessages]):
             completion_client_factory = LiteLLMCompletionClientFactory()
         return RemoteLLMModel(self, completion_client_factory)
 
-    def create_dry_run_model(
-        self, completion_client_factory: Optional[CompletionClientFactory] = None
-    ) -> DryRunModel:
+    def create_dry_run_model(self, completion_client_factory: Optional[CompletionClientFactory] = None) -> DryRunModel:
         if completion_client_factory is None:
             completion_client_factory = LiteLLMCompletionClientFactory()
         return DryRunRemoteLLMModel(self, completion_client_factory)
@@ -1697,16 +1702,17 @@ class DryRunRemoteLLMModel(RemoteLLMModel, DryRunModel):
         self._run_usage.include(usage)
 
     def report_estimate(self) -> None:
-        lines = [f"Dry run: in total, a real run would take {self._run_usage.describe()}."]
+        table = UsageSummaryTable(f"Dry run: a real run with {self._config.model} would take")
+        self._run_usage.add_rows_to(table)
         finished_sources = len(self._sources_with_finished_predictions)
         if finished_sources > 0:
-            lines.append(
-                f"{finished_sources:,} test files already have every translation, so a real run would skip them "
-                "unless --force-infer is added."
+            table.add_row(
+                "Test files already done",
+                f"{finished_sources:,}",
+                "included above, but skipped by a real run without --force-infer",
             )
-        lines.extend(self._run_usage.describe_unsent_requests())
-        # One record, its notes indented beneath, so that nothing logged alongside can come between them.
-        LOGGER.info("\n    ".join(lines))
+        # One record, so that nothing logged alongside can come between the table's rows.
+        LOGGER.info(table.render())
 
     def _complete_texts(
         self,

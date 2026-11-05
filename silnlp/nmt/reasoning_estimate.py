@@ -95,7 +95,7 @@ class ReasoningBudget(LimitedReasoning):
         )
 
     def describe_total(self, reasoning_tokens: int) -> str:
-        return f"; this includes up to {reasoning_tokens:,} reasoning tokens, so the cost is an upper bound"
+        return f"up to {reasoning_tokens:,} reasoning tokens, so the cost is an upper bound"
 
     def _expected_tokens(self, reply_tokens: int) -> int:
         return self._budget
@@ -117,7 +117,7 @@ class MeasuredReasoning(LimitedReasoning):
         )
 
     def describe_total(self, reasoning_tokens: int) -> str:
-        return f"; this includes about {reasoning_tokens:,} reasoning tokens"
+        return f"about {reasoning_tokens:,} reasoning tokens"
 
     def _expected_tokens(self, reply_tokens: int) -> int:
         return round(reply_tokens * self._tokens_per_reply_token)

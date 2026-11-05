@@ -1,5 +1,4 @@
 import argparse
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Set, Union
@@ -67,7 +66,6 @@ class SILExperiment:
         self.config.preprocess(self.make_stats, self.force_align)
 
     def train(self):
-        os.system("nvidia-smi")
         self.model.save_effective_config(self.config.exp_dir / f"effective-config-{self.rev_hash}.yml")
         print(f"=== Training ({self.name}) ===")
         self.model.train()
