@@ -1,5 +1,4 @@
 import argparse
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Set, Union
@@ -10,7 +9,7 @@ from ..common.environment import SilNlpEnv
 from ..common.postprocessor import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import Config, NMTModel
+from .config import Config, DryRunModel, NMTModel
 from .test import SUPPORTED_SCORERS, test
 from .translate import TranslationTask
 
@@ -67,7 +66,6 @@ class SILExperiment:
         self.config.preprocess(self.make_stats, self.force_align)
 
     def train(self):
-        os.system("nvidia-smi")
         self.model.save_effective_config(self.config.exp_dir / f"effective-config-{self.rev_hash}.yml")
         print(f"=== Training ({self.name}) ===")
         self.model.train()
@@ -207,7 +205,7 @@ def main() -> None:
         "--multiple-translations",
         default=False,
         action="store_true",
-        help='Produce multiple translations of each verse. '
+        help="Produce multiple translations of each verse. "
         + 'These will be saved in separate files with suffixes like ".1.txt", ".2.txt", etc.',
     )
     parser.add_argument(
@@ -222,6 +220,13 @@ def main() -> None:
         default=False,
         action="store_true",
         help="Infer again even where test predictions exist, without reusing replies an earlier run saved",
+    )
+    parser.add_argument(
+        "--dry-run",
+        default=False,
+        action="store_true",
+        help="Only for remote LLM: run every step but instead of sending queries, "
+        "estimate the number of tokens and cost",
     )
     parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")
     parser.add_argument(
@@ -275,11 +280,16 @@ def main() -> None:
         tag=args.clearml_tag,
         environment=environment,
     )
-    model = clearml.config.create_model(
-        mixed_precision=not args.disable_mixed_precision,
-        num_devices=args.num_devices,
-        clearml_queue=args.clearml_queue,
-    )
+    dry_run_model: Optional[DryRunModel] = None
+    if args.dry_run:
+        dry_run_model = clearml.config.create_dry_run_model()
+        model: NMTModel = dry_run_model
+    else:
+        model = clearml.config.create_model(
+            mixed_precision=not args.disable_mixed_precision,
+            num_devices=args.num_devices,
+            clearml_queue=args.clearml_queue,
+        )
 
     exp = SILExperiment(
         name=clearml.name,
@@ -308,6 +318,8 @@ def main() -> None:
     if args.train and not args.save_checkpoints:
         environment.delete_path_on_exit(environment.get_mt_exp_dir(args.experiment) / "run")
     exp.run()
+    if dry_run_model is not None:
+        dry_run_model.report_estimate()
 
 
 if __name__ == "__main__":

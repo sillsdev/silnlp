@@ -346,6 +346,11 @@ def test_llm_config_rejects_translate_gemma_with_num_examples(tmp_path):
         _construct_llm_config(tmp_path, {"num_examples": 2}, model="google/translategemma-4b-it")
 
 
+def test_a_local_llm_experiment_has_no_dry_run(tmp_path):
+    with pytest.raises(ValueError, match="remote_llm"):
+        _construct_llm_config(tmp_path, {}).create_dry_run_model()
+
+
 def test_llm_config_warns_when_num_examples_set_without_examples_placeholder(tmp_path, caplog):
     with caplog.at_level(logging.WARNING):
         _construct_llm_config(
