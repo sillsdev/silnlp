@@ -1,0 +1,7 @@
+{
+  "preferred": {
+    "eng": [["NIV11R", "NIV84", "NLT07", "BSB"]],
+    "fra": [["LBS21", "LS1910"], ["PDV2017", "PDV"], ["FCR19DBL", "FRC97", "FC97"]]
+  },
+  "avoid": ["ESV*"]
+}
