@@ -1,16 +1,16 @@
-spa_Latn ▁Y ▁te ▁lo ▁he ▁vuel to ▁a ▁enviar ▁en ▁persona , ▁es ▁decir , ▁como ▁si ▁fuera ▁mi ▁propio ▁corazón , </s>
 spa_Latn ▁Si ▁algun o ▁viene ▁a ▁vosotros ▁y ▁no ▁tra e ▁esta ▁enseñ anza , ▁no ▁lo ▁reci bá is ▁en ▁casa , ▁ni ▁lo ▁salud éis , </s>
-spa_Latn ▁pero ▁no ▁qu ise ▁hacer ▁nada ▁sin ▁tu ▁consenti mi ento , ▁para ▁que ▁tu ▁bond ad ▁no ▁fuera ▁como ▁por ▁obliga ción , ▁sino ▁por ▁tu ▁propia ▁volunt ad . </s>
+spa_Latn ▁Aunque ▁tengo ▁muchas ▁cosas ▁que ▁escribir os , ▁no ▁quiero ▁hacerlo ▁con ▁papel ▁y ▁tinta , ▁sino ▁que ▁espero ▁ir ▁a ▁vosotros ▁y ▁hablar ▁cara ▁a ▁cara , ▁para ▁que ▁vu estro ▁go zo ▁sea ▁completo . </s>
 spa_Latn ▁no ▁ya ▁como ▁escla vo , ▁sino ▁como ▁más ▁que ▁un ▁escla vo , ▁como ▁un ▁hermano ▁am ado , ▁especialmente ▁para ▁mí , ▁pero ▁cu ánto ▁más ▁para ▁ti , ▁tanto ▁en ▁la ▁carne ▁como ▁en ▁el ▁Señor . </s>
-spa_Latn ▁Y ▁si ▁te ▁ha ▁perjudi cado ▁en ▁alguna ▁forma , ▁o ▁te ▁debe ▁algo , ▁cár g alo ▁a ▁mi ▁cuenta . </s>
+spa_Latn ▁Te ▁sal udan ▁los ▁hijos ▁de ▁tu ▁hermana ▁esc og ida . </s>
 spa_Latn ▁Yo , ▁Pablo , ▁escri bo ▁esto ▁con ▁mi ▁propia ▁mano ; ▁yo ▁lo ▁pagar é ▁( por ▁no ▁decirte ▁que ▁aun ▁tú ▁mismo ▁te ▁me ▁debes ▁a ▁mí ). </s>
-spa_Latn ▁Pues ▁me ▁alegr é ▁mucho ▁cuando ▁algunos ▁hermanos ▁vini eron ▁y ▁di eron ▁testimoni o ▁de ▁tu ▁verdad , ▁esto ▁es , ▁de ▁cómo ▁and as ▁en ▁la ▁verdad . </s>
-spa_Latn ▁Am ado , ▁no ▁im ites ▁lo ▁malo ▁sino ▁lo ▁bueno . ▁El ▁que ▁hace ▁lo ▁bueno ▁es ▁de ▁Dios ; ▁el ▁que ▁hace ▁lo ▁malo ▁no ▁ha ▁visto ▁a ▁Dios . </s>
+spa_Latn ▁Sí , ▁hermano , ▁perm ít eme ▁disfr utar ▁este ▁beneficio ▁de ▁ti ▁en ▁el ▁Señor ; ▁rec rea ▁mi ▁corazón ▁en ▁Cristo . </s>
+spa_Latn ▁Y ▁al ▁mismo ▁tiempo , ▁prep ár ame ▁también ▁al oj amiento , ▁pues ▁espero ▁que ▁por ▁vu estras ▁ora ciones ▁os ▁ser é ▁conced ido . </s>
+spa_Latn ▁también ▁Marcos , ▁Ar istar co , ▁Dem as ▁y ▁Lucas , ▁mis ▁colabor adores . </s>
+spa_Latn ▁La ▁gra cia ▁del ▁Señor ▁Jesucristo ▁sea ▁con ▁vu estro ▁espíritu . </s>
+spa_Latn ▁Por ▁esta ▁razón , ▁si ▁voy , ▁llam aré ▁la ▁atención ▁a ▁las ▁obras ▁que ▁hace , ▁acus ánd onos ▁in just amente ▁con ▁palabras ▁mali cios as ; ▁y ▁no ▁satisfe cho ▁con ▁esto , ▁él ▁mismo ▁no ▁recibe ▁a ▁los ▁hermanos , ▁se ▁lo ▁pro hí be ▁a ▁los ▁que ▁quieren ▁hacerlo ▁y ▁los ▁expul sa ▁de ▁la ▁iglesia . </s>
+spa_Latn ▁Demet rio ▁tiene ▁buen ▁testimoni o ▁de ▁parte ▁de ▁todos ▁y ▁de ▁parte ▁de ▁la ▁verdad ▁misma ; ▁también ▁nosotros ▁d amos ▁testimoni o ▁y ▁tú ▁sabes ▁que ▁nuestro ▁testimoni o ▁es ▁verdad ero . </s>
 spa_Latn ▁pues ▁espero ▁verte ▁en ▁breve ▁y ▁hablar emos ▁cara ▁a ▁cara . </s>
-spa_Latn ▁Pablo , ▁pr ision ero ▁de ▁Cristo ▁Jesús , ▁y ▁el ▁hermano ▁Timoteo : ▁A ▁Filem ón ▁nuestro ▁am ado ▁hermano ▁y ▁colabor ador , </s>
-spa_Latn ▁Gra cia ▁a ▁vosotros ▁y ▁paz ▁de ▁parte ▁de ▁Dios ▁nuestro ▁Padre ▁y ▁del ▁Señor ▁Jesucristo . </s>
-spa_Latn ▁porque ▁o igo ▁de ▁tu ▁amor ▁y ▁de ▁la ▁fe ▁que ▁tienes ▁hacia ▁el ▁Señor ▁Jesús ▁y ▁hacia ▁todos ▁los ▁sant os ; </s>
-spa_Latn ▁y ▁ru ego ▁que ▁la ▁comuni ón ▁de ▁tu ▁fe ▁lle gue ▁a ▁ser ▁eficaz ▁por ▁el ▁conoc imiento ▁de ▁todo ▁lo ▁bueno ▁que ▁hay ▁en ▁vosotros ▁mediante ▁Cristo . </s>
-spa_Latn ▁Mu cho ▁me ▁alegr é ▁al ▁encontrar ▁algunos ▁de ▁tus ▁hijos ▁andando ▁en ▁la ▁verdad , ▁tal ▁como ▁hemos ▁recib ido ▁mand amiento ▁del ▁Padre . </s>
+spa_Latn ▁y ▁a ▁la ▁hermana ▁Ap ia , ▁y ▁a ▁Ar qui po , ▁nuestro ▁compañ ero ▁de ▁mili cia , ▁y ▁a ▁la ▁iglesia ▁que ▁está ▁en ▁tu ▁casa : </s>
+spa_Latn ▁Por ▁lo ▁cual , ▁aunque ▁tengo ▁mucha ▁libertad ▁en ▁Cristo ▁para ▁mand arte ▁hacer ▁lo ▁que ▁convi ene , </s>
 spa_Latn ▁Y ▁este ▁es ▁el ▁amor : ▁que ▁and emos ▁conforme ▁a ▁sus ▁mand amientos . ▁Este ▁es ▁el ▁mand amiento ▁tal ▁como ▁lo ▁hab éis ▁oído ▁desde ▁el ▁principio , ▁para ▁que ▁and éis ▁en ▁él . </s>
 spa_Latn ▁Ten ed ▁cuidado ▁para ▁que ▁no ▁perd áis ▁lo ▁que ▁hemos ▁log rado , ▁sino ▁que ▁reci bá is ▁abund ante ▁recompensa . </s>

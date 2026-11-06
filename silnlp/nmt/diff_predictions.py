@@ -15,9 +15,9 @@ import sacrebleu
 from scipy.stats import gmean
 from tqdm import tqdm
 
+from ..common.confidence_files import CONFIDENCE_SUFFIX
 from ..common.corpus import load_corpus
 from ..common.environment import SilNlpEnv
-from ..common.translator import CONFIDENCE_SUFFIX
 from ..common.utils import get_git_revision_hash
 from .sp_utils import decode_sp, decode_sp_lines
 

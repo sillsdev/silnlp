@@ -11,6 +11,8 @@ from ..common.postprocessor import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config, NMTModel
+from .config_utils import load_config
+from .preprocessor import Preprocessor
 from .test import SUPPORTED_SCORERS, test
 from .translate import TranslationTask
 
@@ -64,7 +66,11 @@ class SILExperiment:
         config_file = Path(exp_dir, "config.yml")
         if not config_file.exists():
             raise RuntimeError(f"ERROR: Config file does not exist in experiment folder {exp_dir}.")
-        self.config.preprocess(self.make_stats, self.force_align)
+        Preprocessor(
+            self.config.corpus_inventory,
+            self.config.create_vocabulary_builder(),
+            self.config.create_data_set_writer(self.force_align),
+        ).run(self.make_stats)
 
     def train(self):
         os.system("nvidia-smi")
@@ -98,7 +104,7 @@ class SILExperiment:
 
         postprocess_configs = translate_configs.get("postprocess", [])
         postprocess_handler = PostprocessHandler(
-            [PostprocessConfig(pc, self.environment) for pc in postprocess_configs], environment=self.environment
+            [PostprocessConfig(pc) for pc in postprocess_configs], environment=self.environment
         )
 
         quality_estimation = translate_configs.get("quality_estimation", False)
@@ -207,7 +213,7 @@ def main() -> None:
         "--multiple-translations",
         default=False,
         action="store_true",
-        help='Produce multiple translations of each verse. '
+        help="Produce multiple translations of each verse. "
         + 'These will be saved in separate files with suffixes like ".1.txt", ".2.txt", etc.',
     )
     parser.add_argument(
@@ -275,7 +281,8 @@ def main() -> None:
         tag=args.clearml_tag,
         environment=environment,
     )
-    model = clearml.config.create_model(
+    config = load_config(clearml.name, environment)
+    model = config.create_model(
         mixed_precision=not args.disable_mixed_precision,
         num_devices=args.num_devices,
         clearml_queue=args.clearml_queue,
@@ -283,7 +290,7 @@ def main() -> None:
 
     exp = SILExperiment(
         name=clearml.name,
-        config=clearml.config,
+        config=config,
         model=model,
         environment=environment,
         make_stats=args.stats,
