@@ -26,6 +26,7 @@ from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
 from silnlp.nmt.config import SUPPORTED_GLOSS_ISOS, Config
 
 from ..nmt.config_utils import create_config
+from .auto_onboarding import process_onboarding_experiments
 from .collect_verse_counts import collect_verse_counts
 from .environment import SilNlpEnv
 from .extract_corpora import ExtractOutput, extract_corpora
@@ -620,9 +621,9 @@ class OnboardingReportCreator:
         self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books to Translate"] = ";".join(
             self.planned_books
         )
-        self.report_df.loc[
-            self.report_df["Project Type"] == ProjectType.MAIN.value, "Books Missing/Incomplete"
-        ] = ";".join([book for book in self.completed_books if book not in self.main_project.report.completed_books])
+        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books Missing/Incomplete"] = (
+            ";".join([book for book in self.completed_books if book not in self.main_project.report.completed_books])
+        )
         self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Extra Books"] = ";".join(
             [book for book in self.main_project.report.completed_books if book not in self.completed_books]
         )
@@ -640,9 +641,9 @@ class OnboardingReportCreator:
             self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books to Translate"] = (
                 "yes" if len(books_missing) == 0 else "no"
             )
-            self.report_df.loc[
-                self.report_df["Name on Bucket"] == project.project_name, "Books Missing/Incomplete"
-            ] = ";".join(books_missing)
+            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books Missing/Incomplete"] = (
+                ";".join(books_missing)
+            )
             self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Extra Books"] = ";".join(
                 extra_books
             )
@@ -727,7 +728,7 @@ class OnboardingRequest:
         output_folder = onboarding_config.get("output_folder", None)
         self.output_folder: Path | None = Path(output_folder) if output_folder else None
 
-    def process_onboarding_request(self) -> None:
+    def process_onboarding_request(self, experiments: bool = False) -> None:
         with self.create_log_file():
             LOGGER.info(f"Processing onboarding request for main project '{self.main_project.project_name}'")
             for project in [self.main_project] + self.reference_projects:
@@ -772,6 +773,9 @@ class OnboardingRequest:
             )
 
             report_creator.create_report_csv()
+
+            if experiments:
+                process_onboarding_experiments(str(self.output_folder), auto_onboarding_tag=True)
 
     def align_main_project(self) -> None:
         iso_codes = set()
@@ -1125,6 +1129,9 @@ def main() -> None:
     parser.add_argument("--completed-books", nargs="+", help="The ids of books that have been completed.")
     parser.add_argument("--planned-books", nargs="+", help="The ids of books planned for translation.")
     parser.add_argument(
+        "--experiments", default=False, action="store_true", help="Run experiments for the onboarding request."
+    )
+    parser.add_argument(
         "--clearml-queue",
         default=None,
         type=str,
@@ -1164,7 +1171,7 @@ def main() -> None:
         for i, main_project in enumerate(args.main_projects):
             project_configs[main_project] = args.config[i]
 
-    onboarding_requests = []
+    onboarding_requests: list[OnboardingRequest] = []
     for main_project in args.main_projects:
         if args.config:
             config_file = Path(project_configs[main_project])
@@ -1196,7 +1203,7 @@ def main() -> None:
                 "planned_books": args.planned_books if args.planned_books else [],
             }
 
-        onboarding_request = OnboardingRequest(config=config, environment=environment)
+        onboarding_request: OnboardingRequest = OnboardingRequest(config=config, environment=environment)
         onboarding_request.prepare_and_upload_projects()
         onboarding_requests.append(onboarding_request)
 
@@ -1223,7 +1230,7 @@ def main() -> None:
         )
 
     for onboarding_request in onboarding_requests:
-        onboarding_request.process_onboarding_request()
+        onboarding_request.process_onboarding_request(args.experiments)
 
 
 if __name__ == "__main__":
