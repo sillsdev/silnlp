@@ -565,11 +565,17 @@ class Confirmer:
 
 
 class ExperimentRunner:
+    def __init__(self, auto_onboarding_tag: bool = False):
+        self._auto_onboarding_tag = auto_onboarding_tag
+
     def run(self, name: str, translate: bool) -> int:
         return subprocess.run([sys.executable] + self.arguments(translate) + [name]).returncode
 
     def arguments(self, translate: bool) -> List[str]:
-        return [arg for arg in EXPERIMENT_ARGS if translate or arg != "--translate"]
+        args = EXPERIMENT_ARGS
+        if self._auto_onboarding_tag:
+            args = [arg if arg != "eitl" else "auto-onboarding" for arg in args]
+        return [arg for arg in args if translate or arg != "--translate"]
 
 
 @dataclass
@@ -712,12 +718,7 @@ class AutoOnboarding:
                 print(f"Experiment {name} exited with code {code}.")
 
 
-def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
-    parser = argparse.ArgumentParser(description="Create experiments for an onboarding request automatically.")
-    parser.add_argument("folder", help="Request folder relative to MT/experiments; '_Request' is added if needed")
-    args = parser.parse_args()
-
+def process_onboarding_experiments(request_folder: str, auto_onboarding_tag: bool = False) -> None:
     environment = SilNlpEnv.create_standard_environment()
     paths = DataPaths(
         experiments_dir=Path(environment.mt_experiments_dir),
@@ -726,12 +727,21 @@ def main() -> None:
         terms_dir=Path(environment.mt_terms_dir),
         projects_dir=Path(environment.pt_projects_dir),
     )
+    folder = RequestFolder(paths.experiments_dir).resolve(request_folder)
     try:
-        folder = RequestFolder(paths.experiments_dir).resolve(args.folder)
-        AutoOnboarding(paths, Confirmer(), ExperimentRunner()).run(folder)
+        AutoOnboarding(paths, Confirmer(), ExperimentRunner(auto_onboarding_tag=auto_onboarding_tag)).run(folder)
     except OnboardingError as e:
-        print(f"Error: {e}")
+        print(f"Error processing folder {folder}: {e}")
         sys.exit(1)
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
+    parser = argparse.ArgumentParser(description="Create experiments for an onboarding request automatically.")
+    parser.add_argument("folder", help="Request folder relative to MT/experiments; '_Request' is added if needed")
+    args = parser.parse_args()
+
+    process_onboarding_experiments(args.folder)
 
 
 if __name__ == "__main__":
