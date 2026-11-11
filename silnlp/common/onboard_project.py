@@ -26,7 +26,7 @@ from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
 from silnlp.nmt.config import SUPPORTED_GLOSS_ISOS, Config
 
 from ..nmt.config_utils import create_config
-from .auto_onboarding import process_onboarding_experiments
+from .auto_onboarding_experiments import process_onboarding_experiments
 from .collect_verse_counts import collect_verse_counts
 from .environment import SilNlpEnv
 from .extract_corpora import ExtractOutput, extract_corpora
