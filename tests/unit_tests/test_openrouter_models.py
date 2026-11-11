@@ -2,8 +2,10 @@ from typing import List, Optional
 
 import pytest
 
-from silnlp.nmt.llm_usage import LLMUsageStatistics
+from silnlp.nmt.llm_usage import RequestUsage
 from silnlp.nmt.openrouter_models import OpenRouterListing, OpenRouterListings, OpenRouterModelList, OpenRouterRates
+from silnlp.nmt.prompt_caching import PromptTokenCount
+from silnlp.nmt.usage_estimate import PriceList
 
 
 def _sol_pricing() -> dict:
@@ -26,42 +28,53 @@ def _sol_pricing() -> dict:
     }
 
 
-def _cost(usage: LLMUsageStatistics) -> Optional[float]:
+def _cost(usage: RequestUsage) -> Optional[float]:
     return usage.to_record()["cost"]
 
 
-def test_uncached_prompt_tokens_are_priced_at_the_cache_write_rate_when_it_is_the_higher_one():
-    usage = OpenRouterRates(_sol_pricing()).price(1000, 100)
+def test_prompt_tokens_written_to_the_cache_are_priced_at_the_cache_write_rate_when_it_is_the_higher_one():
+    usage = OpenRouterRates(_sol_pricing()).price(PromptTokenCount(1000, written_to_cache=1000), 100)
     assert _cost(usage) == pytest.approx(1000 * 0.0000025 + 100 * 0.00001)
 
 
-def test_a_cache_write_rate_below_the_prompt_rate_leaves_uncached_prompt_tokens_at_the_prompt_rate():
+def test_prompt_tokens_not_written_to_the_cache_are_priced_at_the_prompt_rate():
+    usage = OpenRouterRates(_sol_pricing()).price(PromptTokenCount(1000, written_to_cache=800), 100)
+    assert _cost(usage) == pytest.approx(200 * 0.000002 + 800 * 0.0000025 + 100 * 0.00001)
+
+
+def test_a_cache_write_rate_below_the_prompt_rate_leaves_written_prompt_tokens_at_the_prompt_rate():
     rates = OpenRouterRates({"prompt": "0.000001", "completion": "0.000004", "input_cache_write": "0.00000004"})
-    assert _cost(rates.price(1000, 100)) == pytest.approx(1000 * 0.000001 + 100 * 0.000004)
+    assert _cost(rates.price(PromptTokenCount(1000, written_to_cache=1000), 100)) == pytest.approx(
+        1000 * 0.000001 + 100 * 0.000004
+    )
 
 
-def test_without_a_cache_write_rate_uncached_prompt_tokens_are_priced_at_the_prompt_rate():
+def test_without_a_cache_write_rate_written_prompt_tokens_are_priced_at_the_prompt_rate():
     rates = OpenRouterRates({"prompt": "0.000002", "completion": "0.00001"})
-    assert _cost(rates.price(1000, 100)) == pytest.approx(1000 * 0.000002 + 100 * 0.00001)
+    assert _cost(rates.price(PromptTokenCount(1000, written_to_cache=1000), 100)) == pytest.approx(
+        1000 * 0.000002 + 100 * 0.00001
+    )
 
 
 def test_cached_prompt_tokens_are_priced_at_the_cache_read_rate():
-    usage = OpenRouterRates(_sol_pricing()).price(1000, 100, 800)
+    usage = OpenRouterRates(_sol_pricing()).price(
+        PromptTokenCount(1000, read_from_cache=800, written_to_cache=200), 100
+    )
     assert _cost(usage) == pytest.approx(200 * 0.0000025 + 800 * 0.0000001 + 100 * 0.00001)
 
 
 def test_cached_prompt_tokens_leave_a_request_unpriced_when_no_cache_read_rate_is_listed():
     rates = OpenRouterRates({"prompt": "0.000002", "completion": "0.00001"})
-    assert _cost(rates.price(1000, 100, 800)) is None
+    assert _cost(rates.price(PromptTokenCount(1000, read_from_cache=800), 100)) is None
 
 
 def test_a_prompt_that_reaches_the_long_prompt_threshold_is_priced_at_the_long_prompt_rates():
-    usage = OpenRouterRates(_sol_pricing()).price(272000, 100)
+    usage = OpenRouterRates(_sol_pricing()).price(PromptTokenCount(272000, written_to_cache=272000), 100)
     assert _cost(usage) == pytest.approx(272000 * 0.000005 + 100 * 0.000015)
 
 
 def test_a_prompt_just_under_the_long_prompt_threshold_is_priced_at_the_base_rates():
-    usage = OpenRouterRates(_sol_pricing()).price(271999, 100)
+    usage = OpenRouterRates(_sol_pricing()).price(PromptTokenCount(271999, written_to_cache=271999), 100)
     assert _cost(usage) == pytest.approx(271999 * 0.0000025 + 100 * 0.00001)
 
 
@@ -74,7 +87,9 @@ def test_the_highest_threshold_a_prompt_reaches_sets_its_rates_whatever_order_th
             {"min_prompt_tokens": 100, "prompt": "0.000003"},
         ],
     }
-    assert _cost(OpenRouterRates(pricing).price(1000, 100)) == pytest.approx(1000 * 0.000004 + 100 * 0.00001)
+    assert _cost(OpenRouterRates(pricing).price(PromptTokenCount(1000), 100)) == pytest.approx(
+        1000 * 0.000004 + 100 * 0.00001
+    )
 
 
 def test_a_long_prompt_override_keeps_the_base_rates_it_does_not_list():
@@ -83,7 +98,9 @@ def test_a_long_prompt_override_keeps_the_base_rates_it_does_not_list():
         "completion": "0.00001",
         "overrides": [{"min_prompt_tokens": 500, "prompt": "0.000004"}],
     }
-    assert _cost(OpenRouterRates(pricing).price(1000, 100)) == pytest.approx(1000 * 0.000004 + 100 * 0.00001)
+    assert _cost(OpenRouterRates(pricing).price(PromptTokenCount(1000), 100)) == pytest.approx(
+        1000 * 0.000004 + 100 * 0.00001
+    )
 
 
 def test_an_override_for_certain_hours_is_ignored():
@@ -92,7 +109,9 @@ def test_an_override_for_certain_hours_is_ignored():
         "completion": "0.00001",
         "overrides": [{"utc_start": 1500, "utc_end": 100, "prompt": "0.000001", "completion": "0.000005"}],
     }
-    assert _cost(OpenRouterRates(pricing).price(1000, 100)) == pytest.approx(1000 * 0.000002 + 100 * 0.00001)
+    assert _cost(OpenRouterRates(pricing).price(PromptTokenCount(1000), 100)) == pytest.approx(
+        1000 * 0.000002 + 100 * 0.00001
+    )
 
 
 def test_a_long_prompt_override_that_also_depends_on_the_day_is_ignored():
@@ -101,7 +120,9 @@ def test_a_long_prompt_override_that_also_depends_on_the_day_is_ignored():
         "completion": "0.00001",
         "overrides": [{"min_prompt_tokens": 500, "utc_days": ["saturday"], "prompt": "0.000001"}],
     }
-    assert _cost(OpenRouterRates(pricing).price(1000, 100)) == pytest.approx(1000 * 0.000002 + 100 * 0.00001)
+    assert _cost(OpenRouterRates(pricing).price(PromptTokenCount(1000), 100)) == pytest.approx(
+        1000 * 0.000002 + 100 * 0.00001
+    )
 
 
 def test_listed_rates_are_fixed():
@@ -137,22 +158,24 @@ def _listed_sol() -> List[dict]:
     ]
 
 
-def _rates_listed_for(model_id: str) -> Optional[OpenRouterRates]:
+def _prices_listed_for(model_id: str) -> PriceList:
     listing = OpenRouterListings(ListedModels(_listed_sol())).find(model_id)
     assert listing is not None
-    return listing.rates()
+    return listing.prices()
 
 
 def test_a_model_is_priced_at_the_rates_listed_under_its_id():
-    rates = _rates_listed_for("openai/gpt-6.1-sol")
-    assert rates is not None
-    assert rates.price(1000, 100) == OpenRouterRates(_sol_pricing()).price(1000, 100)
+    prices = _prices_listed_for("openai/gpt-6.1-sol")
+    assert prices.price(PromptTokenCount(1000), 100) == OpenRouterRates(_sol_pricing()).price(
+        PromptTokenCount(1000), 100
+    )
 
 
 def test_a_model_is_priced_at_the_rates_listed_under_its_canonical_slug():
-    rates = _rates_listed_for("openai/gpt-6.1-sol-20261001")
-    assert rates is not None
-    assert rates.price(1000, 100) == OpenRouterRates(_sol_pricing()).price(1000, 100)
+    prices = _prices_listed_for("openai/gpt-6.1-sol-20261001")
+    assert prices.price(PromptTokenCount(1000), 100) == OpenRouterRates(_sol_pricing()).price(
+        PromptTokenCount(1000), 100
+    )
 
 
 def test_a_model_openrouter_does_not_list_is_not_found_and_a_warning_says_so(caplog):
@@ -166,9 +189,9 @@ def test_a_model_list_that_cannot_be_fetched_finds_nothing_and_a_warning_says_wh
     assert "openrouter.ai is unreachable" in caplog.text
 
 
-def test_a_router_has_no_rates_and_a_warning_says_so(caplog):
+def test_a_router_leaves_its_requests_unpriced_and_a_warning_says_so(caplog):
     listing = OpenRouterListing("openrouter/auto", {"pricing": {"prompt": "-1", "completion": "-1"}})
-    assert listing.rates() is None
+    assert listing.prices().price(PromptTokenCount(1000), 100).to_record()["cost"] is None
     assert "OpenRouter lists no fixed price for 'openrouter/auto'" in caplog.text
 
 

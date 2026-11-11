@@ -1,3 +1,5 @@
+import pytest
+
 from silnlp.nmt.usage_summary_table import UsageSummaryTable
 
 
@@ -32,3 +34,28 @@ def test_a_note_follows_its_rows_value():
 
 def test_a_table_without_rows_is_only_its_title():
     assert UsageSummaryTable("Totals").render() == "Totals"
+
+
+def test_a_note_added_to_a_row_follows_its_value():
+    table = UsageSummaryTable("Totals")
+    table.add_row("Cost", "$3.0432")
+
+    table.add_note("Cost", "$1.0000 if cached")
+
+    assert table.render().splitlines()[1] == "    Cost  $3.0432  $1.0000 if cached"
+
+
+def test_a_note_added_to_a_row_with_a_note_follows_it_after_a_semicolon():
+    table = UsageSummaryTable("Totals")
+    table.add_row("Cost", "$3.0432", "excluding 1 unpriced requests")
+
+    table.add_note("Cost", "$1.0000 if cached")
+
+    assert table.render().splitlines()[1] == "    Cost  $3.0432  excluding 1 unpriced requests; $1.0000 if cached"
+
+
+def test_a_note_for_a_row_the_table_lacks_is_refused():
+    table = UsageSummaryTable("Totals")
+
+    with pytest.raises(KeyError, match="no 'Cost' row"):
+        table.add_note("Cost", "$1.0000 if cached")

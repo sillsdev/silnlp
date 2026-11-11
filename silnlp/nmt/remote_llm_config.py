@@ -44,7 +44,6 @@ from .example_retrieval import (
     CorpusPairProvider,
     CoverageExampleRetriever,
     Example,
-    LengthRatio,
     PreferredCorpusPairProvider,
     TargetLanguageProfile,
     TranslationMemory,
@@ -60,10 +59,12 @@ from .llm_config import (
     PromptTemplate,
     PromptTemplateCollection,
 )
-from .llm_usage import EstimatedLLMUsageStatistics, LLMUsageStatistics
-from .openrouter_models import OpenRouterListing, OpenRouterListings, OpenRouterModelList, OpenRouterRates
-from .reasoning_estimate import GptReasoningRates, NoReasoning, ReasoningBudget, ReasoningEstimate, UnknownReasoning
+from .llm_usage import RequestUsage, RunUsage
+from .openrouter_models import OpenRouterListing, OpenRouterListings, OpenRouterModelList
+from .prompt_caching import PromptCachingPolicy
+from .reasoning_estimate import LiteLLMReasoningEstimator
 from .token_counter import TokenCounter
+from .usage_estimate import LiteLLMPriceList, RequestCostEstimator, UnknownPrices, UsageEstimator
 from .usage_summary_table import UsageSummaryTable
 
 LOGGER = logging.getLogger(__name__)
@@ -159,7 +160,7 @@ class Completion:
 
     text: str
     token_logprobs: List[TokenLogprob] = field(default_factory=list)
-    usage: LLMUsageStatistics = field(default_factory=LLMUsageStatistics)
+    usage: RequestUsage = field(default_factory=RequestUsage)
     # True for a reply saved by an earlier run, whose cost that run already paid.
     reused: bool = False
 
@@ -186,65 +187,11 @@ class Completion:
         """This reply, also billed for an earlier attempt that was discarded."""
         return replace(self, usage=self.usage.including_retried_attempt(earlier.usage))
 
-
-class UsageTotals:
-    """Running totals for one translation run."""
-
-    def __init__(self) -> None:
-        self._usage = LLMUsageStatistics()
-        self._reused_replies = 0
-        self._copied_translations = 0
-        # Requests are made from several threads.
-        self._lock = threading.Lock()
-
-    def add(self, completion: Completion) -> None:
-        with self._lock:
-            if completion.reused:
-                self._reused_replies += 1
-            else:
-                self._usage = self._usage + completion.usage
-
-    def add_copied_translation(self) -> None:
-        with self._lock:
-            self._copied_translations += 1
-
-    def include(self, other: "UsageTotals") -> None:
-        with self._lock:
-            self._usage = self._usage + other._usage
-            self._reused_replies += other._reused_replies
-            self._copied_translations += other._copied_translations
-
-    def describe(self) -> str:
-        with self._lock:
-            summary = self._usage.describe()
-            if self._reused_replies > 0:
-                summary = f"{summary}; replies reused from an earlier run: {self._reused_replies:,}"
-            if self._copied_translations > 0:
-                summary = f"{summary}; translations copied from the training corpus: {self._copied_translations:,}"
-            return summary
-
-    def add_rows_to(self, table: UsageSummaryTable) -> None:
-        with self._lock:
-            self._usage.add_requests_row_to(table)
-            table.add_row(
-                "Saved replies reused",
-                f"{self._reused_replies:,}",
-                (
-                    "no requests; disable with --force-infer or infer.reuse_saved_replies: false"
-                    if self._reused_replies
-                    else ""
-                ),
-            )
-            table.add_row(
-                "Translations copied",
-                f"{self._copied_translations:,}",
-                (
-                    "from training data, no requests; disable with infer.copy_exact_matches: false"
-                    if self._copied_translations
-                    else ""
-                ),
-            )
-            self._usage.add_tokens_and_cost_rows_to(table)
+    def count_in(self, run_usage: RunUsage) -> None:
+        if self.reused:
+            run_usage.add_reused_reply()
+        else:
+            run_usage.add_request(self.usage)
 
 
 @dataclass(frozen=True)
@@ -283,15 +230,19 @@ class LiteLLMResponse:
             token_logprobs.append(TokenLogprob(str(token), float(logprob)))
         return token_logprobs
 
-    def usage(self) -> LLMUsageStatistics:
+    def usage(self) -> RequestUsage:
         prompt_tokens = int(self._field(self._reported_usage(), "prompt_tokens") or 0)
         completion_tokens = int(self._field(self._reported_usage(), "completion_tokens") or 0)
+        # OpenRouter reports what it billed, which LiteLLM, having no prices for OpenRouter, can't work out.
+        reported_cost = self._field(self._reported_usage(), "cost")
+        if reported_cost is not None:
+            return RequestUsage.of_priced_request(prompt_tokens, completion_tokens, float(reported_cost))
         try:
             cost = float(self._litellm.completion_cost(completion_response=self._response))
         except Exception:
             LOGGER.debug("No pricing available for this response; reporting its cost as unknown.", exc_info=True)
-            return LLMUsageStatistics.of_unpriced_request(prompt_tokens, completion_tokens)
-        return LLMUsageStatistics.of_priced_request(prompt_tokens, completion_tokens, cost)
+            return RequestUsage.of_unpriced_request(prompt_tokens, completion_tokens)
+        return RequestUsage.of_priced_request(prompt_tokens, completion_tokens, cost)
 
     def _choice(self) -> Any:
         return self._field(self._response, "choices")[0]
@@ -318,60 +269,11 @@ class CompletionClient(TokenCounter):
         return False
 
     def count_tokens(self, text: str) -> Optional[int]:
-        """None means the caller skips its size check rather than run it against a guess."""
         return None
 
-    def ensure_lookups_need_no_sign_in(self) -> None:
-        """Raises if merely looking the model up, as counting and estimating do, would sign in to an account."""
 
-    def estimate_usage(
-        self, messages: List[Dict[str, str]], reply_tokens: int, cached_prompt_tokens: int = 0
-    ) -> EstimatedLLMUsageStatistics:
-        prompt_tokens = self._count_message_tokens(messages)
-        if prompt_tokens is None:
-            raise RuntimeError("Estimating usage has to count the prompt's tokens, and they could not be counted.")
-        reasoning = self._reasoning_estimate()
-        reasoning_tokens = reasoning.tokens_for(reply_tokens)
-        completion_tokens = reply_tokens + reasoning_tokens
-        usage = self._price(prompt_tokens, completion_tokens)
-        usage_if_cached = (
-            self._price(prompt_tokens, completion_tokens, cached_prompt_tokens) if cached_prompt_tokens > 0 else usage
-        )
-        return EstimatedLLMUsageStatistics(usage, usage_if_cached, reasoning_tokens, reasoning)
-
-    def _count_message_tokens(self, messages: List[Dict[str, str]]) -> Optional[int]:
-        total = 0
-        for message in messages:
-            tokens = self.count_tokens(message["content"])
-            if tokens is None:
-                return None
-            total += tokens
-        return total
-
-    def _price(self, prompt_tokens: int, completion_tokens: int, cached_prompt_tokens: int = 0) -> LLMUsageStatistics:
-        return LLMUsageStatistics.of_unpriced_request(prompt_tokens, completion_tokens)
-
-    def _reasoning_estimate(self) -> ReasoningEstimate:
-        return NoReasoning()
-
-
-class LiteLLMCompletionClient(CompletionClient):
-    # LiteLLM providers that sign in to an account, interactively if need be, whenever a model is looked up.
-    _SIGN_IN_PROVIDERS = ("chatgpt", "github_copilot")
-
-    def __init__(
-        self, model: str, settings: CompletionSettings, extra_kwargs: Optional[dict] = None, litellm: Any = None
-    ) -> None:
-        """`litellm` is the test injection seam; production leaves it to be imported."""
-        self._model = model
-        self._settings = settings
-        self._extra_kwargs: Dict[str, Any] = dict(extra_kwargs or {})
-        self._litellm = litellm if litellm is not None else self._import_litellm()
-        self._reasoning: Optional[ReasoningEstimate] = None
-        # Requests are estimated from several threads; guards what is worked out on first use.
-        self._lock = threading.Lock()
-
-    def _import_litellm(self):
+class LiteLLMLoader:
+    def load(self) -> Any:
         # Deferred import, because the import is slow and the package is optional.
         try:
             import litellm
@@ -384,23 +286,30 @@ class LiteLLMCompletionClient(CompletionClient):
         litellm.suppress_debug_info = True
         return litellm
 
-    def count_tokens(self, text: str) -> Optional[int]:
-        try:
-            return int(self._litellm.token_counter(model=self._model, text=text))
-        except Exception:
-            LOGGER.warning(
-                "Could not count tokens for '%s'; skipping the prompt size check.", self._model, exc_info=True
-            )
-            return None
+
+class LiteLLMModelName:
+    """A model as LiteLLM names it: the providers that route requests to it, then the last one's own name for it."""
+
+    # LiteLLM providers that sign in to an account, interactively if need be, whenever a model is looked up.
+    _SIGN_IN_PROVIDERS = ("chatgpt", "github_copilot")
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    def is_on_openrouter(self) -> bool:
+        return self._name.startswith("openrouter/")
+
+    def find_in(self, listings: OpenRouterListings) -> Optional[OpenRouterListing]:
+        return listings.find(self._name.removeprefix("openrouter/"))
 
     def ensure_lookups_need_no_sign_in(self) -> None:
-        *providers, _ = self._model.split("/")
+        *providers, _ = self._name.split("/")
         signing_in = [provider for provider in providers if provider in self._SIGN_IN_PROVIDERS]
         if len(signing_in) == 0:
             return
         message = (
             f"LiteLLM signs in to an account through its '{signing_in[0]}' provider whenever it looks up "
-            f"{self._model}, so a dry run can't estimate its usage without signing in."
+            f"{self._name}, so a dry run can't estimate its usage without signing in."
         )
         if providers[0] != signing_in[0]:
             message += (
@@ -409,90 +318,50 @@ class LiteLLMCompletionClient(CompletionClient):
             )
         raise RuntimeError(message)
 
-    def _count_message_tokens(self, messages: List[Dict[str, str]]) -> Optional[int]:
+
+class LiteLLMCompletionClient(CompletionClient):
+    def __init__(
+        self,
+        model: str,
+        settings: CompletionSettings,
+        litellm_options: Optional[dict] = None,
+        litellm: Any = None,
+    ) -> None:
+        """`litellm` is the test injection seam; production leaves it to be imported."""
+        self._model = model
+        self._settings = settings
+        self._litellm_options: Dict[str, Any] = dict(litellm_options or {})
+        self._litellm = litellm if litellm is not None else LiteLLMLoader().load()
+        self._caching_policy = PromptCachingPolicy.for_model(model)
+
+    def count_tokens(self, text: str) -> Optional[int]:
+        try:
+            return int(self._litellm.token_counter(model=self._model, text=text))
+        except Exception:
+            LOGGER.warning("Could not count tokens for '%s'.", self._model, exc_info=True)
+            return None
+
+    def count_message_tokens(self, messages: List[Dict[str, str]]) -> Optional[int]:
         try:
             return int(self._litellm.token_counter(model=self._model, messages=messages))
         except Exception:
             LOGGER.warning("Could not count tokens for '%s'.", self._model, exc_info=True)
             return None
 
-    def _price(self, prompt_tokens: int, completion_tokens: int, cached_prompt_tokens: int = 0) -> LLMUsageStatistics:
-        try:
-            # LiteLLM bills cached tokens at nothing, rather than at full price, when it has no cache price for a model.
-            if (
-                cached_prompt_tokens > 0
-                and self._litellm.get_model_info(self._model).get("cache_read_input_token_cost") is None
-            ):
-                return LLMUsageStatistics.of_unpriced_request(prompt_tokens, completion_tokens)
-            prompt_cost, completion_cost = self._litellm.cost_per_token(
-                model=self._model,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                cache_read_input_tokens=cached_prompt_tokens,
-            )
-        except Exception:
-            LOGGER.debug("LiteLLM has no price for '%s'.", self._model, exc_info=True)
-            return LLMUsageStatistics.of_unpriced_request(prompt_tokens, completion_tokens)
-        return LLMUsageStatistics.of_priced_request(
-            prompt_tokens, completion_tokens, float(prompt_cost) + float(completion_cost)
-        )
-
-    def _reasoning_estimate(self) -> ReasoningEstimate:
-        with self._lock:
-            if self._reasoning is None:
-                self._reasoning = self._create_reasoning_estimate()
-            return self._reasoning
-
-    def _create_reasoning_estimate(self) -> ReasoningEstimate:
-        budget = self._reasoning_budget()
-        if budget is not None:
-            return ReasoningBudget(self._model, self._settings.max_new_tokens, budget)
-        if not self._can_reason():
-            return NoReasoning()
-        measured = GptReasoningRates().estimate_for(self._model, self._extra_kwargs, self._settings.max_new_tokens)
-        return measured if measured is not None else UnknownReasoning(self._model)
-
-    def _can_reason(self) -> bool:
-        if any(option in self._extra_kwargs for option in ("reasoning_effort", "reasoning", "thinking")):
-            return True
-        try:
-            return bool(self._litellm.supports_reasoning(model=self._model))
-        except Exception:
-            return False
-
-    def _reasoning_budget(self) -> Optional[int]:
-        settings = {
-            name: value for name, value in self._extra_kwargs.items() if name in ("reasoning_effort", "thinking")
-        }
-        if not settings:
-            return None
-        try:
-            # LiteLLM's own translation of the settings, so that its table of budgets stays the only one.
-            model, provider, _, _ = self._litellm.get_llm_provider(self._model)
-            params = self._litellm.get_optional_params(
-                model=model, custom_llm_provider=provider, max_tokens=self._settings.max_new_tokens, **settings
-            )
-        except Exception:
-            LOGGER.debug("LiteLLM could not translate the reasoning settings for '%s'.", self._model, exc_info=True)
-            return None
-        thinking = params.get("thinking") or params.get("thinkingConfig") or {}
-        budget = thinking.get("budget_tokens", thinking.get("thinkingBudget"))
-        # Gemini takes a negative budget to mean that the model decides.
-        return budget if isinstance(budget, int) and budget >= 0 else None
-
     def complete(self, messages: List[Dict[str, str]], logprobs: bool = False) -> Completion:
-        extra_kwargs = dict(self._extra_kwargs)
+        # Configured options win, so that a run can still choose its own routing.
+        litellm_options = {**self._routing_options(messages), **self._litellm_options}
         if logprobs:
-            extra_kwargs["logprobs"] = True
+            litellm_options["logprobs"] = True
         response = self._litellm.completion(
             model=self._model,
-            messages=messages,
+            messages=self._caching_policy.mark(messages),
             temperature=self._settings.temperature,
             max_tokens=self._settings.max_new_tokens,
             # RetryingCompletionClient owns retries; LiteLLM's need tenacity and hide the error that caused them.
             num_retries=0,
             timeout=self._settings.request_timeout,
-            **extra_kwargs,
+            **litellm_options,
         )
         return LiteLLMResponse(response, self._litellm).to_completion(logprobs)
 
@@ -504,43 +373,17 @@ class LiteLLMCompletionClient(CompletionClient):
             return False
         return "logprobs" in supported
 
+    def _routing_options(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+        return {}
+
 
 class OpenRouterCompletionClient(LiteLLMCompletionClient):
-    """LiteLLM lacks OpenRouter's prices and which of its models reason, so estimates use OpenRouter's own listing."""
-
-    def __init__(
-        self,
-        model: str,
-        settings: CompletionSettings,
-        listings: OpenRouterListings,
-        extra_kwargs: Optional[dict] = None,
-        litellm: Any = None,
-    ) -> None:
-        super().__init__(model, settings, extra_kwargs, litellm)
-        self._listings = listings
-        self._listing: Optional[OpenRouterListing] = None
-        self._rates: Optional[OpenRouterRates] = None
-        self._looked_up = False
-        # Not the base class's lock, which is already held when the reasoning estimate asks whether the model reasons.
-        self._listing_lock = threading.Lock()
-
-    def _price(self, prompt_tokens: int, completion_tokens: int, cached_prompt_tokens: int = 0) -> LLMUsageStatistics:
-        self._look_up()
-        if self._rates is None:
-            return LLMUsageStatistics.of_unpriced_request(prompt_tokens, completion_tokens)
-        return self._rates.price(prompt_tokens, completion_tokens, cached_prompt_tokens)
-
-    def _can_reason(self) -> bool:
-        self._look_up()
-        return (self._listing is not None and self._listing.can_reason()) or super()._can_reason()
-
-    def _look_up(self) -> None:
-        with self._listing_lock:
-            if self._looked_up:
-                return
-            self._looked_up = True
-            self._listing = self._listings.find(self._model.removeprefix("openrouter/"))
-            self._rates = None if self._listing is None else self._listing.rates()
+    def _routing_options(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+        system_message = next((message["content"] for message in messages if message["role"] == "system"), None)
+        if system_message is None:
+            return {}
+        # Requests sharing a session go to one provider, the one whose cache already holds their system message.
+        return {"session_id": hashlib.sha256(system_message.encode("utf-8")).hexdigest()}
 
 
 class RetryPolicy:
@@ -603,13 +446,8 @@ class RetryingCompletionClient(CompletionClient):
     def count_tokens(self, text: str) -> Optional[int]:
         return self._client.count_tokens(text)
 
-    def ensure_lookups_need_no_sign_in(self) -> None:
-        self._client.ensure_lookups_need_no_sign_in()
-
-    def estimate_usage(
-        self, messages: List[Dict[str, str]], reply_tokens: int, cached_prompt_tokens: int = 0
-    ) -> EstimatedLLMUsageStatistics:
-        return self._client.estimate_usage(messages, reply_tokens, cached_prompt_tokens)
+    def count_message_tokens(self, messages: List[Dict[str, str]]) -> Optional[int]:
+        return self._client.count_message_tokens(messages)
 
 
 class SavedReplies:
@@ -723,7 +561,7 @@ class SavedReplies:
         completion = Completion(
             str(record["text"]),
             [TokenLogprob(str(token), float(logprob)) for token, logprob in record["token_logprobs"]],
-            LLMUsageStatistics.from_record(record),
+            RequestUsage.from_record(record),
         )
         return str(record["key"]), int(record["occurrence"]), completion
 
@@ -775,26 +613,51 @@ class ReplyReusingClient:
 
 
 class CompletionClientFactory(ABC):
+    """Builds, for a configured model, the client that sends its requests and the cost estimator a dry run uses."""
+
     @abstractmethod
     def create(self, config: "RemoteLLMConfig") -> CompletionClient: ...
+
+    def create_cost_estimator(self, config: "RemoteLLMConfig") -> RequestCostEstimator:
+        return RequestCostEstimator.of_unknown_model()
 
 
 class LiteLLMCompletionClientFactory(CompletionClientFactory):
     def __init__(self, openrouter_models: Optional[OpenRouterModelList] = None, litellm: Any = None) -> None:
-        """Nothing is fetched from `openrouter_models` unless a request has to be estimated before it is sent."""
+        """Nothing is fetched from `openrouter_models` unless a run's requests have to be estimated."""
         self._openrouter_models = openrouter_models if openrouter_models is not None else OpenRouterModelList()
         self._litellm = litellm
 
     def create(self, config: "RemoteLLMConfig") -> CompletionClient:
         settings = config.create_completion_settings()
-        return RetryingCompletionClient(self._create_client(config, settings), RetryPolicy(settings.num_retries))
-
-    def _create_client(self, config: "RemoteLLMConfig", settings: CompletionSettings) -> LiteLLMCompletionClient:
         options = config.get_litellm_options()
-        if config.model.startswith("openrouter/"):
-            listings = OpenRouterListings(self._openrouter_models)
-            return OpenRouterCompletionClient(config.model, settings, listings, options, self._litellm)
-        return LiteLLMCompletionClient(config.model, settings, options, self._litellm)
+        if LiteLLMModelName(config.model).is_on_openrouter():
+            client: LiteLLMCompletionClient = OpenRouterCompletionClient(config.model, settings, options, self._litellm)
+        else:
+            client = LiteLLMCompletionClient(config.model, settings, options, self._litellm)
+        return RetryingCompletionClient(client, RetryPolicy(settings.num_retries))
+
+    def create_cost_estimator(self, config: "RemoteLLMConfig") -> RequestCostEstimator:
+        name = LiteLLMModelName(config.model)
+        # Checked first, since even looking the model up could sign in to an account.
+        name.ensure_lookups_need_no_sign_in()
+        litellm = self._litellm if self._litellm is not None else LiteLLMLoader().load()
+        max_new_tokens = config.create_completion_settings().max_new_tokens
+        reasoning_estimator = LiteLLMReasoningEstimator(
+            config.model, config.get_litellm_options(), max_new_tokens, litellm
+        )
+        caching_policy = PromptCachingPolicy.for_model(config.model)
+        if not name.is_on_openrouter():
+            return RequestCostEstimator(
+                LiteLLMPriceList(config.model, litellm), reasoning_estimator.estimate(), caching_policy
+            )
+        # LiteLLM has neither OpenRouter's prices nor which of its models reason, but OpenRouter's own listing does.
+        listing = name.find_in(OpenRouterListings(self._openrouter_models))
+        if listing is None:
+            return RequestCostEstimator(UnknownPrices(), reasoning_estimator.estimate(), caching_policy)
+        return RequestCostEstimator(
+            listing.prices(), reasoning_estimator.estimate(listed_as_reasoning=listing.can_reason()), caching_policy
+        )
 
 
 class BatchPromptBuilder(PromptBuilder[PromptMessages]):
@@ -1190,7 +1053,7 @@ class RemoteLLMModel(NMTModel):
                 summary.corpus_size,
                 corpus_tokens if corpus_tokens is not None else "an unknown number of",
             )
-            self._warn_if_corpus_too_large(corpus_tokens)
+            self._check_corpus_size(corpus_tokens)
         else:
             self._config.save_example_index(checkpoint_dir)
             info["num_training_pairs"] = summary.corpus_size
@@ -1212,9 +1075,15 @@ class RemoteLLMModel(NMTModel):
     def _checkpoint_dir(self) -> Path:
         return self._config.model_dir / f"checkpoint-{self._CHECKPOINT_STEP}"
 
-    def _warn_if_corpus_too_large(self, corpus_tokens: Optional[int]) -> None:
+    def _check_corpus_size(self, corpus_tokens: Optional[int]) -> None:
         limit = self._config.get_max_context_tokens()
-        if corpus_tokens is not None and corpus_tokens > limit:
+        if corpus_tokens is None:
+            LOGGER.warning(
+                "The training corpus's tokens could not be counted, so it is not checked against "
+                "infer.max_context_tokens (%d).",
+                limit,
+            )
+        elif corpus_tokens > limit:
             LOGGER.warning(
                 "The training corpus is %d tokens, which exceeds infer.max_context_tokens (%d). "
                 "Requests may be rejected for exceeding the model's context window. Lower "
@@ -1259,7 +1128,7 @@ class RemoteLLMModel(NMTModel):
         with self._lock:
             if self._corpus_block is None:
                 rendered = builder.render_pool(src_lang, trg_lang)
-                self._warn_if_corpus_too_large(client.count_tokens(rendered))
+                self._check_corpus_size(client.count_tokens(rendered))
                 self._corpus_block = self._config.build_corpus_block(rendered)
             return self._corpus_block
 
@@ -1405,12 +1274,12 @@ class RemoteLLMModel(NMTModel):
             batch_index, draft_index = task
             indices = batches[batch_index]
             completions = self._translate_batch(
-                [sentences[i] for i in indices], src_lang, trg_lang, want_logprobs, usage
+                [sentences[i] for i in indices], src_lang, trg_lang, want_logprobs, run_usage
             )
             for index, completion in zip(indices, completions):
                 results[draft_index][index] = completion
 
-        usage = UsageTotals()
+        run_usage = RunUsage()
         tasks = [(batch_index, draft_index) for draft_index in range(num_drafts) for batch_index in range(len(batches))]
         concurrency = self._config.get_concurrency()
         with self._saved_replies_session():
@@ -1428,10 +1297,10 @@ class RemoteLLMModel(NMTModel):
                     if self._reply_reusing_client is not None
                     else ""
                 )
-                LOGGER.error("Translation failed after %s.%s", usage.describe(), resume_hint)
+                LOGGER.error("Translation failed after %s.%s", run_usage.describe(), resume_hint)
                 raise
 
-        self._report_translation(source, sentences, results, usage)
+        self._report_translation(source, sentences, results, run_usage)
         for index in range(len(sentences)):
             yield SentenceTranslationGroup(
                 [(results[draft][index] or Completion("")).to_sentence_translation() for draft in range(num_drafts)]
@@ -1442,9 +1311,9 @@ class RemoteLLMModel(NMTModel):
         source: Optional[Path],
         sentences: Sequence[str],
         results: List[List[Optional[Completion]]],
-        usage: UsageTotals,
+        run_usage: RunUsage,
     ) -> None:
-        LOGGER.info("Translated %s using %s.", self._describe_translated(source, sentences), usage.describe())
+        LOGGER.info("Translated %s using %s.", self._describe_translated(source, sentences), run_usage.describe())
         num_blank = sum(
             1
             for draft in results
@@ -1468,7 +1337,7 @@ class RemoteLLMModel(NMTModel):
         src_lang: Language,
         trg_lang: Language,
         want_logprobs: bool = False,
-        usage: Optional[UsageTotals] = None,
+        run_usage: Optional[RunUsage] = None,
     ) -> List[Completion]:
         memory = self._get_translation_memory()
         translations: List[Completion] = [Completion("")] * len(texts)
@@ -1477,14 +1346,14 @@ class RemoteLLMModel(NMTModel):
             known = memory.translate(text)
             if known is not None:
                 translations[index] = Completion(known)
-                if usage is not None:
-                    usage.add_copied_translation()
+                if run_usage is not None:
+                    run_usage.add_copied_translation()
             # Blank segments are verses absent from the source; no request needed.
             elif text.strip() != "":
                 unknown.append((index, text))
         if len(unknown) == 0:
             return translations
-        completed = self._complete_texts([text for _, text in unknown], src_lang, trg_lang, want_logprobs, usage)
+        completed = self._complete_texts([text for _, text in unknown], src_lang, trg_lang, want_logprobs, run_usage)
         for (index, _), completion in zip(unknown, completed):
             translations[index] = completion
         return translations
@@ -1495,17 +1364,17 @@ class RemoteLLMModel(NMTModel):
         src_lang: Language,
         trg_lang: Language,
         want_logprobs: bool = False,
-        usage: Optional[UsageTotals] = None,
+        run_usage: Optional[RunUsage] = None,
     ) -> List[Completion]:
         """Recovers from a miscounted reply by correcting, then halving the batch, then falling
         back to one request per segment. Only that last case can carry log probabilities, since a
         batched reply's token stream cannot be split per segment."""
         if len(texts) == 1:
-            return [self._complete_single(texts[0], src_lang, trg_lang, want_logprobs, usage)]
+            return [self._complete_single(texts[0], src_lang, trg_lang, want_logprobs, run_usage)]
 
         reader = BatchReplyReader(len(texts))
         messages = self._build_messages(texts, src_lang, trg_lang)
-        response = self._complete(messages, usage=usage).text
+        response = self._complete(messages, run_usage=run_usage).text
         parsed = reader.read(response)
         if parsed is None:
             correction = messages + [
@@ -1519,7 +1388,7 @@ class RemoteLLMModel(NMTModel):
                     ),
                 },
             ]
-            parsed = reader.read(self._complete(correction, usage=usage).text)
+            parsed = reader.read(self._complete(correction, run_usage=run_usage).text)
         if parsed is not None:
             return [Completion(text) for text in parsed]
 
@@ -1527,9 +1396,9 @@ class RemoteLLMModel(NMTModel):
             "Could not read %d translations from the model's reply; splitting the batch and retrying.", len(texts)
         )
         middle = len(texts) // 2
-        return self._complete_texts(texts[:middle], src_lang, trg_lang, want_logprobs, usage) + self._complete_texts(
-            texts[middle:], src_lang, trg_lang, want_logprobs, usage
-        )
+        return self._complete_texts(
+            texts[:middle], src_lang, trg_lang, want_logprobs, run_usage
+        ) + self._complete_texts(texts[middle:], src_lang, trg_lang, want_logprobs, run_usage)
 
     def _complete_single(
         self,
@@ -1537,16 +1406,25 @@ class RemoteLLMModel(NMTModel):
         src_lang: Language,
         trg_lang: Language,
         want_logprobs: bool = False,
-        usage: Optional[UsageTotals] = None,
+        run_usage: Optional[RunUsage] = None,
     ) -> Completion:
-        reader = SingleReplyReader(TranslationLabelRemover(trg_lang.name), self._get_target_profile())
         messages = self._build_messages([text], src_lang, trg_lang)
-        completion = self._complete(messages, want_logprobs, usage, lambda reply: reader.read(reply.text) != "")
-        translation = reader.read(completion.text)
+        completion = self._complete(messages, want_logprobs, run_usage, self._usable_reply_check([text], trg_lang))
+        translation = self._single_reply_reader(trg_lang).read(completion.text)
         if translation == completion.text:
             return completion
         # The scores still cover the discarded text, so drop them rather than misalign them.
         return replace(completion, text=translation, token_logprobs=[])
+
+    def _usable_reply_check(self, texts: Sequence[str], trg_lang: Language) -> Callable[[Completion], bool]:
+        """Decides which saved replies a run reuses, so a dry run must ask it too, or it will count requests as free."""
+        if len(texts) > 1:
+            return lambda reply: not reply.is_empty()
+        reader = self._single_reply_reader(trg_lang)
+        return lambda reply: reader.read(reply.text) != ""
+
+    def _single_reply_reader(self, trg_lang: Language) -> SingleReplyReader:
+        return SingleReplyReader(TranslationLabelRemover(trg_lang.name), self._get_target_profile())
 
     def _get_target_profile(self) -> TargetLanguageProfile:
         with self._lock:
@@ -1570,17 +1448,17 @@ class RemoteLLMModel(NMTModel):
         self,
         messages: List[Dict[str, str]],
         logprobs: bool = False,
-        usage: Optional[UsageTotals] = None,
+        run_usage: Optional[RunUsage] = None,
         usable: Callable[[Completion], bool] = lambda reply: not reply.is_empty(),
     ) -> Completion:
-        return self._complete_using(self._get_client(), messages, logprobs, usage, usable)
+        return self._complete_using(self._get_client(), messages, logprobs, run_usage, usable)
 
     def _complete_using(
         self,
         client: CompletionClient,
         messages: List[Dict[str, str]],
         logprobs: bool = False,
-        usage: Optional[UsageTotals] = None,
+        run_usage: Optional[RunUsage] = None,
         usable: Callable[[Completion], bool] = lambda reply: not reply.is_empty(),
     ) -> Completion:
         """Send one request, counting it against the run's totals."""
@@ -1588,8 +1466,8 @@ class RemoteLLMModel(NMTModel):
             completion = client.complete(messages, logprobs)
         else:
             completion = self._reply_reusing_client.complete(client, messages, logprobs, usable)
-        if usage is not None:
-            usage.add(completion)
+        if run_usage is not None:
+            completion.count_in(run_usage)
         return completion
 
     def _build_messages(self, texts: Sequence[str], src_lang: Language, trg_lang: Language) -> List[Dict[str, str]]:
@@ -1601,50 +1479,6 @@ class RemoteLLMModel(NMTModel):
         return self._config.get_infer_prompt_builder().select_examples("\n".join(texts))
 
 
-class UsageEstimator:
-    """Prompt tokens are counted, but reply tokens are estimated by a multiplier."""
-
-    # Providers that cache prompts automatically leave a shorter prefix uncached.
-    _MIN_CACHED_TOKENS = 1024
-
-    def __init__(self, client: CompletionClient, length_ratio: LengthRatio) -> None:
-        self._client = client
-        self._length_ratio = length_ratio
-        self._system_message_tokens: Dict[str, int] = {}
-        # Requests are estimated from several threads.
-        self._lock = threading.Lock()
-
-    def estimate(self, messages: List[Dict[str, str]], texts: Sequence[str]) -> Completion:
-        usage = self._client.estimate_usage(messages, self._reply_tokens(texts), self._cached_prompt_tokens(messages))
-        return Completion("", usage=usage)
-
-    def _reply_tokens(self, texts: Sequence[str]) -> int:
-        tokens = self._length_ratio.scale(self._required(self._client.count_tokens("\n".join(texts))))
-        if len(texts) > 1:
-            # A batched reply also numbers its lines.
-            numbers = "\n".join(f"{number}." for number in range(1, len(texts) + 1))
-            tokens += self._required(self._client.count_tokens(numbers))
-        return tokens
-
-    def _cached_prompt_tokens(self, messages: List[Dict[str, str]]) -> int:
-        """What a provider that caches prompts automatically would read from its cache."""
-        system_message = messages[0]["content"] if messages[0]["role"] == "system" else ""
-        with self._lock:
-            # The first request to carry a system message is the one that puts it in the cache.
-            if system_message not in self._system_message_tokens:
-                self._system_message_tokens[system_message] = (
-                    self._required(self._client.count_tokens(system_message)) if system_message else 0
-                )
-                return 0
-            shared_tokens = self._system_message_tokens[system_message]
-        return shared_tokens if shared_tokens >= self._MIN_CACHED_TOKENS else 0
-
-    def _required(self, tokens: Optional[int]) -> int:
-        if tokens is None:
-            raise RuntimeError("A dry run has to count the model's tokens, and they could not be counted.")
-        return tokens
-
-
 class EstimatingCompletionClient(CompletionClient):
     """Stands in for the provider in a dry run, answering a request with what it would use instead of a reply."""
 
@@ -1653,7 +1487,7 @@ class EstimatingCompletionClient(CompletionClient):
         self._texts = texts
 
     def complete(self, messages: List[Dict[str, str]], logprobs: bool = False) -> Completion:
-        return self._estimator.estimate(messages, self._texts)
+        return Completion("", usage=self._estimator.estimate(messages, self._texts))
 
 
 class DryRunRemoteLLMModel(RemoteLLMModel, DryRunModel):
@@ -1665,14 +1499,11 @@ class DryRunRemoteLLMModel(RemoteLLMModel, DryRunModel):
         completion_client_factory: Optional[CompletionClientFactory] = None,
     ) -> None:
         super().__init__(config, completion_client_factory)
-        # Checked before any step runs, since even looking the model up could sign in to an account.
-        self._get_client().ensure_lookups_need_no_sign_in()
+        # Built before any step runs, since even looking the model up could sign in to an account.
+        self._cost_estimator = self._client_factory.create_cost_estimator(config)
         self._estimator: Optional[UsageEstimator] = None
-        self._run_usage = UsageTotals()
+        self._run_usage = RunUsage()
         self._sources_with_finished_predictions: Set[Path] = set()
-
-    def produces_translations(self) -> bool:
-        return False
 
     def has_completed_translation(self, input_path: Path, translation_path: Path) -> bool:
         if super().has_completed_translation(input_path, translation_path):
@@ -1697,13 +1528,15 @@ class DryRunRemoteLLMModel(RemoteLLMModel, DryRunModel):
         source: Optional[Path],
         sentences: Sequence[str],
         results: List[List[Optional[Completion]]],
-        usage: UsageTotals,
+        run_usage: RunUsage,
     ) -> None:
-        self._run_usage.include(usage)
+        self._run_usage.include(run_usage)
 
     def report_estimate(self) -> None:
         table = UsageSummaryTable(f"Dry run: a real run with {self._config.model} would take")
         self._run_usage.add_rows_to(table)
+        if self._estimator is not None:
+            self._estimator.add_notes_to(table)
         finished_sources = len(self._sources_with_finished_predictions)
         if finished_sources > 0:
             table.add_row(
@@ -1720,10 +1553,13 @@ class DryRunRemoteLLMModel(RemoteLLMModel, DryRunModel):
         src_lang: Language,
         trg_lang: Language,
         want_logprobs: bool = False,
-        usage: Optional[UsageTotals] = None,
+        run_usage: Optional[RunUsage] = None,
     ) -> List[Completion]:
         messages = self._build_messages(texts, src_lang, trg_lang)
-        self._complete_using(EstimatingCompletionClient(self._get_estimator(), texts), messages, want_logprobs, usage)
+        estimating_client = EstimatingCompletionClient(self._get_estimator(), texts)
+        self._complete_using(
+            estimating_client, messages, want_logprobs, run_usage, self._usable_reply_check(texts, trg_lang)
+        )
         return [Completion("") for _ in texts]
 
     def _get_estimator(self) -> UsageEstimator:
@@ -1737,5 +1573,7 @@ class DryRunRemoteLLMModel(RemoteLLMModel, DryRunModel):
                     self._config.model,
                     length_ratio.describe(),
                 )
-                self._estimator = UsageEstimator(client, length_ratio)
+                self._estimator = UsageEstimator(
+                    client, length_ratio, self._cost_estimator, self._config.get_concurrency()
+                )
             return self._estimator

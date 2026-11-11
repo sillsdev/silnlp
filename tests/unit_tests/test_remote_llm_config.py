@@ -1,7 +1,6 @@
 import json
 import math
 import re
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 from unittest.mock import Mock
@@ -13,10 +12,17 @@ import silnlp.nmt.test as test_step
 from silnlp.common.environment import SilNlpEnv
 from silnlp.nmt.config import Language
 from silnlp.nmt.config_utils import is_local_llm_config, is_remote_llm_config, load_config
-from silnlp.nmt.example_retrieval import Example, TargetLanguageProfile
-from silnlp.nmt.llm_usage import LLMUsageStatistics
-from silnlp.nmt.openrouter_models import OpenRouterListings, OpenRouterModelList
+from silnlp.nmt.example_retrieval import Example, LengthRatio, TargetLanguageProfile
+from silnlp.nmt.llm_usage import RequestUsage, RunUsage
+from silnlp.nmt.openrouter_models import OpenRouterModelList
+from silnlp.nmt.prompt_caching import (
+    AnthropicPromptCachingPolicy,
+    PromptCachingPolicy,
+    PromptTokenCount,
+    SharedSystemMessageCacheStatus,
+)
 from silnlp.nmt.reasoning_estimate import (
+    LiteLLMReasoningEstimator,
     MeasuredReasoning,
     NoReasoning,
     ReasoningBudget,
@@ -33,6 +39,8 @@ from silnlp.nmt.remote_llm_config import (
     DryRunRemoteLLMModel,
     LiteLLMCompletionClient,
     LiteLLMCompletionClientFactory,
+    LiteLLMLoader,
+    LiteLLMModelName,
     LiteLLMResponse,
     OpenRouterCompletionClient,
     ReadOnlySavedReplies,
@@ -45,9 +53,9 @@ from silnlp.nmt.remote_llm_config import (
     SingleReplyReader,
     TokenLogprob,
     TranslationLabelRemover,
-    UsageTotals,
 )
 from silnlp.nmt.translate import DryRunTranslator, TranslationTask
+from silnlp.nmt.usage_estimate import LiteLLMPriceList, RequestCostEstimator, PriceList, RequestEstimate, UsageEstimator
 
 EN = Language("en", "English")
 ES = Language("es", "Spanish")
@@ -468,12 +476,12 @@ def test_back_translation_guidance_alone_replaces_an_empty_system_message(tmp_pa
 _NUMBERED_SOURCE = re.compile(r"^\d+\. ")
 
 
-def priced(prompt_tokens: int, completion_tokens: int, cost: float) -> LLMUsageStatistics:
-    return LLMUsageStatistics.of_priced_request(prompt_tokens, completion_tokens, cost)
+def priced(prompt_tokens: int, completion_tokens: int, cost: float) -> RequestUsage:
+    return RequestUsage.of_priced_request(prompt_tokens, completion_tokens, cost)
 
 
-def unpriced(prompt_tokens: int = 0, completion_tokens: int = 0) -> LLMUsageStatistics:
-    return LLMUsageStatistics.of_unpriced_request(prompt_tokens, completion_tokens)
+def unpriced(prompt_tokens: int = 0, completion_tokens: int = 0) -> RequestUsage:
+    return RequestUsage.of_unpriced_request(prompt_tokens, completion_tokens)
 
 
 class ScriptedClient(CompletionClient):
@@ -485,7 +493,7 @@ class ScriptedClient(CompletionClient):
         logprobs_supported: bool = False,
         token_logprobs: Optional[List[TokenLogprob]] = None,
         tokens_per_word: Optional[int] = 1,
-        usage: Optional[LLMUsageStatistics] = None,
+        usage: Optional[RequestUsage] = None,
     ) -> None:
         self._responder = responder
         self._logprobs_supported = logprobs_supported
@@ -511,11 +519,15 @@ class ScriptedClient(CompletionClient):
 
 
 class ScriptedClientFactory(CompletionClientFactory):
-    def __init__(self, client: CompletionClient) -> None:
+    def __init__(self, client: CompletionClient, cost_estimator: Optional[RequestCostEstimator] = None) -> None:
         self._client = client
+        self._cost_estimator = cost_estimator
 
     def create(self, config: RemoteLLMConfig) -> CompletionClient:
         return self._client
+
+    def create_cost_estimator(self, config: RemoteLLMConfig) -> RequestCostEstimator:
+        return self._cost_estimator if self._cost_estimator is not None else super().create_cost_estimator(config)
 
 
 def echo_translations(messages: List[Dict[str, str]]) -> str:
@@ -914,6 +926,18 @@ def test_response_reports_an_unknown_cost_when_litellm_has_no_pricing():
     assert LiteLLMResponse(raw, _Pricing(None)).usage() == unpriced(7, 3)
 
 
+def test_response_is_priced_at_the_cost_the_provider_reports_when_litellm_has_no_pricing():
+    usage = {"prompt_tokens": 7, "completion_tokens": 3, "cost": 0.05}
+    raw = {"choices": [{"message": {"content": "hola"}}], "usage": usage}
+    assert LiteLLMResponse(raw, _Pricing(None)).usage() == priced(7, 3, 0.05)
+
+
+def test_the_cost_the_provider_reports_outweighs_litellms_price():
+    usage = _Obj(prompt_tokens=7, completion_tokens=3, cost=0.05)
+    raw = _Obj(choices=[_Obj(message=_Obj(content="hola"))], usage=usage)
+    assert LiteLLMResponse(raw, _Pricing(0.01)).usage() == priced(7, 3, 0.05)
+
+
 def test_confidence_scores_come_from_the_token_logprobs(tmp_path: Path):
     (tmp_path / "test.src.txt").write_text("one\n", encoding="utf-8")
     model, client = make_model(
@@ -1115,40 +1139,37 @@ def test_a_client_that_cannot_count_tokens_makes_the_caller_skip_the_size_check(
     assert "exceeds infer.max_context_tokens" not in caplog.text
 
 
+def test_a_client_that_cannot_count_tokens_warns_that_the_size_check_is_skipped(tmp_path: Path, caplog):
+    model, _ = make_model(
+        tmp_path,
+        lambda messages: "hola",
+        infer={"prompt": {"num_examples": 1000000}, "max_context_tokens": 1},
+        tokens_per_word=None,
+    )
+
+    with caplog.at_level("WARNING"):
+        list(model.translate(["anything"], "en", "es"))
+
+    assert "could not be counted, so it is not checked against infer.max_context_tokens (1)" in caplog.text
+
+
 # --- usage and cost reporting ---------------------------------------------------------------
 
 
-def test_usage_totals_accumulate():
-    totals = UsageTotals()
-    totals.add(Completion("a", usage=priced(100, 10, 0.01)))
-    totals.add(Completion("b", usage=priced(200, 20, 0.02)))
+def test_a_reply_counts_as_a_request_in_a_runs_usage():
+    run_usage = RunUsage()
+    Completion("hola", usage=priced(100, 10, 0.01)).count_in(run_usage)
 
-    assert "2 requests, 300 prompt + 30 completion tokens, $0.0300" == totals.describe()
-
-
-def test_usage_totals_report_an_unpriced_model_rather_than_calling_it_free():
-    totals = UsageTotals()
-    totals.add(Completion("a", usage=unpriced(100, 10)))
-    assert "cost unavailable" in totals.describe()
-    assert "$" not in totals.describe()
+    assert run_usage.describe() == "1 requests, 100 prompt + 10 completion tokens, $0.0100"
 
 
-def test_usage_totals_flag_a_partial_cost():
-    totals = UsageTotals()
-    totals.add(Completion("a", usage=priced(100, 10, 0.01)))
-    totals.add(Completion("b", usage=unpriced(100, 10)))
+def test_a_reused_reply_counts_as_reused_rather_than_as_a_request_in_a_runs_usage():
+    run_usage = RunUsage()
+    Completion("hola", usage=priced(100, 10, 0.01), reused=True).count_in(run_usage)
 
-    assert "$0.0100 excluding 1 unpriced requests" in totals.describe()
-
-
-def test_usage_totals_are_thread_safe():
-    totals = UsageTotals()
-    completion = Completion("a", usage=priced(1, 1, 0.001))
-
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        list(executor.map(lambda _: totals.add(completion), range(2000)))
-
-    assert totals.describe().startswith("2,000 requests, 2,000 prompt + 2,000 completion tokens")
+    assert run_usage.describe() == (
+        "0 requests, 0 prompt + 0 completion tokens, $0.0000; replies reused from an earlier run: 1"
+    )
 
 
 def test_translating_logs_the_usage_and_cost(tmp_path: Path, caplog):
@@ -1449,12 +1470,11 @@ def test_the_retrying_client_reports_what_the_wrapped_client_supports():
     assert client.count_tokens("two words") == 4
 
 
-def test_the_retrying_client_estimates_with_the_wrapped_client():
-    inner = PricedClient(reasoning=ReasoningBudget("a-model", 4096, 1024))
+def test_the_retrying_client_counts_a_chat_with_the_wrapped_client():
+    inner = ScriptedClient(lambda messages: "hola", tokens_per_word=2)
     client = RetryingCompletionClient(inner, RetryPolicy(0))
-    messages = [{"role": "user", "content": "two words"}]
 
-    assert client.estimate_usage(messages, 100, 1).describe() == inner.estimate_usage(messages, 100, 1).describe()
+    assert client.count_message_tokens([{"role": "user", "content": "two words"}]) == 4
 
 
 class FakeLiteLLM:
@@ -1498,6 +1518,113 @@ def test_importing_litellm_turns_off_its_feedback_banner():
     litellm = pytest.importorskip("litellm")
     LiteLLMCompletionClient("gpt-4o", CompletionSettings(0.0, 16, 0, 10))
     assert litellm.suppress_debug_info is True
+
+
+def _hola() -> FakeLiteLLM:
+    return FakeLiteLLM({"choices": [{"message": {"content": "hola"}}], "usage": {"prompt_tokens": 3}})
+
+
+def _litellm_client(fake: FakeLiteLLM, model: str = "gpt-4o") -> LiteLLMCompletionClient:
+    return LiteLLMCompletionClient(model, CompletionSettings(0.0, 16, 0, 10), litellm=fake)
+
+
+def _openrouter_client(fake: FakeLiteLLM, litellm_options: Optional[dict] = None) -> OpenRouterCompletionClient:
+    settings = CompletionSettings(0.0, 16, 0, 10)
+    return OpenRouterCompletionClient("openrouter/anthropic/claude-haiku-5.5", settings, litellm_options, fake)
+
+
+def _marked_prompt() -> List[dict]:
+    system = {"type": "text", "text": "translate", "cache_control": {"type": "ephemeral"}}
+    return [{"role": "system", "content": [system]}, {"role": "user", "content": "hello"}]
+
+
+def test_a_request_to_claude_marks_its_system_message_for_caching():
+    fake = _hola()
+
+    _litellm_client(fake, model="anthropic/claude-sonnet-4-5").complete(_prompt())
+
+    assert fake.calls[0]["messages"] == _marked_prompt()
+
+
+def test_a_request_to_claude_through_openrouter_marks_its_system_message_for_caching():
+    fake = _hola()
+
+    _openrouter_client(fake).complete(_prompt())
+
+    assert fake.calls[0]["messages"] == _marked_prompt()
+
+
+def test_a_request_to_another_model_sends_its_system_message_as_it_is():
+    fake = _hola()
+
+    _litellm_client(fake).complete(_prompt())
+
+    assert fake.calls[0]["messages"] == _prompt()
+
+
+def test_a_retried_request_to_claude_is_marked_like_the_first():
+    fake = FakeLiteLLM({"choices": [{"message": {"content": ""}}], "usage": {"prompt_tokens": 3}})
+    client = RetryingCompletionClient(
+        _litellm_client(fake, model="anthropic/claude-sonnet-4-5"), RetryPolicy(1, delay_seconds=0)
+    )
+
+    client.complete(_prompt())
+
+    assert [call["messages"] for call in fake.calls] == [_marked_prompt(), _marked_prompt()]
+
+
+def _openrouter_sessions(*requests: List[Dict[str, str]], litellm_options: Optional[dict] = None) -> List[object]:
+    fake = _hola()
+    client = _openrouter_client(fake, litellm_options)
+    for messages in requests:
+        client.complete(messages)
+    return [call.get("session_id") for call in fake.calls]
+
+
+def test_requests_through_openrouter_that_share_a_system_message_share_a_session():
+    other_verse = [{"role": "system", "content": "translate"}, {"role": "user", "content": "goodbye"}]
+    first, second = _openrouter_sessions(_prompt(), other_verse)
+    assert first is not None and first == second
+
+
+def test_requests_through_openrouter_with_different_system_messages_have_different_sessions():
+    other_instructions = [{"role": "system", "content": "back-translate"}, {"role": "user", "content": "hello"}]
+    first, second = _openrouter_sessions(_prompt(), other_instructions)
+    assert first != second
+
+
+def test_a_session_configured_for_openrouter_is_kept():
+    assert _openrouter_sessions(_prompt(), litellm_options={"session_id": "mine"}) == ["mine"]
+
+
+def test_a_request_through_openrouter_without_a_system_message_has_no_session():
+    assert _openrouter_sessions([{"role": "user", "content": "hello"}]) == [None]
+
+
+def test_the_client_factory_sends_a_request_through_openrouter_in_a_session(tmp_path: Path):
+    fake = _hola()
+    factory = LiteLLMCompletionClientFactory(CountingModelList(), fake)
+
+    factory.create(make_config(tmp_path, model="openrouter/anthropic/claude-haiku-5.5")).complete(_prompt())
+
+    assert fake.calls[0]["session_id"] is not None
+
+
+def test_the_client_factory_sends_a_request_to_another_provider_without_a_session(tmp_path: Path):
+    fake = _hola()
+    factory = LiteLLMCompletionClientFactory(CountingModelList(), fake)
+
+    factory.create(make_config(tmp_path, model="anthropic/claude-sonnet-4-5")).complete(_prompt())
+
+    assert "session_id" not in fake.calls[0]
+
+
+def test_a_request_to_a_provider_other_than_openrouter_has_no_session():
+    fake = _hola()
+
+    _litellm_client(fake, model="anthropic/claude-sonnet-4-5").complete(_prompt())
+
+    assert "session_id" not in fake.calls[0]
 
 
 # --- saved replies -------------------------------------------------------------------------
@@ -1775,32 +1902,6 @@ def test_missing_test_predictions_are_unfinished(tmp_path: Path):
     assert not model.has_completed_translation(tmp_path / "test.src.txt", tmp_path / "predictions.txt")
 
 
-def test_usage_totals_count_reused_replies_without_billing_them_again():
-    totals = UsageTotals()
-    totals.add(Completion("hola", usage=priced(100, 0, 0.01), reused=True))
-    totals.add(Completion("adios", usage=priced(100, 0, 0.01)))
-
-    described = totals.describe()
-    assert "1 requests, 100 prompt" in described
-    assert "$0.0100" in described
-    assert "replies reused from an earlier run: 1" in described
-
-
-def test_usage_totals_include_the_totals_of_another_translation():
-    totals = UsageTotals()
-    totals.add(Completion("a", usage=priced(100, 10, 0.01)))
-    other = UsageTotals()
-    other.add(Completion("b", usage=unpriced(200, 20)))
-    other.add(Completion("c", usage=priced(300, 0, 0.03), reused=True))
-    other.add_copied_translation()
-
-    totals.include(other)
-
-    assert "2 requests, 300 prompt + 30 completion tokens, $0.0100 excluding 1 unpriced requests" in totals.describe()
-    assert "replies reused from an earlier run: 1" in totals.describe()
-    assert "translations copied from the training corpus: 1" in totals.describe()
-
-
 # --- read-only saved replies ---------------------------------------------------------------
 
 
@@ -1856,14 +1957,17 @@ def test_read_only_saved_replies_forget_but_keep_the_file_when_discarded(tmp_pat
 class FakeLiteLLMPrices:
     """LiteLLM's token counting and price list, for a model it prices per token, or for one it does not know."""
 
-    def __init__(self, model_info: Optional[dict] = None, supports_reasoning: bool = False) -> None:
+    def __init__(
+        self, model_info: Optional[dict] = None, supports_reasoning: bool = False, prompt_tokens: int = 1000
+    ) -> None:
         self._model_info = model_info
         self._supports_reasoning = supports_reasoning
+        self._prompt_tokens = prompt_tokens
         self.counted: List[List[Dict[str, str]]] = []
 
     def token_counter(self, model: str, messages: List[Dict[str, str]]) -> int:
         self.counted.append(messages)
-        return 1000
+        return self._prompt_tokens
 
     def get_model_info(self, model: str) -> dict:
         if self._model_info is None:
@@ -1871,13 +1975,23 @@ class FakeLiteLLMPrices:
         return self._model_info
 
     def cost_per_token(
-        self, model: str, prompt_tokens: int, completion_tokens: int, cache_read_input_tokens: int = 0
+        self,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cache_read_input_tokens: int = 0,
+        cache_creation_input_tokens: int = 0,
     ) -> Tuple[float, float]:
         info = self.get_model_info(model)
-        # Like LiteLLM, a model with no cache price has its cached tokens billed at nothing.
-        cache_price = info.get("cache_read_input_token_cost") or 0.0
-        uncached_tokens = prompt_tokens - cache_read_input_tokens
-        prompt_cost = uncached_tokens * info["input_cost_per_token"] + cache_read_input_tokens * cache_price
+        # Like LiteLLM, a model with no cache price has its cached or written tokens billed at nothing.
+        read_price = info.get("cache_read_input_token_cost") or 0.0
+        write_price = info.get("cache_creation_input_token_cost") or 0.0
+        plain_tokens = prompt_tokens - cache_read_input_tokens - cache_creation_input_tokens
+        prompt_cost = (
+            plain_tokens * info["input_cost_per_token"]
+            + cache_read_input_tokens * read_price
+            + cache_creation_input_tokens * write_price
+        )
         return prompt_cost, completion_tokens * info["output_cost_per_token"]
 
     def supports_reasoning(self, model: str) -> bool:
@@ -1891,77 +2005,99 @@ def _priced_litellm(cache_price: Optional[float] = 0.0001, supports_reasoning: b
     return FakeLiteLLMPrices(info, supports_reasoning)
 
 
-def _litellm_client(
-    fake: FakeLiteLLMPrices, extra_kwargs: Optional[dict] = None, model: str = "gpt-4o"
-) -> LiteLLMCompletionClient:
-    return LiteLLMCompletionClient(model, CompletionSettings(0.0, 16, 0, 10), extra_kwargs, litellm=fake)
+def _cost_estimator(
+    exp_dir: Path,
+    model: str = "gpt-4o",
+    litellm: object = None,
+    model_list: Optional[OpenRouterModelList] = None,
+    litellm_options: Optional[dict] = None,
+) -> RequestCostEstimator:
+    factory = LiteLLMCompletionClientFactory(
+        model_list if model_list is not None else CountingModelList(),
+        _priced_litellm() if litellm is None else litellm,
+    )
+    config = make_config(
+        exp_dir, model=model, params={"litellm": litellm_options or {}}, infer={"max_new_tokens": 4096}
+    )
+    return factory.create_cost_estimator(config)
+
+
+def _estimate(
+    cost_estimator: RequestCostEstimator,
+    cache_status: SharedSystemMessageCacheStatus = SharedSystemMessageCacheStatus(0, already_cached=False),
+    prompt_tokens: int = 1000,
+) -> RequestEstimate:
+    return cost_estimator.estimate(prompt_tokens, 100, cache_status)
 
 
 def _prompt() -> List[Dict[str, str]]:
     return [{"role": "system", "content": "translate"}, {"role": "user", "content": "hello"}]
 
 
-def test_estimated_usage_adds_the_prompt_and_completion_prices():
-    usage = _litellm_client(_priced_litellm()).estimate_usage(_prompt(), 100)
-    assert usage.describe() == "1 requests, 1,000 prompt + 100 completion tokens, $1.2000"
+def test_an_estimate_adds_the_prompt_and_completion_prices(tmp_path: Path):
+    estimate = _estimate(_cost_estimator(tmp_path))
+    assert estimate.usage.describe() == "1 requests, 1,000 prompt + 100 completion tokens, $1.2000"
 
 
-def test_estimated_usage_bills_cached_prompt_tokens_at_the_cache_price():
-    usage = _litellm_client(_priced_litellm()).estimate_usage(_prompt(), 100, 800)
-    assert usage.describe().endswith("; $0.4800 if the provider caches the system message the requests share")
+def test_an_estimate_bills_cached_prompt_tokens_at_the_cache_price(tmp_path: Path):
+    estimate = _estimate(
+        _cost_estimator(tmp_path), SharedSystemMessageCacheStatus(1600, already_cached=True), prompt_tokens=2000
+    )
+    assert estimate.usage_if_cached.describe_cost() == "$0.7600"
 
 
-def test_estimated_usage_says_nothing_of_caching_for_a_model_without_a_cache_price():
-    usage = _litellm_client(_priced_litellm(cache_price=None)).estimate_usage(_prompt(), 100, 800)
-    assert usage.describe() == "1 requests, 1,000 prompt + 100 completion tokens, $1.2000"
+def test_an_estimate_for_a_model_without_a_cache_price_saves_nothing_by_caching(tmp_path: Path):
+    cost_estimator = _cost_estimator(tmp_path, litellm=_priced_litellm(cache_price=None))
+
+    estimate = _estimate(cost_estimator, SharedSystemMessageCacheStatus(1600, already_cached=True), prompt_tokens=2000)
+
+    assert estimate.usage.describe() == "1 requests, 2,000 prompt + 100 completion tokens, $2.2000"
+    assert not estimate.usage_if_cached.costs_less_than(estimate.usage)
 
 
-def test_estimated_usage_is_unpriced_for_a_model_litellm_has_no_price_for():
-    usage = _litellm_client(FakeLiteLLMPrices()).estimate_usage(_prompt(), 100)
-    assert usage.describe().endswith("; cost unavailable (no pricing for this model)")
+def test_an_estimate_is_unpriced_for_a_model_litellm_has_no_price_for(tmp_path: Path):
+    estimate = _estimate(_cost_estimator(tmp_path, litellm=FakeLiteLLMPrices()))
+    assert estimate.usage.describe().endswith("; cost unavailable (no pricing for this model)")
 
 
-def test_estimated_usage_counts_the_tokens_of_the_whole_chat():
+def test_a_litellm_client_counts_the_tokens_of_the_whole_chat():
     fake = _priced_litellm()
+    client = LiteLLMCompletionClient("gpt-4o", CompletionSettings(0.0, 16, 0, 10), litellm=fake)
 
-    _litellm_client(fake).estimate_usage(_prompt(), 100)
-
+    assert client.count_message_tokens(_prompt()) == 1000
     assert fake.counted == [_prompt()]
-
-
-def _check_lookups_of(model: str) -> None:
-    client = LiteLLMCompletionClient(model, CompletionSettings(0.0, 16, 0, 10), litellm=FakeLiteLLMPrices())
-    client.ensure_lookups_need_no_sign_in()
 
 
 def test_looking_up_a_chatgpt_subscription_model_would_sign_in():
     with pytest.raises(RuntimeError, match="signs in to an account through its 'chatgpt' provider"):
-        _check_lookups_of("chatgpt/gpt-5")
+        LiteLLMModelName("chatgpt/gpt-5").ensure_lookups_need_no_sign_in()
 
 
 def test_looking_up_a_github_copilot_model_would_sign_in():
     with pytest.raises(RuntimeError, match="signs in to an account through its 'github_copilot' provider"):
-        _check_lookups_of("github_copilot/gpt-4o")
+        LiteLLMModelName("github_copilot/gpt-4o").ensure_lookups_need_no_sign_in()
 
 
 def test_a_sign_in_provider_inside_an_openrouter_model_name_is_pointed_out_as_a_naming_mistake():
     with pytest.raises(RuntimeError, match="the part of its name after 'openrouter/' must be openrouter's own name"):
-        _check_lookups_of("openrouter/chatgpt/gpt-6.1-sol")
+        LiteLLMModelName("openrouter/chatgpt/gpt-6.1-sol").ensure_lookups_need_no_sign_in()
 
 
 def test_looking_up_an_openrouter_model_needs_no_sign_in():
-    _check_lookups_of("openrouter/openai/gpt-6.1-sol")
+    LiteLLMModelName("openrouter/openai/gpt-6.1-sol").ensure_lookups_need_no_sign_in()
 
 
 def test_looking_up_a_model_merely_named_after_chatgpt_needs_no_sign_in():
-    _check_lookups_of("openai/chatgpt-4o-latest")
+    LiteLLMModelName("openai/chatgpt-4o-latest").ensure_lookups_need_no_sign_in()
 
 
-def test_the_retrying_client_refuses_lookups_its_wrapped_client_would_sign_in_for():
-    inner = LiteLLMCompletionClient("chatgpt/gpt-5", CompletionSettings(0.0, 16, 0, 10), litellm=FakeLiteLLMPrices())
+def test_the_client_factory_refuses_to_bill_a_model_it_would_sign_in_to_look_up(tmp_path: Path):
+    fake = _priced_litellm()
 
     with pytest.raises(RuntimeError, match="signs in to an account"):
-        RetryingCompletionClient(inner, RetryPolicy(0)).ensure_lookups_need_no_sign_in()
+        _cost_estimator(tmp_path, "chatgpt/gpt-5", fake)
+
+    assert fake.counted == []
 
 
 # --- estimating with OpenRouter's prices ------------------------------------------------------
@@ -1986,78 +2122,119 @@ class CountingModelList(OpenRouterModelList):
         return [{"id": "mistralai/mistral-large", "pricing": pricing}, *self._others]
 
 
-def _openrouter_client(
-    model_list: OpenRouterModelList, model: str = "openrouter/mistralai/mistral-large", litellm: object = None
-) -> OpenRouterCompletionClient:
-    return OpenRouterCompletionClient(
-        model,
-        CompletionSettings(0.0, 16, 0, 10),
-        OpenRouterListings(model_list),
-        litellm=FakeLiteLLMPrices() if litellm is None else litellm,
-    )
+def _openrouter_cost_estimator(
+    exp_dir: Path, model_list: OpenRouterModelList, model: str = "openrouter/mistralai/mistral-large"
+) -> RequestCostEstimator:
+    return _cost_estimator(exp_dir, model, FakeLiteLLMPrices(), model_list)
 
 
-def test_an_openrouter_model_is_estimated_at_the_price_openrouter_lists():
-    usage = _openrouter_client(CountingModelList()).estimate_usage(_prompt(), 100)
-    assert usage.describe() == "1 requests, 1,000 prompt + 100 completion tokens, $0.0035"
+def test_an_openrouter_model_is_estimated_at_the_price_openrouter_lists(tmp_path: Path):
+    estimate = _estimate(_openrouter_cost_estimator(tmp_path, CountingModelList()))
+    assert estimate.usage.describe() == "1 requests, 1,000 prompt + 100 completion tokens, $0.0035"
 
 
-def test_an_openrouter_estimate_bills_cached_prompt_tokens_at_openrouters_cache_read_price():
-    usage = _openrouter_client(CountingModelList()).estimate_usage(_prompt(), 100, 800)
-    assert usage.describe().endswith("; $0.0016 if the provider caches the system message the requests share")
+def test_an_openrouter_estimate_bills_cached_prompt_tokens_at_openrouters_cache_read_price(tmp_path: Path):
+    cost_estimator = _openrouter_cost_estimator(tmp_path, CountingModelList())
+
+    estimate = _estimate(cost_estimator, SharedSystemMessageCacheStatus(1600, already_cached=True), prompt_tokens=2000)
+
+    # 400 prompt tokens at the $2.50 write price, 1,600 at the $0.10 read price and 100 at $10 per million.
+    assert estimate.usage_if_cached.describe_cost() == "$0.0022"
 
 
-def test_openrouters_model_list_is_fetched_once_for_all_of_a_clients_requests():
+def test_openrouters_model_list_is_fetched_once_for_all_of_a_dry_runs_requests(tmp_path: Path):
     model_list = CountingModelList()
-    client = _openrouter_client(model_list)
+    cost_estimator = _openrouter_cost_estimator(tmp_path, model_list)
 
-    client.estimate_usage(_prompt(), 100)
-    client.estimate_usage(_prompt(), 100)
+    _estimate(cost_estimator)
+    _estimate(cost_estimator)
 
     assert model_list.fetches == 1
 
 
-def test_a_model_openrouter_does_not_list_is_estimated_without_a_cost():
-    usage = _openrouter_client(CountingModelList(), "openrouter/mistralai/mistral-huge").estimate_usage(_prompt(), 100)
-    assert usage.describe().endswith("; cost unavailable (no pricing for this model)")
+def test_a_model_openrouter_does_not_list_is_estimated_without_a_cost(tmp_path: Path):
+    cost_estimator = _openrouter_cost_estimator(tmp_path, CountingModelList(), "openrouter/mistralai/mistral-huge")
+    assert _estimate(cost_estimator).usage.describe().endswith("; cost unavailable (no pricing for this model)")
 
 
-def test_a_model_openrouter_does_not_list_is_looked_up_once_for_all_of_a_clients_requests():
+def test_a_model_openrouter_does_not_list_is_looked_up_once_for_all_of_a_dry_runs_requests(tmp_path: Path):
     model_list = CountingModelList()
-    client = _openrouter_client(model_list, "openrouter/mistralai/mistral-huge")
+    cost_estimator = _openrouter_cost_estimator(tmp_path, model_list, "openrouter/mistralai/mistral-huge")
 
-    client.estimate_usage(_prompt(), 100)
-    client.estimate_usage(_prompt(), 100)
+    _estimate(cost_estimator)
+    _estimate(cost_estimator)
 
     assert model_list.fetches == 1
 
 
-def test_sending_a_request_to_openrouter_fetches_no_prices():
+def test_sending_a_request_to_openrouter_fetches_no_prices(tmp_path: Path):
     model_list = CountingModelList()
     fake = FakeLiteLLM({"choices": [{"message": {"content": "hola"}}], "usage": {"prompt_tokens": 3}})
+    factory = LiteLLMCompletionClientFactory(model_list, fake)
 
-    _openrouter_client(model_list, litellm=fake).complete([])
+    factory.create(make_config(tmp_path, model="openrouter/mistralai/mistral-large")).complete([])
 
     assert model_list.fetches == 0
-
-
-def test_the_client_factory_prices_an_openrouter_model_as_openrouter_lists_it(tmp_path: Path):
-    factory = LiteLLMCompletionClientFactory(CountingModelList(), FakeLiteLLMPrices())
-    client = factory.create(make_config(tmp_path, model="openrouter/mistralai/mistral-large"))
-
-    usage = client.estimate_usage(_prompt(), 100)
-
-    assert usage.describe() == "1 requests, 1,000 prompt + 100 completion tokens, $0.0035"
 
 
 def test_the_client_factory_prices_other_models_with_litellm_without_fetching_openrouters_list(tmp_path: Path):
     model_list = CountingModelList()
-    client = LiteLLMCompletionClientFactory(model_list, _priced_litellm()).create(make_config(tmp_path))
 
-    usage = client.estimate_usage(_prompt(), 100)
+    estimate = _estimate(_cost_estimator(tmp_path, model_list=model_list))
 
-    assert usage.describe() == "1 requests, 1,000 prompt + 100 completion tokens, $1.2000"
+    assert estimate.usage.describe() == "1 requests, 1,000 prompt + 100 completion tokens, $1.2000"
     assert model_list.fetches == 0
+
+
+def _claude_listing() -> dict:
+    """A Claude model billed per million tokens at $1 prompt, $1.25 cache write, $0.10 cache read and $5 completion."""
+    pricing = {
+        "prompt": "0.000001",
+        "completion": "0.000005",
+        "input_cache_read": "0.0000001",
+        "input_cache_write": "0.00000125",
+    }
+    return {"id": "anthropic/claude-haiku-5.5", "pricing": pricing}
+
+
+def _openrouter_claude_estimate(exp_dir: Path, cache_status: SharedSystemMessageCacheStatus) -> str:
+    model_list = CountingModelList(_claude_listing())
+    cost_estimator = _openrouter_cost_estimator(exp_dir, model_list, "openrouter/anthropic/claude-haiku-5.5")
+    return _estimate(cost_estimator, cache_status).usage.describe()
+
+
+def test_an_openrouter_claude_estimate_bills_a_system_message_not_yet_cached_at_the_cache_write_price(tmp_path: Path):
+    # 200 prompt tokens at $1, 800 written to the cache at $1.25 and 100 completion tokens at $5 per million.
+    described = _openrouter_claude_estimate(tmp_path, SharedSystemMessageCacheStatus(800, already_cached=False))
+    assert described == "1 requests, 1,000 prompt + 100 completion tokens, $0.0017"
+
+
+def test_an_openrouter_claude_estimate_bills_a_cached_system_message_at_the_cache_read_price(tmp_path: Path):
+    # 200 prompt tokens at $1, 800 read from the cache at $0.10 and 100 completion tokens at $5 per million.
+    described = _openrouter_claude_estimate(tmp_path, SharedSystemMessageCacheStatus(800, already_cached=True))
+    assert described == "1 requests, 1,000 prompt + 100 completion tokens, $0.0008"
+
+
+def test_an_openrouter_claude_estimate_bills_a_system_message_too_short_to_cache_at_the_prompt_price(tmp_path: Path):
+    described = _openrouter_claude_estimate(tmp_path, SharedSystemMessageCacheStatus(400, already_cached=True))
+    assert described == "1 requests, 1,000 prompt + 100 completion tokens, $0.0015"
+
+
+def test_a_claude_estimate_through_litellm_bills_a_system_message_not_yet_cached_at_litellms_cache_write_price(
+    tmp_path: Path,
+):
+    info = {
+        "input_cost_per_token": 0.001,
+        "output_cost_per_token": 0.002,
+        "cache_read_input_token_cost": 0.0001,
+        "cache_creation_input_token_cost": 0.00125,
+    }
+    cost_estimator = _cost_estimator(tmp_path, "anthropic/claude-sonnet-5-5", FakeLiteLLMPrices(info))
+
+    estimate = _estimate(cost_estimator, SharedSystemMessageCacheStatus(800, already_cached=False))
+
+    # 200 prompt tokens at 0.001, 800 written to the cache at 0.00125 and 100 completion tokens at 0.002.
+    assert estimate.usage.describe() == "1 requests, 1,000 prompt + 100 completion tokens, $1.4000"
 
 
 def _listed(model_id: str, *supported_parameters: str) -> dict:
@@ -2065,68 +2242,74 @@ def _listed(model_id: str, *supported_parameters: str) -> dict:
     return {"id": model_id, "pricing": pricing, "supported_parameters": list(supported_parameters)}
 
 
-def _openrouter_reasoning_tokens(model: str, model_list: OpenRouterModelList, litellm: object = None) -> int:
-    client = OpenRouterCompletionClient(
-        model,
-        CompletionSettings(0.0, 4096, 0, 10),
-        OpenRouterListings(model_list),
-        litellm=FakeLiteLLMPrices() if litellm is None else litellm,
-    )
-    return client.estimate_usage(_prompt(), 100).to_record()["completion_tokens"] - 100
+def _openrouter_reasoning_tokens(
+    exp_dir: Path, model: str, model_list: OpenRouterModelList, litellm: object = None
+) -> int:
+    cost_estimator = _cost_estimator(exp_dir, model, FakeLiteLLMPrices() if litellm is None else litellm, model_list)
+    return _estimate(cost_estimator).reasoning_tokens
 
 
-def test_a_gpt_model_openrouter_lists_as_reasoning_reasons_at_the_measured_rate_without_reasoning_settings():
+def test_a_gpt_model_openrouter_lists_as_reasoning_reasons_at_the_measured_rate_without_reasoning_settings(
+    tmp_path: Path,
+):
     model_list = CountingModelList(_listed("openai/gpt-5", "max_tokens", "reasoning"))
-    assert _openrouter_reasoning_tokens("openrouter/openai/gpt-5", model_list) == 54
+    assert _openrouter_reasoning_tokens(tmp_path, "openrouter/openai/gpt-5", model_list) == 54
 
 
-def test_a_gpt_model_openrouter_lists_as_not_reasoning_has_no_reasoning_to_estimate(caplog):
+def test_a_gpt_model_openrouter_lists_as_not_reasoning_has_no_reasoning_to_estimate(tmp_path: Path, caplog):
     model_list = CountingModelList(_listed("openai/gpt-4o", "max_tokens", "temperature"))
 
     with caplog.at_level("INFO"):
-        tokens = _openrouter_reasoning_tokens("openrouter/openai/gpt-4o", model_list)
+        tokens = _openrouter_reasoning_tokens(tmp_path, "openrouter/openai/gpt-4o", model_list)
 
     assert tokens == 0
     assert "reason" not in caplog.text
 
 
-def test_reasoning_is_left_out_with_a_warning_for_another_model_openrouter_lists_as_reasoning(caplog):
+def test_reasoning_is_left_out_with_a_warning_for_another_model_openrouter_lists_as_reasoning(tmp_path: Path, caplog):
     model_list = CountingModelList(_listed("mistralai/magistral-medium", "reasoning"))
 
     with caplog.at_level("WARNING"):
-        tokens = _openrouter_reasoning_tokens("openrouter/mistralai/magistral-medium", model_list)
+        tokens = _openrouter_reasoning_tokens(tmp_path, "openrouter/mistralai/magistral-medium", model_list)
 
     assert tokens == 0
     assert "leaves out" in caplog.text
 
 
-def test_litellm_says_whether_a_model_openrouter_does_not_list_can_reason(caplog):
+def test_litellm_says_whether_a_model_openrouter_does_not_list_can_reason(tmp_path: Path, caplog):
     with caplog.at_level("WARNING"):
         _openrouter_reasoning_tokens(
-            "openrouter/mistralai/mistral-huge", CountingModelList(), FakeLiteLLMPrices(supports_reasoning=True)
+            tmp_path,
+            "openrouter/mistralai/mistral-huge",
+            CountingModelList(),
+            FakeLiteLLMPrices(supports_reasoning=True),
         )
 
     assert "leaves out" in caplog.text
 
 
-def _warns_that_reasoning_is_left_out(client: LiteLLMCompletionClient, caplog) -> bool:
+def _warns_that_reasoning_is_left_out(cost_estimator: RequestCostEstimator, caplog) -> bool:
     with caplog.at_level("WARNING"):
-        client.estimate_usage(_prompt(), 100)
+        _estimate(cost_estimator)
     return "leaves out" in caplog.text
 
 
-def test_reasoning_is_left_out_with_a_warning_for_a_model_that_litellm_says_supports_it(caplog):
-    client = _litellm_client(_priced_litellm(supports_reasoning=True), model="mistral/magistral-medium")
-    assert _warns_that_reasoning_is_left_out(client, caplog)
+def test_reasoning_is_left_out_with_a_warning_for_a_model_that_litellm_says_supports_it(tmp_path: Path, caplog):
+    cost_estimator = _cost_estimator(tmp_path, "mistral/magistral-medium", _priced_litellm(supports_reasoning=True))
+    assert _warns_that_reasoning_is_left_out(cost_estimator, caplog)
 
 
-def test_reasoning_is_left_out_with_a_warning_for_a_model_asked_to_reason_by_its_litellm_params(caplog):
-    client = _litellm_client(_priced_litellm(), {"reasoning": {"effort": "minimal"}}, "mistral/magistral-medium")
-    assert _warns_that_reasoning_is_left_out(client, caplog)
+def test_reasoning_is_left_out_with_a_warning_for_a_model_asked_to_reason_by_its_litellm_params(tmp_path: Path, caplog):
+    cost_estimator = _cost_estimator(
+        tmp_path, "mistral/magistral-medium", litellm_options={"reasoning": {"effort": "minimal"}}
+    )
+    assert _warns_that_reasoning_is_left_out(cost_estimator, caplog)
 
 
-def test_there_is_no_reasoning_to_leave_out_for_a_model_that_neither_supports_nor_is_asked_to_reason(caplog):
-    assert not _warns_that_reasoning_is_left_out(_litellm_client(_priced_litellm()), caplog)
+def test_there_is_no_reasoning_to_leave_out_for_a_model_that_neither_supports_nor_is_asked_to_reason(
+    tmp_path: Path, caplog
+):
+    assert not _warns_that_reasoning_is_left_out(_cost_estimator(tmp_path), caplog)
 
 
 class UncountingLiteLLM:
@@ -2136,11 +2319,12 @@ class UncountingLiteLLM:
         raise ValueError("no tokenizer")
 
 
-def test_estimated_usage_fails_for_a_model_litellm_cannot_count():
+def test_estimating_fails_for_a_model_litellm_cannot_count():
     client = LiteLLMCompletionClient("made-up", CompletionSettings(0.0, 16, 0, 10), litellm=UncountingLiteLLM())
+    estimator = UsageEstimator(client, LengthRatio([], client), RequestCostEstimator.of_unknown_model(), 1)
 
     with pytest.raises(RuntimeError, match="could not be counted"):
-        client.estimate_usage(_prompt(), 100)
+        estimator.estimate(_prompt(), ["hello"])
 
 
 class UnrecognizingLiteLLM(FakeLiteLLMPrices):
@@ -2150,9 +2334,8 @@ class UnrecognizingLiteLLM(FakeLiteLLMPrices):
         raise ValueError("unrecognized model")
 
 
-def test_a_model_litellm_cannot_look_up_has_no_reasoning_to_leave_out(caplog):
-    client = LiteLLMCompletionClient("made-up", CompletionSettings(0.0, 16, 0, 10), litellm=UnrecognizingLiteLLM())
-    assert not _warns_that_reasoning_is_left_out(client, caplog)
+def test_a_model_litellm_cannot_look_up_has_no_reasoning_to_leave_out(tmp_path: Path, caplog):
+    assert not _warns_that_reasoning_is_left_out(_cost_estimator(tmp_path, "made-up", UnrecognizingLiteLLM()), caplog)
 
 
 class FakeLiteLLMReasoning(FakeLiteLLMPrices):
@@ -2174,13 +2357,8 @@ class FakeLiteLLMReasoning(FakeLiteLLMPrices):
         return self._optional_params
 
 
-def _reasoning_client(model: str, litellm_options: dict, fake: FakeLiteLLMReasoning) -> LiteLLMCompletionClient:
-    return LiteLLMCompletionClient(model, CompletionSettings(0.0, 4096, 0, 10), litellm_options, litellm=fake)
-
-
 def _reasoning_tokens(model: str, litellm_options: dict, fake: FakeLiteLLMReasoning, reply_tokens: int = 100) -> int:
-    usage = _reasoning_client(model, litellm_options, fake).estimate_usage(_prompt(), reply_tokens)
-    return usage.to_record()["completion_tokens"] - reply_tokens
+    return LiteLLMReasoningEstimator(model, litellm_options, 4096, fake).estimate().tokens_for(reply_tokens)
 
 
 def test_a_thinking_budget_litellm_would_send_is_estimated_in_full():
@@ -2211,24 +2389,22 @@ def test_litellm_is_asked_about_only_the_reasoning_settings_and_max_new_tokens()
     ]
 
 
-def test_a_budget_the_model_decides_for_itself_is_left_out_with_a_warning(caplog):
+def test_a_budget_gemini_decides_for_itself_is_estimated_at_the_rate_measured_for_gemini():
     fake = FakeLiteLLMReasoning({"thinkingConfig": {"thinkingBudget": -1}}, supports_reasoning=True)
 
-    with caplog.at_level("WARNING"):
-        tokens = _reasoning_tokens("gemini/gemini-2.5-pro", {"reasoning_effort": "high"}, fake)
-
-    assert tokens == 0
-    assert "leaves out" in caplog.text
+    assert _reasoning_tokens("gemini/gemini-2.5-pro", {"reasoning_effort": "high"}, fake) == 4096 - 100
 
 
-def test_adaptive_thinking_without_a_budget_is_left_out_with_a_warning(caplog):
+def test_adaptive_thinking_without_a_budget_is_estimated_at_the_rate_measured_for_claude():
     fake = FakeLiteLLMReasoning({"thinking": {"type": "adaptive"}}, supports_reasoning=True)
 
-    with caplog.at_level("WARNING"):
-        tokens = _reasoning_tokens("anthropic/claude-opus-4-6", {"reasoning_effort": "high"}, fake)
+    assert _reasoning_tokens("anthropic/claude-opus-4-6", {"reasoning_effort": "high"}, fake) == 1600
 
-    assert tokens == 0
-    assert "leaves out" in caplog.text
+
+def test_an_openrouter_reasoning_budget_is_estimated_in_full():
+    options = {"reasoning": {"max_tokens": 2000}}
+
+    assert _reasoning_tokens("openrouter/anthropic/claude-haiku-5.5", options, FakeLiteLLMReasoning()) == 2000
 
 
 def test_gpt_6_without_a_litellm_budget_reasons_at_its_measured_rate():
@@ -2256,10 +2432,9 @@ def test_gpt_6_reasons_at_its_measured_rate_within_max_new_tokens():
 def test_litellm_is_not_asked_about_a_model_without_reasoning_settings():
     fake = FakeLiteLLMReasoning({"thinkingConfig": {"thinkingBudget": 2048}}, supports_reasoning=True)
 
-    tokens = _reasoning_tokens("gemini/gemini-2.5-pro", {}, fake)
+    _reasoning_tokens("gemini/gemini-2.5-pro", {}, fake)
 
     assert fake.translated == []
-    assert tokens == 0
 
 
 def test_a_model_that_cannot_reason_has_no_reasoning_to_estimate(caplog):
@@ -2270,85 +2445,110 @@ def test_a_model_that_cannot_reason_has_no_reasoning_to_estimate(caplog):
     assert caplog.text == ""
 
 
-def test_a_client_works_out_its_reasoning_estimate_once_for_all_its_requests(caplog):
+def test_a_dry_runs_cost_estimator_works_out_its_reasoning_estimate_once_for_all_its_requests(tmp_path: Path, caplog):
     fake = FakeLiteLLMReasoning({"thinking": {"type": "enabled", "budget_tokens": 1024}})
-    client = _reasoning_client("anthropic/claude-sonnet-4-5", {"reasoning_effort": "low"}, fake)
+    cost_estimator = _cost_estimator(
+        tmp_path, "anthropic/claude-sonnet-4-5", fake, litellm_options={"reasoning_effort": "low"}
+    )
 
     with caplog.at_level("INFO"):
-        client.estimate_usage(_prompt(), 100)
-        client.estimate_usage(_prompt(), 100)
+        _estimate(cost_estimator)
+        _estimate(cost_estimator)
 
     assert len(fake.translated) == 1
     assert caplog.text.count("thinking budget") == 1
 
 
 @pytest.mark.slow
-def test_estimated_usage_prices_a_known_model_with_litellm_and_bills_cached_tokens_for_less():
+def test_an_estimate_prices_a_known_model_with_litellm_and_bills_cached_tokens_for_less(tmp_path: Path):
     pytest.importorskip("litellm")
-    client = LiteLLMCompletionClient("gpt-4o", CompletionSettings(0.0, 16, 0, 10))
+    cost_estimator = LiteLLMCompletionClientFactory().create_cost_estimator(make_config(tmp_path, model="gpt-4o"))
 
-    described = client.estimate_usage([{"role": "user", "content": "word " * 10000}], 1000, 8000).describe()
+    estimate = cost_estimator.estimate(10000, 1000, SharedSystemMessageCacheStatus(8000, True))
 
-    assert "cost unavailable" not in described
-    assert "if the provider caches" in described
+    assert "cost unavailable" not in estimate.usage.describe()
+    assert estimate.usage_if_cached.costs_less_than(estimate.usage)
 
 
 @pytest.mark.slow
-def test_estimated_usage_is_unpriced_for_a_model_missing_from_litellms_price_list():
+def test_an_estimate_is_unpriced_for_a_model_missing_from_litellms_price_list():
     pytest.importorskip("litellm")
-    client = LiteLLMCompletionClient("openrouter/made-up/nonexistent", CompletionSettings(0.0, 16, 0, 10))
+    prices = LiteLLMPriceList("openrouter/made-up/nonexistent", LiteLLMLoader().load())
 
-    assert client.estimate_usage(_prompt(), 1000).to_record()["cost"] is None
+    assert prices.price(PromptTokenCount(1000), 1000).to_record()["cost"] is None
 
 
 @pytest.mark.slow
 def test_litellm_gives_claude_a_thinking_budget_for_a_reasoning_effort():
     pytest.importorskip("litellm")
-    settings = CompletionSettings(0.0, 8192, 0, 10)
-    client = LiteLLMCompletionClient("anthropic/claude-sonnet-4-5", settings, {"reasoning_effort": "low"})
+    reasoning_estimator = LiteLLMReasoningEstimator(
+        "anthropic/claude-sonnet-4-5", {"reasoning_effort": "low"}, 8192, LiteLLMLoader().load()
+    )
 
-    assert client.estimate_usage(_prompt(), 100).to_record()["completion_tokens"] == 100 + 1024
+    assert reasoning_estimator.estimate().tokens_for(100) == 1024
 
 
 @pytest.mark.slow
 def test_litellm_gives_gemini_a_thinking_budget_for_a_reasoning_effort():
     pytest.importorskip("litellm")
-    settings = CompletionSettings(0.0, 8192, 0, 10)
-    client = LiteLLMCompletionClient("gemini/gemini-2.5-pro", settings, {"reasoning_effort": "high"})
+    reasoning_estimator = LiteLLMReasoningEstimator(
+        "gemini/gemini-2.5-pro", {"reasoning_effort": "high"}, 8192, LiteLLMLoader().load()
+    )
 
-    assert client.estimate_usage(_prompt(), 100).to_record()["completion_tokens"] == 100 + 4096
+    assert reasoning_estimator.estimate().tokens_for(100) == 4096
 
 
 # --- dry runs -------------------------------------------------------------------------------
 
 
-class PricedClient(ScriptedClient):
-    """A scripted client with flat per-token prices, which bills cached prompt tokens at a tenth of the price."""
+class FlatPrices(PriceList):
+    """Flat per-token prices, which bill cached prompt tokens at a tenth of the price."""
 
-    def __init__(self, prices_cached_prompts: bool = True, reasoning: Optional[ReasoningEstimate] = None) -> None:
-        super().__init__(lambda messages: "hola")
+    def __init__(self, prices_cached_prompts: bool = True, write_price: float = 0.001) -> None:
         self._prices_cached_prompts = prices_cached_prompts
-        self._reasoning = reasoning if reasoning is not None else NoReasoning()
+        self._write_price = write_price
 
-    def _price(self, prompt_tokens: int, completion_tokens: int, cached_prompt_tokens: int = 0) -> LLMUsageStatistics:
-        if cached_prompt_tokens > 0 and not self._prices_cached_prompts:
-            return unpriced(prompt_tokens, completion_tokens)
-        uncached_tokens = prompt_tokens - cached_prompt_tokens
-        cost = uncached_tokens * 0.001 + cached_prompt_tokens * 0.0001 + completion_tokens * 0.002
-        return priced(prompt_tokens, completion_tokens, cost)
+    def price(self, prompt_token_count: PromptTokenCount, completion_tokens: int) -> RequestUsage:
+        if prompt_token_count.read_from_cache > 0 and not self._prices_cached_prompts:
+            return unpriced(prompt_token_count.total, completion_tokens)
+        plain_tokens = (
+            prompt_token_count.total - prompt_token_count.read_from_cache - prompt_token_count.written_to_cache
+        )
+        cost = (
+            plain_tokens * 0.001
+            + prompt_token_count.written_to_cache * self._write_price
+            + prompt_token_count.read_from_cache * 0.0001
+            + completion_tokens * 0.002
+        )
+        return priced(prompt_token_count.total, completion_tokens, cost)
 
-    def _reasoning_estimate(self) -> ReasoningEstimate:
-        return self._reasoning
+
+def flat_cost_estimator(
+    prices_cached_prompts: bool = True,
+    reasoning: Optional[ReasoningEstimate] = None,
+    caching_policy: Optional[PromptCachingPolicy] = None,
+    write_price: float = 0.001,
+) -> RequestCostEstimator:
+    return RequestCostEstimator(
+        FlatPrices(prices_cached_prompts, write_price),
+        reasoning if reasoning is not None else NoReasoning(),
+        caching_policy if caching_policy is not None else PromptCachingPolicy.for_model("a-model"),
+    )
 
 
 def make_dry_run_model(
-    tmp_path: Path, client: Optional[ScriptedClient] = None, with_corpus: bool = True, **overrides
+    tmp_path: Path,
+    client: Optional[ScriptedClient] = None,
+    with_corpus: bool = True,
+    cost_estimator: Optional[RequestCostEstimator] = None,
+    **overrides,
 ) -> Tuple[DryRunRemoteLLMModel, ScriptedClient]:
     if with_corpus and not (tmp_path / "train.src.txt").is_file():
         write_training_corpus(tmp_path)
     if client is None:
         client = ScriptedClient(lambda messages: "hola")
-    return DryRunRemoteLLMModel(make_config(tmp_path, **overrides), ScriptedClientFactory(client)), client
+    factory = ScriptedClientFactory(client, cost_estimator)
+    return DryRunRemoteLLMModel(make_config(tmp_path, **overrides), factory), client
 
 
 def write_large_training_corpus(exp_dir: Path) -> None:
@@ -2465,7 +2665,7 @@ def test_a_dry_run_without_a_training_corpus_estimates_a_reply_as_long_as_its_so
 
 def test_a_dry_run_reports_the_estimated_cost(tmp_path: Path, caplog):
     prompt_words, _ = words_in_the_first_request(tmp_path / "real", ["one"])
-    model, _ = make_dry_run_model(tmp_path, PricedClient())
+    model, _ = make_dry_run_model(tmp_path, cost_estimator=flat_cost_estimator())
 
     with caplog.at_level("INFO"):
         list(model.translate(["one"], "en", "es"))
@@ -2491,7 +2691,7 @@ def test_a_dry_run_reports_what_caching_the_shared_system_message_would_save(tmp
     write_large_training_corpus(tmp_path / "real")
     _, system_message_words = words_in_the_first_request(tmp_path / "real", ["one"], **settings)
     write_large_training_corpus(tmp_path)
-    model, _ = make_dry_run_model(tmp_path, PricedClient(), **settings)
+    model, _ = make_dry_run_model(tmp_path, cost_estimator=flat_cost_estimator(), **settings)
 
     with caplog.at_level("INFO"):
         list(model.translate(["one", "two"], "en", "es"))
@@ -2506,7 +2706,7 @@ def test_a_dry_run_reports_what_caching_the_shared_system_message_would_save(tmp
 
 
 def test_a_dry_run_reports_no_cached_cost_for_a_system_message_too_short_to_cache(tmp_path: Path, caplog):
-    model, _ = make_dry_run_model(tmp_path, PricedClient())
+    model, _ = make_dry_run_model(tmp_path, cost_estimator=flat_cost_estimator())
 
     with caplog.at_level("INFO"):
         list(model.translate(["one", "two"], "en", "es"))
@@ -2518,7 +2718,9 @@ def test_a_dry_run_reports_no_cached_cost_for_a_system_message_too_short_to_cach
 def test_a_dry_run_reports_no_cached_cost_for_a_model_without_a_cache_price(tmp_path: Path, caplog):
     write_large_training_corpus(tmp_path)
     model, _ = make_dry_run_model(
-        tmp_path, PricedClient(prices_cached_prompts=False), infer={"prompt": {"num_examples": 1000}}
+        tmp_path,
+        cost_estimator=flat_cost_estimator(prices_cached_prompts=False),
+        infer={"prompt": {"num_examples": 1000}},
     )
 
     with caplog.at_level("INFO"):
@@ -2526,6 +2728,60 @@ def test_a_dry_run_reports_no_cached_cost_for_a_model_without_a_cache_price(tmp_
         model.report_estimate()
 
     assert "caches" not in caplog.text
+
+
+def test_a_dry_run_counts_on_the_cache_only_after_the_requests_sent_together(tmp_path: Path, caplog):
+    settings = {"infer": {"prompt": {"num_examples": 1000}, "concurrency": 2}}
+    (tmp_path / "real").mkdir()
+    write_large_training_corpus(tmp_path / "real")
+    _, system_message_words = words_in_the_first_request(tmp_path / "real", ["one"], **settings)
+    write_large_training_corpus(tmp_path)
+    model, _ = make_dry_run_model(tmp_path, cost_estimator=flat_cost_estimator(), **settings)
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one", "two", "three"], "en", "es"))
+        model.report_estimate()
+
+    [estimate] = estimates_logged(caplog)
+    uncached, cached = dollars_in(estimate)
+    # Only the third request comes after one that has cached the system message.
+    assert uncached - cached == pytest.approx(system_message_words * 0.0009, abs=0.0002)
+
+
+def _claude_dry_run(tmp_path: Path, caplog) -> Tuple[int, int]:
+    """The words in each request of a two-request dry run of Claude, and in the system message they share."""
+    settings = {"infer": {"prompt": {"num_examples": 1000}, "concurrency": 1}}
+    (tmp_path / "real").mkdir()
+    write_large_training_corpus(tmp_path / "real")
+    prompt_words, system_message_words = words_in_the_first_request(tmp_path / "real", ["one"], **settings)
+    write_large_training_corpus(tmp_path)
+    cost_estimator = flat_cost_estimator(
+        caching_policy=AnthropicPromptCachingPolicy("anthropic/claude-sonnet-5-5"), write_price=0.00125
+    )
+    model, _ = make_dry_run_model(tmp_path, cost_estimator=cost_estimator, **settings)
+    with caplog.at_level("INFO"):
+        list(model.translate(["one", "two"], "en", "es"))
+        model.report_estimate()
+    return prompt_words, system_message_words
+
+
+def test_a_dry_run_of_claude_bills_the_shared_system_message_at_the_write_price_then_the_read_price(
+    tmp_path: Path, caplog
+):
+    prompt_words, system_message_words = _claude_dry_run(tmp_path, caplog)
+
+    rows = estimate_rows(caplog)
+    completion_tokens = int(rows["Completion tokens"][0])
+    other_words = prompt_words - system_message_words
+    expected = 2 * other_words * 0.001 + system_message_words * (0.00125 + 0.0001) + completion_tokens * 0.002
+    assert dollars_in(rows["Cost"][0]) == [pytest.approx(expected, abs=0.0001)]
+    assert rows["Cost"][1] == ""
+
+
+def test_a_dry_run_of_claude_says_it_marks_the_shared_system_message_for_caching(tmp_path: Path, caplog):
+    _claude_dry_run(tmp_path, caplog)
+
+    assert caplog.text.count("mark the system message they share for caching") == 1
 
 
 def test_a_dry_run_counts_a_request_for_each_draft(tmp_path: Path, caplog):
@@ -2650,7 +2906,7 @@ def test_a_dry_run_does_not_warn_of_blank_translations(tmp_path: Path, caplog):
 
 
 def test_a_dry_run_warns_that_its_estimate_leaves_out_reasoning(tmp_path: Path, caplog):
-    model, _ = make_dry_run_model(tmp_path, PricedClient(reasoning=UnknownReasoning("a-model")))
+    model, _ = make_dry_run_model(tmp_path, cost_estimator=flat_cost_estimator(reasoning=UnknownReasoning("a-model")))
 
     with caplog.at_level("WARNING"):
         list(model.translate(["one"], "en", "es"))
@@ -2659,7 +2915,7 @@ def test_a_dry_run_warns_that_its_estimate_leaves_out_reasoning(tmp_path: Path, 
 
 
 def test_a_dry_run_of_a_model_that_cannot_reason_says_nothing_of_reasoning(tmp_path: Path, caplog):
-    model, _ = make_dry_run_model(tmp_path, PricedClient())
+    model, _ = make_dry_run_model(tmp_path, cost_estimator=flat_cost_estimator())
 
     with caplog.at_level("INFO"):
         list(model.translate(["one"], "en", "es"))
@@ -2669,7 +2925,9 @@ def test_a_dry_run_of_a_model_that_cannot_reason_says_nothing_of_reasoning(tmp_p
 
 
 def test_a_dry_run_adds_estimated_reasoning_to_the_completion_tokens(tmp_path: Path, caplog):
-    model, _ = make_dry_run_model(tmp_path, PricedClient(reasoning=MeasuredReasoning("a-model", 4096, 2.0, "a test")))
+    model, _ = make_dry_run_model(
+        tmp_path, cost_estimator=flat_cost_estimator(reasoning=MeasuredReasoning("a-model", 4096, 2.0, "a test"))
+    )
 
     with caplog.at_level("INFO"):
         list(model.translate(["one two three four five six seven"], "en", "es"))
@@ -2681,7 +2939,9 @@ def test_a_dry_run_adds_estimated_reasoning_to_the_completion_tokens(tmp_path: P
 
 def test_a_dry_run_bills_estimated_reasoning_as_output(tmp_path: Path, caplog):
     prompt_words, _ = words_in_the_first_request(tmp_path / "real", ["one"])
-    model, _ = make_dry_run_model(tmp_path, PricedClient(reasoning=MeasuredReasoning("a-model", 4096, 2.0, "a test")))
+    model, _ = make_dry_run_model(
+        tmp_path, cost_estimator=flat_cost_estimator(reasoning=MeasuredReasoning("a-model", 4096, 2.0, "a test"))
+    )
 
     with caplog.at_level("INFO"):
         list(model.translate(["one"], "en", "es"))
@@ -2692,7 +2952,9 @@ def test_a_dry_run_bills_estimated_reasoning_as_output(tmp_path: Path, caplog):
 
 
 def test_a_dry_run_reports_how_much_of_its_total_is_measured_reasoning(tmp_path: Path, caplog):
-    model, _ = make_dry_run_model(tmp_path, PricedClient(reasoning=MeasuredReasoning("a-model", 4096, 2.0, "a test")))
+    model, _ = make_dry_run_model(
+        tmp_path, cost_estimator=flat_cost_estimator(reasoning=MeasuredReasoning("a-model", 4096, 2.0, "a test"))
+    )
 
     with caplog.at_level("INFO"):
         list(model.translate(["one two three four five six seven"], "en", "es"))
@@ -2703,7 +2965,9 @@ def test_a_dry_run_reports_how_much_of_its_total_is_measured_reasoning(tmp_path:
 
 
 def test_a_dry_run_with_a_thinking_budget_reports_an_upper_bound(tmp_path: Path, caplog):
-    model, _ = make_dry_run_model(tmp_path, PricedClient(reasoning=ReasoningBudget("a-model", 4096, 100)))
+    model, _ = make_dry_run_model(
+        tmp_path, cost_estimator=flat_cost_estimator(reasoning=ReasoningBudget("a-model", 4096, 100))
+    )
 
     with caplog.at_level("INFO"):
         list(model.translate(["one"], "en", "es"))
@@ -2716,7 +2980,9 @@ def test_a_dry_run_with_a_thinking_budget_reports_an_upper_bound(tmp_path: Path,
 
 
 def test_a_dry_run_announces_how_it_estimates_reasoning(tmp_path: Path, caplog):
-    model, _ = make_dry_run_model(tmp_path, PricedClient(reasoning=MeasuredReasoning("a-model", 4096, 2.0, "a test")))
+    model, _ = make_dry_run_model(
+        tmp_path, cost_estimator=flat_cost_estimator(reasoning=MeasuredReasoning("a-model", 4096, 2.0, "a test"))
+    )
 
     with caplog.at_level("INFO"):
         list(model.translate(["one"], "en", "es"))
@@ -2726,7 +2992,9 @@ def test_a_dry_run_announces_how_it_estimates_reasoning(tmp_path: Path, caplog):
 
 def test_a_dry_run_warns_once_that_reasoning_would_crowd_out_replies(tmp_path: Path, caplog):
     model, _ = make_dry_run_model(
-        tmp_path, PricedClient(reasoning=ReasoningBudget("a-model", 50, 100)), infer={"concurrency": 1}
+        tmp_path,
+        cost_estimator=flat_cost_estimator(reasoning=ReasoningBudget("a-model", 50, 100)),
+        infer={"concurrency": 1},
     )
 
     with caplog.at_level("WARNING"):
@@ -2738,12 +3006,14 @@ def test_a_dry_run_warns_once_that_reasoning_would_crowd_out_replies(tmp_path: P
 def test_a_dry_run_of_a_model_litellm_signs_in_to_look_up_stops_before_looking_anything_up(tmp_path: Path):
     write_training_corpus(tmp_path)
     fake = FakeLiteLLMPrices()
-    client = LiteLLMCompletionClient("openrouter/chatgpt/gpt-6.1-sol", CompletionSettings(0.0, 16, 0, 10), litellm=fake)
+    model_list = CountingModelList()
+    config = make_config(tmp_path, model="openrouter/chatgpt/gpt-6.1-sol")
 
     with pytest.raises(RuntimeError, match="signs in to an account"):
-        DryRunRemoteLLMModel(make_config(tmp_path), ScriptedClientFactory(client))
+        DryRunRemoteLLMModel(config, LiteLLMCompletionClientFactory(model_list, fake))
 
     assert fake.counted == []
+    assert model_list.fetches == 0
 
 
 def test_a_dry_run_fails_when_the_model_tokens_cannot_be_counted(tmp_path: Path):
@@ -2753,11 +3023,12 @@ def test_a_dry_run_fails_when_the_model_tokens_cannot_be_counted(tmp_path: Path)
         list(model.translate(["one"], "en", "es"))
 
 
-def test_estimated_usage_fails_for_a_client_that_cannot_count_tokens():
+def test_estimating_fails_for_a_client_that_cannot_count_tokens():
     client = ScriptedClient(lambda messages: "hola", tokens_per_word=None)
+    estimator = UsageEstimator(client, LengthRatio([], client), RequestCostEstimator.of_unknown_model(), 1)
 
     with pytest.raises(RuntimeError, match="could not be counted"):
-        client.estimate_usage([{"role": "user", "content": "hello"}], 10)
+        estimator.estimate([{"role": "user", "content": "hello"}], ["hello"])
 
 
 def test_a_dry_run_bills_nothing_for_a_reply_an_earlier_run_saved(tmp_path: Path, caplog):
@@ -2787,6 +3058,35 @@ def test_a_dry_run_explains_how_to_estimate_requests_whose_replies_an_earlier_ru
         "1",
         "no requests; disable with --force-infer or infer.reuse_saved_replies: false",
     )
+
+
+def save_a_label_as_the_reply_to(tmp_path: Path, source: str) -> None:
+    real, _ = make_model(tmp_path, lambda messages: "hola", infer={"concurrency": 1})
+    list(real.translate([source], "en", "es"))
+    replies = tmp_path / "remote_llm_replies.jsonl"
+    replies.write_text(replies.read_text(encoding="utf-8").replace('"hola"', '"Spanish:"'), encoding="utf-8")
+
+
+def test_a_real_run_asks_again_for_a_segment_whose_saved_reply_is_only_a_label(tmp_path: Path):
+    save_a_label_as_the_reply_to(tmp_path, "one")
+    model, client = make_model(tmp_path, lambda messages: "hola", infer={"concurrency": 1})
+
+    list(model.translate(["one"], "en", "es"))
+
+    assert len(client.calls) == 1
+
+
+def test_a_dry_run_counts_a_request_for_a_segment_whose_saved_reply_is_only_a_label(tmp_path: Path, caplog):
+    save_a_label_as_the_reply_to(tmp_path, "one")
+    model, _ = make_dry_run_model(tmp_path, infer={"concurrency": 1})
+
+    with caplog.at_level("INFO"):
+        list(model.translate(["one"], "en", "es"))
+        model.report_estimate()
+
+    rows = estimate_rows(caplog)
+    assert rows["Requests"] == ("1", "")
+    assert rows["Saved replies reused"][0] == "0"
 
 
 def test_a_dry_run_estimates_test_predictions_that_are_already_complete(tmp_path: Path):

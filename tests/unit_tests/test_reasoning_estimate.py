@@ -1,10 +1,11 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from silnlp.nmt.reasoning_estimate import (
-    GptReasoningRates,
     MeasuredReasoning,
     NoReasoning,
     ReasoningBudget,
+    ReasoningRates,
+    ReasoningToTheLimit,
     UnknownReasoning,
 )
 
@@ -147,67 +148,218 @@ def test_a_total_with_measured_reasoning_is_described_as_approximate():
     assert "about 1,234 reasoning tokens" in MeasuredReasoning("a-model", 4096, 0.5, "a test").describe_total(1234)
 
 
-# --- the rates measured for GPT-6.1 Sol -----------------------------------------------------
+# --- reasoning until max_new_tokens runs out ---------------------------------------------------
 
 
-def _gpt_tokens_for_a_100_token_reply(model: str, litellm_options: Dict[str, Any]) -> Optional[int]:
-    estimate = GptReasoningRates().estimate_for(model, litellm_options, 100_000)
-    return None if estimate is None else estimate.tokens_for(100)
+def test_reasoning_to_the_limit_takes_all_the_reply_leaves_of_max_new_tokens():
+    assert ReasoningToTheLimit("a-model", 4096, "a test").tokens_for(100) == 3996
+
+
+def test_reasoning_to_the_limit_leaves_nothing_when_the_reply_fills_max_new_tokens():
+    assert ReasoningToTheLimit("a-model", 1000, "a test").tokens_for(1200) == 0
+
+
+def test_reasoning_to_the_limit_warns_once_that_replies_will_be_cut_short(caplog):
+    estimate = ReasoningToTheLimit("gemini/gemini-3.7-flash", 4096, "a test")
+
+    with caplog.at_level("WARNING"):
+        estimate.tokens_for(100)
+        estimate.tokens_for(100)
+
+    assert caplog.text.count("cut short or blank") == 1
+    assert "gemini/gemini-3.7-flash is estimated to reason until infer.max_new_tokens runs out" in caplog.text
+    assert "Measured with max_new_tokens at 4,096 for a test." in caplog.text
+
+
+def test_a_total_with_reasoning_to_the_limit_is_described_as_an_upper_bound():
+    description = ReasoningToTheLimit("a-model", 4096, "a test").describe_total(2048)
+
+    assert "up to 2,048 reasoning tokens" in description
+    assert "upper bound" in description
+
+
+# --- the rates measured for each provider --------------------------------------------------------
+
+
+def _tokens_for_a_100_token_reply(model: str, litellm_options: Dict[str, Any]) -> int:
+    return ReasoningRates.for_model(model).estimate_for(litellm_options, 100_000).tokens_for(100)
+
+
+def _leaves_reasoning_out(model: str, litellm_options: Dict[str, Any], caplog) -> bool:
+    with caplog.at_level("WARNING"):
+        tokens = _tokens_for_a_100_token_reply(model, litellm_options)
+    return tokens == 0 and "leaves out" in caplog.text
+
+
+def _announcement(model: str, litellm_options: Dict[str, Any], caplog) -> str:
+    with caplog.at_level("INFO"):
+        _tokens_for_a_100_token_reply(model, litellm_options)
+    return caplog.text
 
 
 def test_gpt_6_at_its_default_effort_reasons_for_about_half_its_reply():
-    assert _gpt_tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {}) == 54
+    assert _tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {}) == 54
 
 
 def test_gpt_6_at_minimal_effort_barely_reasons():
-    assert _gpt_tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {"reasoning_effort": "minimal"}) == 3
+    assert _tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {"reasoning_effort": "minimal"}) == 3
 
 
 def test_gpt_6_at_high_effort_reasons_for_several_times_its_reply():
-    assert _gpt_tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {"reasoning_effort": "high"}) == 570
+    assert _tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {"reasoning_effort": "high"}) == 570
 
 
 def test_gpt_6_at_extra_high_effort_reasons_for_twelve_times_its_reply():
-    assert _gpt_tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {"reasoning_effort": "xhigh"}) == 1200
+    assert _tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {"reasoning_effort": "xhigh"}) == 1200
 
 
 def test_gpt_6_with_reasoning_turned_off_spends_nothing_on_it():
-    assert _gpt_tokens_for_a_100_token_reply("openai/gpt-6.1-terra", {"reasoning_effort": "none"}) == 0
+    assert _tokens_for_a_100_token_reply("openai/gpt-6.1-terra", {"reasoning_effort": "none"}) == 0
 
 
 def test_every_gpt_6_tier_reasons_at_the_measured_rate():
-    assert _gpt_tokens_for_a_100_token_reply("openrouter/openai/gpt-6-luna", {"reasoning_effort": "high"}) == 570
+    assert _tokens_for_a_100_token_reply("openrouter/openai/gpt-6-luna", {"reasoning_effort": "high"}) == 570
 
 
 def test_openrouters_form_of_the_effort_setting_is_read():
-    assert _gpt_tokens_for_a_100_token_reply("openrouter/openai/gpt-6.1-sol", {"reasoning": {"effort": "low"}}) == 6
+    assert _tokens_for_a_100_token_reply("openrouter/openai/gpt-6.1-sol", {"reasoning": {"effort": "low"}}) == 6
 
 
-def test_an_effort_that_was_not_measured_has_no_gpt_rate():
-    assert _gpt_tokens_for_a_100_token_reply("openai/gpt-6.1-sol", {"reasoning_effort": "max"}) is None
+def test_a_gpt_reasoning_budget_is_estimated_like_medium_effort():
+    assert _tokens_for_a_100_token_reply("openrouter/openai/gpt-6.1-sol", {"reasoning": {"max_tokens": 3000}}) == 28
+
+
+def test_litellms_effort_setting_wins_over_openrouters_budget():
+    options = {"reasoning_effort": "high", "reasoning": {"max_tokens": 3000}}
+    assert _tokens_for_a_100_token_reply("openrouter/openai/gpt-6.1-sol", options) == 570
 
 
 def test_an_earlier_gpt_model_reasons_at_the_rate_measured_for_gpt_6_1_sol():
-    assert _gpt_tokens_for_a_100_token_reply("openai/gpt-5", {"reasoning_effort": "high"}) == 570
+    assert _tokens_for_a_100_token_reply("openai/gpt-5", {"reasoning_effort": "high"}) == 570
 
 
 def test_a_gpt_model_openrouter_lists_under_an_alias_reasons_at_the_measured_rate():
-    assert _gpt_tokens_for_a_100_token_reply("openrouter/~openai/gpt-sol-latest", {"reasoning_effort": "low"}) == 6
+    assert _tokens_for_a_100_token_reply("openrouter/~openai/gpt-sol-latest", {"reasoning_effort": "low"}) == 6
 
 
-def test_an_openai_model_not_named_gpt_has_no_gpt_rate():
-    assert _gpt_tokens_for_a_100_token_reply("openai/o3", {"reasoning_effort": "high"}) is None
+def test_a_gpt_effort_that_was_not_measured_is_left_out_with_a_warning(caplog):
+    assert _leaves_reasoning_out("openai/gpt-6.1-sol", {"reasoning_effort": "max"}, caplog)
 
 
-def test_a_model_from_another_provider_has_no_gpt_rate():
-    assert _gpt_tokens_for_a_100_token_reply("anthropic/claude-sonnet-4-5", {}) is None
+def test_an_openai_model_not_named_gpt_is_left_out_with_a_warning(caplog):
+    assert _leaves_reasoning_out("openai/o3", {"reasoning_effort": "high"}, caplog)
 
 
 def test_a_gpt_rate_is_announced_as_measured_on_gpt_6_1_sol_at_its_effort(caplog):
-    estimate = GptReasoningRates().estimate_for("openai/gpt-5", {"reasoning_effort": "medium"}, 4096)
-    assert estimate is not None
+    announcement = _announcement("openai/gpt-5", {"reasoning_effort": "medium"}, caplog)
+    assert "0.28 tokens per reply token, as measured for GPT-6.1 Sol at reasoning effort 'medium'" in announcement
 
-    with caplog.at_level("INFO"):
-        estimate.tokens_for(100)
 
-    assert "0.28 tokens per reply token, as measured for GPT-6.1 Sol at reasoning effort 'medium'" in caplog.text
+def test_claude_at_its_default_effort_reasons_for_nearly_three_times_its_reply():
+    assert _tokens_for_a_100_token_reply("openrouter/anthropic/claude-sonnet-5.5", {}) == 270
+
+
+def test_claude_with_reasoning_turned_off_spends_nothing_on_it():
+    assert (
+        _tokens_for_a_100_token_reply("openrouter/anthropic/claude-haiku-5.5", {"reasoning": {"effort": "none"}}) == 0
+    )
+
+
+def test_claude_at_low_effort_does_not_reason():
+    assert _tokens_for_a_100_token_reply("openrouter/anthropic/claude-haiku-5.5", {"reasoning": {"effort": "low"}}) == 0
+
+
+def test_claude_at_medium_effort_reasons_for_nearly_four_times_its_reply():
+    options = {"reasoning": {"effort": "medium"}}
+    assert _tokens_for_a_100_token_reply("openrouter/anthropic/claude-haiku-5.5", options) == 380
+
+
+def test_claude_at_high_effort_reasons_for_sixteen_times_its_reply():
+    assert (
+        _tokens_for_a_100_token_reply("openrouter/anthropic/claude-haiku-5.5", {"reasoning": {"effort": "high"}})
+        == 1600
+    )
+
+
+def test_claude_at_extra_high_effort_reasons_for_sixty_five_times_its_reply():
+    options = {"reasoning": {"effort": "xhigh"}}
+    assert _tokens_for_a_100_token_reply("openrouter/anthropic/claude-haiku-5.5", options) == 6500
+
+
+def test_litellms_form_of_the_effort_setting_is_read_for_claude():
+    assert _tokens_for_a_100_token_reply("anthropic/claude-opus-5-5", {"reasoning_effort": "medium"}) == 380
+
+
+def test_a_claude_model_on_bedrock_reasons_at_the_measured_rate():
+    assert (
+        _tokens_for_a_100_token_reply("bedrock/anthropic.claude-sonnet-5-5-v1:0", {"reasoning_effort": "high"}) == 1600
+    )
+
+
+def test_a_claude_reasoning_budget_is_estimated_in_full():
+    options = {"reasoning": {"max_tokens": 2000}}
+    assert _tokens_for_a_100_token_reply("openrouter/anthropic/claude-haiku-5.5", options) == 2000
+
+
+def test_a_claude_effort_that_was_not_measured_is_left_out_with_a_warning(caplog):
+    assert _leaves_reasoning_out("anthropic/claude-opus-5-5", {"reasoning_effort": "max"}, caplog)
+
+
+def test_a_claude_rate_is_announced_as_the_higher_of_the_two_models_measured(caplog):
+    announcement = _announcement("anthropic/claude-opus-5-5", {"reasoning_effort": "high"}, caplog)
+    assert "as measured for Claude Haiku 5.5 and Sonnet 5.5 at reasoning effort 'high', whichever reasoned more" in (
+        announcement
+    )
+
+
+def test_gemini_at_its_default_effort_reasons_until_max_new_tokens_runs_out():
+    assert _tokens_for_a_100_token_reply("gemini/gemini-3.7-flash", {}) == 100_000 - 100
+
+
+def test_gemini_at_low_effort_reasons_for_about_four_times_its_reply():
+    assert _tokens_for_a_100_token_reply("gemini/gemini-3.7-flash", {"reasoning_effort": "low"}) == 420
+
+
+def test_gemini_at_minimal_effort_reasons_like_low_effort():
+    assert _tokens_for_a_100_token_reply("gemini/gemini-3.7-flash", {"reasoning_effort": "minimal"}) == 420
+
+
+def test_gemini_with_reasoning_turned_off_reasons_like_low_effort():
+    assert _tokens_for_a_100_token_reply("gemini/gemini-3.7-flash", {"reasoning_effort": "none"}) == 420
+
+
+def test_gemini_at_medium_effort_reasons_until_max_new_tokens_runs_out():
+    assert _tokens_for_a_100_token_reply("gemini/gemini-3.1-pro-preview", {"reasoning_effort": "medium"}) == 99_900
+
+
+def test_gemini_at_high_effort_reasons_until_max_new_tokens_runs_out():
+    assert _tokens_for_a_100_token_reply("gemini/gemini-3.5-flash-lite", {"reasoning_effort": "high"}) == 99_900
+
+
+def test_openrouters_form_of_the_effort_setting_is_read_for_gemini():
+    assert _tokens_for_a_100_token_reply("openrouter/google/gemini-3.7-flash", {"reasoning": {"effort": "low"}}) == 420
+
+
+def test_a_gemini_reasoning_budget_is_estimated_in_full():
+    assert (
+        _tokens_for_a_100_token_reply("openrouter/google/gemini-3.7-flash", {"reasoning": {"max_tokens": 1024}}) == 1024
+    )
+
+
+def test_a_gemini_effort_that_was_not_measured_is_left_out_with_a_warning(caplog):
+    assert _leaves_reasoning_out("gemini/gemini-3.1-pro-preview", {"reasoning_effort": "xhigh"}, caplog)
+
+
+def test_a_gemini_rate_is_announced_as_the_highest_of_the_three_models_measured(caplog):
+    announcement = _announcement("gemini/gemini-3.7-flash", {"reasoning_effort": "low"}, caplog)
+    assert "Gemini 3.7 Flash, 3.5 Flash Lite and 3.1 Pro at reasoning effort 'low', whichever reasoned most" in (
+        announcement
+    )
+
+
+def test_another_providers_reasoning_is_left_out_with_a_warning(caplog):
+    assert _leaves_reasoning_out("mistral/magistral-medium", {"reasoning_effort": "high"}, caplog)
+
+
+def test_another_providers_reasoning_budget_is_estimated_in_full():
+    assert _tokens_for_a_100_token_reply("openrouter/deepseek/deepseek-r1", {"reasoning": {"max_tokens": 1500}}) == 1500

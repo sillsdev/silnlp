@@ -249,7 +249,6 @@ class NMTModel(ABC):
         """Only a model that saves its inference, so that a rerun resumes, has anything to discard."""
 
     def produces_translations(self) -> bool:
-        """False for a dry run, whose translations are blank placeholders that must not be written or scored."""
         return True
 
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
@@ -264,6 +263,10 @@ class NMTModel(ABC):
 
 
 class DryRunModel(NMTModel):
+    def produces_translations(self) -> bool:
+        """Its translations are blank placeholders, which must not be written or scored."""
+        return False
+
     @abstractmethod
     def report_estimate(self) -> None:
         """Called once a run has finished, so that the whole run's estimate is logged as a single message."""

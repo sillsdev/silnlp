@@ -3,7 +3,9 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import requests
 
-from .llm_usage import LLMUsageStatistics
+from .llm_usage import RequestUsage
+from .prompt_caching import PromptTokenCount
+from .usage_estimate import PriceList, UnknownPrices
 
 LOGGER = logging.getLogger(__name__)
 
@@ -20,7 +22,7 @@ class OpenRouterModelList:
         return response.json()["data"]
 
 
-class OpenRouterRates:
+class OpenRouterRates(PriceList):
     """One model's listed prices per token, including the higher rates that some models charge for long prompts."""
 
     _PRICES = ("prompt", "completion", "input_cache_read", "input_cache_write")
@@ -41,16 +43,20 @@ class OpenRouterRates:
         # Routers list a price of -1, since what they charge depends on the model each request is routed to.
         return all(self._base.get(name, -1.0) >= 0 for name in ("prompt", "completion"))
 
-    def price(self, prompt_tokens: int, completion_tokens: int, cached_prompt_tokens: int = 0) -> LLMUsageStatistics:
-        rates = self._rates_for(prompt_tokens)
-        if cached_prompt_tokens > 0 and "input_cache_read" not in rates:
-            return LLMUsageStatistics.of_unpriced_request(prompt_tokens, completion_tokens)
+    def price(self, prompt_token_count: PromptTokenCount, completion_tokens: int) -> RequestUsage:
+        rates = self._rates_for(prompt_token_count.total)
+        if prompt_token_count.read_from_cache > 0 and "input_cache_read" not in rates:
+            return RequestUsage.of_unpriced_request(prompt_token_count.total, completion_tokens)
+        plain_tokens = (
+            prompt_token_count.total - prompt_token_count.read_from_cache - prompt_token_count.written_to_cache
+        )
         cost = (
-            (prompt_tokens - cached_prompt_tokens) * self._uncached_prompt_rate(rates)
-            + cached_prompt_tokens * rates.get("input_cache_read", 0.0)
+            plain_tokens * rates["prompt"]
+            + prompt_token_count.written_to_cache * self._cache_write_rate(rates)
+            + prompt_token_count.read_from_cache * rates.get("input_cache_read", 0.0)
             + completion_tokens * rates["completion"]
         )
-        return LLMUsageStatistics.of_priced_request(prompt_tokens, completion_tokens, cost)
+        return RequestUsage.of_priced_request(prompt_token_count.total, completion_tokens, cost)
 
     def _parse(self, pricing: dict) -> Dict[str, float]:
         return {name: float(pricing[name]) for name in self._PRICES if name in pricing}
@@ -66,8 +72,8 @@ class OpenRouterRates:
                 rates = tier_rates
         return rates
 
-    def _uncached_prompt_rate(self, rates: Dict[str, float]) -> float:
-        # Automatic caching bills an uncached prompt at the cache-write price where that exceeds the prompt price.
+    def _cache_write_rate(self, rates: Dict[str, float]) -> float:
+        # A write price below the prompt price, as Gemini lists, is for explicit caches, not its implicit caching.
         return max(rates["prompt"], rates.get("input_cache_write", 0.0))
 
 
@@ -76,12 +82,11 @@ class OpenRouterListing:
         self._model_id = model_id
         self._entry = entry
 
-    def rates(self) -> Optional[OpenRouterRates]:
-        """None, after a warning, when OpenRouter lists no fixed price for the model."""
+    def prices(self) -> PriceList:
         rates = OpenRouterRates(self._entry.get("pricing", {}))
         if not rates.is_fixed():
             LOGGER.warning("OpenRouter lists no fixed price for '%s', so it can't be priced.", self._model_id)
-            return None
+            return UnknownPrices()
         return rates
 
     def can_reason(self) -> bool:
