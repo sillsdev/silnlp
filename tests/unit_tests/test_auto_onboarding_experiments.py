@@ -7,10 +7,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import pandas as pd
 import pytest
 import yaml
-from machine.corpora import FileParatextProjectSettingsParser
-from machine.scripture import ALL_BOOK_IDS
-
-from silnlp.common.auto_onboarding import (
+from auto_onboarding_experiments import (
     AutoOnboarding,
     BackTranslationCheck,
     BookThresholds,
@@ -29,6 +26,9 @@ from silnlp.common.auto_onboarding import (
     SourcePreferencesFile,
     Thresholds,
 )
+from machine.corpora import FileParatextProjectSettingsParser
+from machine.scripture import ALL_BOOK_IDS
+
 from silnlp.common.create_onboarding_experiments import NT_CANON, OT_CANON, Candidate, load_vref_books
 
 ASSETS_DIR = Path(__file__).parent.parent.parent / "silnlp" / "assets"
