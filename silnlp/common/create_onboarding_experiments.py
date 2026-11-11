@@ -421,12 +421,12 @@ def execute_copy(scripture_dir: Path, terms_dir: Optional[Path], old_stem: str, 
     """
     old_path = scripture_dir / f"{old_stem}.txt"
     shutil.copyfile(old_path, scripture_dir / f"{new_stem}.txt")
-    print(f"Copied {old_path.name} to {new_stem}.txt in {scripture_dir}")
+    LOGGER.info(f"Copied {old_path.name} to {new_stem}.txt in {scripture_dir}")
     if terms_dir is not None and terms_dir.is_dir():
         for path in sorted(terms_dir.glob(f"{old_stem}-*-renderings.txt")):
             target = f"{new_stem}{path.name[len(old_stem):]}"
             shutil.copyfile(path, terms_dir / target)
-            print(f"Copied {path.name} to {target} in {terms_dir}")
+            LOGGER.info(f"Copied {path.name} to {target} in {terms_dir}")
 
 
 def folder_name(name: str, keep_case: bool = False) -> str:
@@ -619,8 +619,8 @@ def warn_missing_verses(source_name: str, kind: str, selection_str: str, presenc
     present, total = presence
     if total == 0 or present / total > 1 - MISSING_VERSE_WARN:
         return
-    print(
-        f"Warning: '{source_name}' is missing {100 * (1 - present / total):.0f}% of the {kind} verses"
+    LOGGER.warning(
+        f"'{source_name}' is missing {100 * (1 - present / total):.0f}% of the {kind} verses"
         f" specified by '{selection_str}' ({present} of {total} present); check before running."
     )
 
@@ -777,7 +777,7 @@ def resolve_translate_sources(
             problem = checked[current]
             if problem is None:
                 break
-            print(f"Warning: {label}: cannot translate {';'.join(books)} from '{current}': {problem}.")
+            LOGGER.warning(f"{label}: cannot translate {';'.join(books)} from '{current}': {problem}.")
             try:
                 reply = input(
                     f"Enter a different project for {label} to translate from"
@@ -789,7 +789,7 @@ def resolve_translate_sources(
                 break
             current = reply
         if current != name:
-            print(f"Translating from '{current}' instead of '{name}' for {label}.")
+            LOGGER.info(f"Translating from '{current}' instead of '{name}' for {label}.")
         projects.append(current)
     return projects
 
@@ -830,25 +830,25 @@ def select_candidates(
     name_w = max([len("Candidate")] + [len(c.name) for c in candidates])
     book_w = {book: max(3, len(book)) for book in translate_book_ids}
     marks_header = "".join(f"  {book:>{book_w[book]}}" for book in translate_book_ids)
-    print("\nCandidates (train = parallel/training verses, draft = source-only/drafting verses):")
-    print(
+    LOGGER.info("\nCandidates (train = parallel/training verses, draft = source-only/drafting verses):")
+    LOGGER.info(
         f"  # {'Candidate':<{name_w}}  {'align':>6}  {'total':>7}  {'train':>7}  {'draft':>7}"
         f"  {'trg-only':>8}  {'script':<6}{marks_header}"
     )
     for i, c in enumerate(candidates, start=1):
         counts = coverage.counts(c.stem)
         marks = "".join(f"  {book_mark(counts, book, complete_counts):>{book_w[book]}}" for book in translate_book_ids)
-        print(
+        LOGGER.info(
             f"  {i:>2} {c.name:<{name_w}}  {c.alignment:>6.3f}  {c.count:>7}  {c.parallel:>7}  {c.src_only:>7}"
             f"  {c.trg_only:>8}  {(c.script or ''):<6}{marks}"
         )
-    print("Marks: ✓ = source has ≥98% of the book, ~ = partial, X = none.")
+    LOGGER.info("Marks: ✓ = source has ≥98% of the book, ~ = partial, X = none.")
     try:
         reply = input("Enter the candidates to use (e.g. 1,3), 'all' or 'none': ").strip().lower()
     except EOFError:
         reply = ""
     if reply in ("", "none"):
-        print("No candidates selected.")
+        LOGGER.info("No candidates selected.")
         return []
     if reply != "all":
         chosen: List[Candidate] = []
@@ -859,7 +859,7 @@ def select_candidates(
             else:
                 LOGGER.warning(f"Ignoring invalid selection '{token}'.")
         if not chosen:
-            print("No candidates selected.")
+            LOGGER.info("No candidates selected.")
         select_back_translations(candidates, chosen)
         return chosen
     select_back_translations(candidates, candidates)
@@ -902,7 +902,7 @@ def select_back_translations(candidates: List[Candidate], selected: List[Candida
         candidate.back_translation = True
     if marked:
         names = ", ".join(candidate.name for candidate in marked)
-        print(
+        LOGGER.info(
             f"Back translation(s): {names} — used only as a pair's second source, never as a single"
             " or primary source, and never as a drafting source."
         )
@@ -915,18 +915,18 @@ def select_experiments(
     total = len(singles) + len(mixed)
     displayed = (singles + mixed)[:top]
     shown = f"top {len(displayed)} of {total}" if total > len(displayed) else f"{total}"
-    print(f"\nPossible experiments ({shown}, single sources first):")
+    LOGGER.info(f"\nPossible experiments ({shown}, single sources first):")
     for i, sources in enumerate(displayed, start=1):
         names = " + ".join(f"{source.name} ({source.alignment:.4f})" for source in sources)
-        print(f"  {i:>2}. {names}")
+        LOGGER.info(f"  {i:>2}. {names}")
     if total > len(displayed):
-        print(f"Use --top to list more than {top} experiments.")
+        LOGGER.info(f"Use --top to list more than {top} experiments.")
     try:
         reply = input("Enter the numbers to create (e.g. 1,3), 'all' or 'none': ").strip().lower()
     except EOFError:
         reply = ""
     if reply in ("", "none"):
-        print("No experiments selected.")
+        LOGGER.info("No experiments selected.")
         return []
     if reply == "all":
         return displayed
@@ -939,7 +939,7 @@ def select_experiments(
         else:
             LOGGER.warning(f"Ignoring invalid selection '{token}'.")
     if not chosen:
-        print("No experiments selected.")
+        LOGGER.info("No experiments selected.")
     return chosen
 
 
@@ -965,7 +965,7 @@ def update_translate_config(folder: Path, translate_config: dict) -> None:
     if on_disk == translate_config:
         return
     write_yaml(path, translate_config)
-    print(f"Updated {path} with the current drafting configuration.")
+    LOGGER.info(f"Updated {path} with the current drafting configuration.")
 
 
 def submit_experiments(
@@ -978,9 +978,9 @@ def submit_experiments(
     """
     experiment_args = [arg for arg in EXPERIMENT_ARGS if not (no_test and arg == "--test")]
     names = [experiment.folder.relative_to(experiments_dir).as_posix() for experiment in experiments]
-    print("\nTo run the experiments:")
+    LOGGER.info("\nTo run the experiments:")
     for name in names:
-        print(f"  uv run python {' '.join(experiment_args)} {name}")
+        LOGGER.info(f"  uv run python {' '.join(experiment_args)} {name}")
     if submit is None:
         try:
             reply = input(f"\nRun {len(names)} experiment(s) now? [y/N]: ").strip().lower()
@@ -992,15 +992,15 @@ def submit_experiments(
 
     failures = []
     for name in names:
-        print(f"\nRunning experiment {name}")
+        LOGGER.info(f"\nRunning experiment {name}")
         result = subprocess.run([sys.executable] + experiment_args + [name])
         if result.returncode != 0:
             failures.append(name)
-            print(f"Experiment {name} exited with code {result.returncode}.")
+            LOGGER.info(f"Experiment {name} exited with code {result.returncode}.")
     if failures:
-        print(f"\n{len(failures)} of {len(names)} experiment(s) failed: {', '.join(failures)}")
+        LOGGER.info(f"\n{len(failures)} of {len(names)} experiment(s) failed: {', '.join(failures)}")
     else:
-        print(f"\nAll {len(names)} experiment(s) completed.")
+        LOGGER.info(f"\nAll {len(names)} experiment(s) completed.")
 
 
 def resolve_request_dir(request: str, experiments_dir: Path) -> Path:
@@ -1071,7 +1071,7 @@ def run(
                 detected_stem = None
         flipped = detected_stem is not None and detected_stem != main.stem
         if flipped:
-            print(f"Note: --target overrides the analyze run's own target project ({detected_stem}).")
+            LOGGER.info(f"Note: --target overrides the analyze run's own target project ({detected_stem}).")
 
         # A stats folder inside the experiments tree (e.g. PNG/Taupota/Align) creates its
         # experiments next to itself, keeping whatever country/language naming already
@@ -1112,8 +1112,8 @@ def run(
     language_seg = folder_name(language, keep_case=use_language)
 
     lang_dir = lang_dir_override or experiments_dir / country_seg / language_seg
-    print(f"Main project: {main.name} ({main.stem}), language: {language} " f"[{main.iso}], country: {country}")
-    print(f"Experiment location: {lang_dir}")
+    LOGGER.info(f"Main project: {main.name} ({main.stem}), language: {language} " f"[{main.iso}], country: {country}")
+    LOGGER.info(f"Experiment location: {lang_dir}")
 
     # Warn (non-destructive) when a folder under the old official name(s) already exists, so it
     # can be merged manually. Only in the derived-location case — the corpus-stats override path
@@ -1121,16 +1121,18 @@ def run(
     if lang_dir_override is None:
         warning = old_name_folder_warning(experiments_dir, raw_country, raw_language, country_seg, language_seg)
         if warning is not None:
-            print(warning)
+            LOGGER.info(warning)
 
     candidates.sort(key=lambda c: c.alignment, reverse=True)
     passing = [c for c in candidates if c.parallel >= min_parallel and c.alignment >= min_alignment]
-    print(f"\n{'Reference':<24} {'iso':<5} {'count':>7} {'parallel':>9} {'alignment':>10}  result")
+    LOGGER.info(f"\n{'Reference':<24} {'iso':<5} {'count':>7} {'parallel':>9} {'alignment':>10}  result")
     for c in candidates:
         result = "pass" if c in passing else "fail"
-        print(f"{c.name:<24} {c.iso:<5} {c.count:>7} {c.parallel:>9} {c.alignment:>10.4f}  {result}")
+        LOGGER.info(f"{c.name:<24} {c.iso:<5} {c.count:>7} {c.parallel:>9} {c.alignment:>10.4f}  {result}")
     if not passing:
-        print(f"\nNo references passed the thresholds (parallel >= {min_parallel}, alignment >= {min_alignment}).")
+        LOGGER.info(
+            f"\nNo references passed the thresholds (parallel >= {min_parallel}, alignment >= {min_alignment})."
+        )
         return []
 
     # Verse counts drive the candidate table below: per source it shows the parallel (training)
@@ -1171,20 +1173,20 @@ def run(
         if c.parallel >= secondary_min:
             continue
         if c.back_translation:
-            print(
+            LOGGER.info(
                 f"Note: {c.name} cannot be used at all: a back translation is only ever a pair's second"
                 f" source, and its {c.parallel} parallel verses are below {secondary_min:.0f}"
                 " (max of 1000 and 25% of the target's verses)."
             )
         else:
-            print(
+            LOGGER.info(
                 f"Note: {c.name} can be a single source or the primary of a pair, but not a pair's"
                 f" second source: its {c.parallel} parallel verses are below {secondary_min:.0f}"
                 " (max of 1000 and 25% of the target's verses)."
             )
     usable = [c for c in selected if not c.back_translation or c.parallel >= secondary_min]
     if not any(not c.back_translation for c in usable):
-        print(
+        LOGGER.info(
             "No experiments are possible: every selected candidate is a back translation, and a back"
             " translation can only be a pair's second source. Select at least one other candidate."
         )
@@ -1208,12 +1210,12 @@ def run(
         synthetic = prior_iso or synthesize_trg_iso(to_iso3(main.iso) or main.iso, real_isos)
         if clashing:
             names = ", ".join(c.name for c in clashing)
-            print(
+            LOGGER.info(
                 f"\n{names} share{'s' if len(clashing) == 1 else ''} iso code '{main.iso}' with the target"
                 f" project; using synthetic target code '{synthetic}' instead."
             )
         else:
-            print(f"\nUsing synthetic target code '{synthetic}' from the previously copied extract file.")
+            LOGGER.info(f"\nUsing synthetic target code '{synthetic}' from the previously copied extract file.")
         new_stem = f"{synthetic}-{stem_to_project(main.stem)}"
         if scripture_dir is None:
             raise ValueError("No scripture directory available to copy the target extract file in.")
@@ -1228,18 +1230,18 @@ def run(
         elif old_path.is_file():
             pending_copy = (main.stem, new_stem)
             # The copy adds files to the shared MT/scripture store — always confirm first.
-            print(
+            LOGGER.info(
                 f"{main.stem}.txt (and matching terms renderings files) will be copied to"
                 f" {new_stem}.txt in {scripture_dir}; the originals are kept."
             )
             if flipped:
-                print(
-                    "Warning: the target was overridden with --target; make sure"
+                LOGGER.warning(
+                    "The target was overridden with --target; make sure"
                     f" {main.stem} really is the intended target project."
                 )
             elif to_iso3(main.iso) in NLLB_TAG_FROM_ISO:
-                print(
-                    f"Caution: '{main.iso}' is an NLLB language code; make sure {main.stem} is the"
+                LOGGER.warning(
+                    f"'{main.iso}' is an NLLB language code; make sure {main.stem} is the"
                     " minority-language project sharing that code, not a shared reference Bible."
                 )
             try:
@@ -1247,7 +1249,7 @@ def run(
             except EOFError:
                 reply = ""
             if reply not in ("y", "yes"):
-                print("Aborted: the copy is required to create these experiments.")
+                LOGGER.info("Aborted: the copy is required to create these experiments.")
                 return []
         else:
             raise FileNotFoundError(f"Neither {main.stem}.txt nor {new_stem}.txt found in {scripture_dir}.")
@@ -1287,8 +1289,8 @@ def run(
             for project in translate_scripture:
                 problem = check_translate_source(projects_dir, project, translate_book_ids)
                 if problem is not None:
-                    print(
-                        f"Warning: cannot translate {';'.join(translate_book_ids)} from '{project}': {problem}."
+                    LOGGER.warning(
+                        f"Cannot translate {';'.join(translate_book_ids)} from '{project}': {problem}."
                         " Including it anyway: it was explicitly requested with --translate-scripture."
                     )
 
@@ -1297,7 +1299,7 @@ def run(
     warned_removals: set = set()
     warned_missing: set = set()  # (stem, kind) pairs already warned about
     warned_overlap: set = set()  # training selections already checked for translate-book overlap
-    print()
+
     for sources in chosen:
         label = " + ".join(source.name for source in sources)
         # corpus_books is the user's --training-books spec verbatim (they subtract what they
@@ -1310,13 +1312,13 @@ def run(
                 exclude=translate_set if training_is_complete else frozenset(),
             )
         except ValueError as e:
-            print(f"Skipped {label}: {e}")
+            LOGGER.info(f"Skipped {label}: {e}")
             continue
         if removed and tuple(removed) not in warned_removals:
             warned_removals.add(tuple(removed))
-            print(f"Warning: excluded the books being translated from corpus_books: {';'.join(removed)}")
+            LOGGER.warning(f"Excluded the books being translated from corpus_books: {';'.join(removed)}")
         if not corpus_books:
-            print(f"Skipped {label}: no training books remain in '{training_books}' after the exclusions.")
+            LOGGER.info(f"Skipped {label}: no training books remain in '{training_books}' after the exclusions.")
             continue
         # Warn (once per selection) when the training and translate books overlap: the model
         # would train on text it is also meant to draft/test. Not blocked — the user decides.
@@ -1326,8 +1328,8 @@ def run(
             overlap = overlapping_books(training_selection, translate_selection)
             if overlap:
                 shown = ";".join(overlap[:10]) + (f" (+{len(overlap) - 10} more)" if len(overlap) > 10 else "")
-                print(
-                    f"Warning: the training books '{corpus_books}' and translate books '{translate_books}'"
+                LOGGER.warning(
+                    f"The training books '{corpus_books}' and translate books '{translate_books}'"
                     f" overlap in {shown}; the model would train on text it is meant to translate."
                 )
         # Warn (once per source) when a source is missing a quarter or more of the verses the
@@ -1360,7 +1362,7 @@ def run(
         prefix = "_".join([source.name for source in sources] + [main.iso] + ([test_variant] if test_variant else []))
         existing, index = find_existing(lang_dir, prefix, config)
         if existing is not None:
-            print(f"Skipped {label}: {existing} already contains an identical config.yml.")
+            LOGGER.info(f"Skipped {label}: {existing} already contains an identical config.yml.")
             update_translate_config(existing, translate_config)
             existing_experiments.append(
                 Experiment(
@@ -1386,7 +1388,7 @@ def run(
         folder.mkdir(parents=True, exist_ok=True)
         write_yaml(folder / "config.yml", experiment.config)
         write_yaml(folder / "translate_config.yml", experiment.translate_config)
-        print(f"Created {folder} (corpus_books: {corpus_books})")
+        LOGGER.info(f"Created {folder} (corpus_books: {corpus_books})")
     if experiments or existing_experiments:
         # Existing folders with an identical config are offered too: their creation was
         # skipped, but the experiments themselves may not have been run yet.
