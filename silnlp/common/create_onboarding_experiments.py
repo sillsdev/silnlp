@@ -39,8 +39,7 @@ NT_CANON = [book for book in ALL_BOOK_IDS if is_nt(book_id_to_number(book))]
 MAIN_PROJECT_RE = re.compile(r"Processing onboarding request for main project '([^']+)'")
 EXTRACT_RE = re.compile(r"Extracted corpus file: .*[/\\]([^/\\]+)\.txt\s*$")
 VERSES_RE = re.compile(r"# of Verses: (\d+)")
-# "beteween" is how onboard_project's analyze step spells it in the log.
-ALIGN_RE = re.compile(r"Computing alignment beteween (\S+) and (\S+) using")
+ALIGN_RE = re.compile(r"Computing alignment \S+ (\S+) and (\S+) using")
 STATS_RE = re.compile(
     r"(?P<main>\S+) -> (?P<ref>\S+) stats - count: (?P<count>\d+),"
     r".*?parallel count: (?P<parallel>\d+) alignment: (?P<alignment>[\d.]+),"
@@ -1137,7 +1136,7 @@ def run(
     # Verse counts drive the candidate table below: per source it shows the parallel (training)
     # and source-only (drafting) verse counts and a coverage mark for each --translate-book, so
     # the user can judge which sources to use — including whether one looks like a back
-    # translation (narrow book coverage). See create_onboarding_experiments_brief.md.
+    # translation (narrow book coverage).
     verse_counts: Optional[pd.DataFrame] = None
     try:
         verse_counts = load_verse_counts(request_dir, experiments_dir)
