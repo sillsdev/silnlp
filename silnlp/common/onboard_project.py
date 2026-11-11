@@ -775,7 +775,7 @@ class OnboardingRequest:
             report_creator.create_report_csv()
 
             if experiments:
-                process_onboarding_experiments(str(self.output_folder), tag=clearml_tag)
+                process_onboarding_experiments(str(self.output_folder), tag=clearml_tag, auto_confirm=True)
 
     def align_main_project(self) -> None:
         iso_codes = set()

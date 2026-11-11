@@ -43,6 +43,8 @@ from .create_onboarding_experiments import (
 from .environment import SilNlpEnv
 from .folder_naming import FolderNaming
 
+LOGGER = logging.getLogger(__package__ + ".auto_onboarding")
+
 
 class OnboardingError(Exception):
     pass
@@ -104,8 +106,10 @@ class OnboardingRequest:
         bt_project = onboarding.get("bt_project")
         return SignUp(
             main_project=str(onboarding["main_project"]),
-            planned_books=self._scripture_books(onboarding["planned_books"], "planned_books", path),
-            completed_books=self._scripture_books(onboarding.get("completed_books") or [], "completed_books", path),
+            planned_books=[self._book_id(book, "planned_books", path) for book in onboarding["planned_books"]],
+            completed_books=[
+                self._book_id(book, "completed_books", path) for book in onboarding.get("completed_books") or []
+            ],
             draft_source=str(onboarding["draft_source"]),
             bt_project=str(bt_project) if bt_project else None,
         )
@@ -119,17 +123,9 @@ class OnboardingRequest:
     def _book_id(self, book: object, key: str, path: Path) -> str:
         text = str(book).strip().upper()
         book_id = book_number_to_id(int(text)) if text.isdigit() else text
-        if book_id_to_number(book_id) == 0:
+        if book_id_to_number(book_id) == 0 or not is_canonical(book_id):
             raise OnboardingError(f"'{book}' in {key} of {path} is not a book.")
         return book_id
-
-    def _scripture_books(self, books: Sequence[object], key: str, path: Path) -> List[str]:
-        book_ids = [self._book_id(book, key, path) for book in books]
-        # Front and back matter such as introductions and glossaries can't be drafted.
-        for book_id in book_ids:
-            if not is_canonical(book_id):
-                print(f"Warning: {book_id} in {key} is not an OT, NT or DC book; ignoring it.")
-        return [book_id for book_id in book_ids if is_canonical(book_id)]
 
 
 class Thresholds:
@@ -144,51 +140,13 @@ class Thresholds:
         return f"at least {self._min_parallel} parallel verses and alignment >= {self._min_alignment}"
 
 
-class SourceSummary:
-    def __init__(self, candidate: Candidate):
-        self._candidate = candidate
-
-    def describe(self) -> str:
-        c = self._candidate
-        return (
-            f"{c.name}: alignment {c.alignment:.4f}, {c.parallel + c.src_only} verses,"
-            f" {c.parallel} in parallel with the target, {c.src_only} not in the target."
-        )
-
-    def has_no_more_data_than_target(self) -> bool:
-        # Both totals include the parallel verses, so only the unshared verses differ.
-        return self._candidate.src_only <= self._candidate.trg_only
-
-
-class SameProjectRole:
-    def __init__(self, confirmer: "Confirmer"):
-        self._confirmer = confirmer
-
-    def resolve(self, sign_up: SignUp, candidates: Sequence[Candidate]) -> SignUp:
-        if sign_up.bt_project != sign_up.draft_source:
-            return sign_up
-        project = next((c for c in candidates if c.name == sign_up.bt_project), None)
-        if project is None:
-            return sign_up
-        summary = SourceSummary(project)
-        print(f"Warning: {project.name} is both the back translation and the draft source.")
-        print(summary.describe())
-        default = "back translation" if summary.has_no_more_data_than_target() else None
-        role = self._confirmer.choose(f"Treat {project.name} as", ["back translation", "draft source"], default)
-        if role is None:
-            raise OnboardingError(f"No role chosen for {project.name}, which is both bt_project and draft_source.")
-        if role == "draft source":
-            return dataclasses.replace(sign_up, bt_project=None)
-        return dataclasses.replace(sign_up, draft_source="")
-
-
 class BackTranslationCheck:
     def __init__(self, thresholds: Thresholds):
         self._thresholds = thresholds
 
     def usable(self, sign_up: SignUp, candidates: Sequence[Candidate]) -> Optional[Candidate]:
         if sign_up.bt_project is None:
-            print("Back translation: none named at sign-up.")
+            LOGGER.info("Back translation: none named at sign-up.")
             return None
         if sign_up.bt_project == sign_up.draft_source:
             raise OnboardingError(
@@ -197,13 +155,16 @@ class BackTranslationCheck:
             )
         bt = next((c for c in candidates if c.name == sign_up.bt_project), None)
         if bt is None:
-            print(
-                f"Warning: back translation '{sign_up.bt_project}' is not in corpus-stats.csv; continuing without it."
+            LOGGER.warning(
+                f"Back translation '{sign_up.bt_project}' is not in corpus-stats.csv; continuing without it."
             )
             return None
-        print(f"Back translation {SourceSummary(bt).describe()}")
+        LOGGER.info(
+            f"Back translation {bt.name}: alignment {bt.alignment:.4f}, {bt.parallel + bt.src_only} verses,"
+            f" {bt.parallel} in parallel with the target, {bt.src_only} not in the target."
+        )
         if not self._thresholds.passes(bt):
-            print(f"Warning: back translation {bt.name} needs {self._thresholds.describe()}; continuing without it.")
+            LOGGER.warning(f"Back translation {bt.name} needs {self._thresholds.describe()}; continuing without it.")
             return None
         return bt
 
@@ -252,7 +213,7 @@ class ExperimentChooser:
             reverse=True,
         )
         if not passing:
-            print(f"No source has {self._thresholds.describe()}; no experiments.")
+            LOGGER.info(f"No source has {self._thresholds.describe()}; no experiments.")
             return []
         pool = [c for c in passing if not self._preferences.is_avoided(c.name)] or passing
         first = next((c for c in passing if c.name == sign_up.draft_source), None)
@@ -260,8 +221,8 @@ class ExperimentChooser:
             first = self._later_edition_of_draft_source(first, passing)
             best = self._best(pool, first)
         else:
-            print(
-                f"Warning: draft_source '{sign_up.draft_source}' is not a candidate (it needs"
+            LOGGER.warning(
+                f"Draft_source '{sign_up.draft_source}' is not a candidate (it needs"
                 f" {self._thresholds.describe()}); using the two best-aligned sources instead."
             )
             best = self._best(pool, None)
@@ -281,11 +242,11 @@ class ExperimentChooser:
 
     def _later_edition_of_draft_source(self, draft_source: Candidate, passing: Sequence[Candidate]) -> Candidate:
         if self._preferences.is_avoided(draft_source.name):
-            print(f"Warning: draft_source {draft_source.name} is normally avoided; keeping it as the team's choice.")
+            LOGGER.warning(f"Draft_source {draft_source.name} is normally avoided; keeping it as the team's choice.")
         for name in self._preferences.later_editions(draft_source.name):
             later = next((c for c in passing if c.name == name and c.alignment > draft_source.alignment), None)
             if later is not None:
-                print(
+                LOGGER.info(
                     f"Drafting from {later.name} ({later.alignment:.4f}) instead of draft_source"
                     f" {draft_source.name} ({draft_source.alignment:.4f}): a later edition that aligns better."
                 )
@@ -389,7 +350,7 @@ class ParatextBooks:
         try:
             settings = FileParatextProjectSettingsParser(project_dir).parse()
         except Exception as e:
-            print(f"Warning: the settings of project '{project}' could not be read ({e}).")
+            LOGGER.warning(f"The settings of project '{project}' could not be read ({e}).")
             return frozenset()
         return frozenset(book for book in ALL_BOOK_IDS if (project_dir / settings.get_book_file_name(book)).is_file())
 
@@ -429,7 +390,7 @@ class ExperimentBooks:
         self._planned = [book for book in self._ordered if book in planned]
         ignored = [book for book in sign_up.planned_books if book not in self._ordered]
         if ignored:
-            print(f"Warning: planned book(s) {';'.join(ignored)} can't be drafted for this target; ignoring them.")
+            LOGGER.warning(f"Planned book(s) {';'.join(ignored)} can't be drafted for this target; ignoring them.")
         self._declared = set(sign_up.completed_books) - set(sign_up.planned_books)
         self._complete_counts = complete_counts
         self._paratext = paratext
@@ -440,7 +401,7 @@ class ExperimentBooks:
         declared = {book for book in self._declared if parallel.get(book, 0) > 0}
         empty = self._canonical(self._declared - declared)
         if empty:
-            print(f"  Declared complete but with no parallel verses: {';'.join(empty)}")
+            LOGGER.info(f"  Declared complete but with no parallel verses: {';'.join(empty)}")
         declared_total = self._total(declared, parallel)
         if declared_total >= limits.declared_enough:
             training = declared
@@ -560,20 +521,20 @@ class TargetExtractCopy:
         self._copy_stem = new_stem
         original, copy = self._path(main.stem), self._path(new_stem)
         if clashing:
-            print(
+            LOGGER.info(
                 f"{', '.join(clashing)} share(s) iso code '{main.iso}' with the target; the target uses '{synthetic}'."
             )
         else:
-            print(f"The target uses synthetic iso code '{synthetic}' from an earlier copy of its extract.")
+            LOGGER.info(f"The target uses synthetic iso code '{synthetic}' from an earlier copy of its extract.")
         if self._reuse_prior:
-            print(f"  Reusing {copy} (a copy of {original}).")
+            LOGGER.info(f"  Reusing {copy} (a copy of {original}).")
         elif copy.is_file():
-            print(
+            LOGGER.info(
                 f"  {copy} is older than {original}: it will be renamed to {self._backup(new_stem)} and copied again."
             )
         else:
-            print(f"  Will copy {original} to {copy}; the original is kept.")
-        print("  Matching MT/terms renderings copies will be overwritten with the current ones.")
+            LOGGER.info(f"  Will copy {original} to {copy}; the original is kept.")
+        LOGGER.info("  Matching MT/terms renderings copies will be overwritten with the current ones.")
         return dataclasses.replace(main, iso=synthetic, stem=new_stem)
 
     def execute(self) -> None:
@@ -585,14 +546,14 @@ class TargetExtractCopy:
             if copy.is_file():
                 renamed = self._backup(new_stem)
                 copy.rename(renamed)
-                print(f"Warning: renamed the outdated copy {copy} to {renamed}.")
+                LOGGER.warning(f"Renamed the outdated copy {copy} to {renamed}.")
             shutil.copyfile(original, copy)
-            print(f"Copied {original} to {copy}.")
+            LOGGER.info(f"Copied {original} to {copy}.")
         if self._terms_dir.is_dir():
             for path in sorted(self._terms_dir.glob(f"{old_stem}-*-renderings.txt")):
                 target = self._terms_dir / f"{new_stem}{path.name[len(old_stem):]}"
                 shutil.copyfile(path, target)
-                print(f"Copied {path} to {target}.")
+                LOGGER.info(f"Copied {path} to {target}.")
         self._copy_stem = None
 
     def _path(self, stem: str) -> Path:
@@ -606,25 +567,16 @@ class TargetExtractCopy:
 
 
 class Confirmer:
-    def choose(self, question: str, options: Sequence[str], default: Optional[str]) -> Optional[str]:
-        suffix = f" (default: {default})" if default else ""
-        while True:
-            try:
-                reply = input(f"{question} [{'/'.join(options)}]{suffix}: ").strip().lower()
-            except EOFError:
-                print("No answer; stopping.")
-                return None
-            if not reply and default:
-                return default
-            matches = [option for option in options if option.startswith(reply)] if reply else []
-            if len(matches) == 1:
-                return matches[0]
+    def __init__(self, auto_confirm: bool = False):
+        self._auto_confirm = auto_confirm
 
     def confirm(self, question: str) -> bool:
+        if self._auto_confirm:
+            return True
         try:
             reply = input(f"{question} [Y/n]: ").strip().lower()
         except EOFError:
-            print("No answer; stopping.")
+            LOGGER.info("No answer; stopping.")
             return False
         return reply in ("", "y", "yes")
 
@@ -661,10 +613,9 @@ class AutoOnboarding:
         request = OnboardingRequest(folder, self._paths.experiments_dir)
         sign_up = request.sign_up()
         main, candidates = request.corpus_stats(sign_up.main_project)
-        sign_up = SameProjectRole(self._confirmer).resolve(sign_up, candidates)
         lang_dir, language_entries = self._language_dir(main)
-        print(f"Target: {main.name} ({main.stem}); planned books: {';'.join(sign_up.planned_books)}")
-        print(f"Experiment location: {lang_dir}")
+        LOGGER.info(f"Target: {main.name} ({main.stem}); planned books: {';'.join(sign_up.planned_books)}")
+        LOGGER.info(f"Experiment location: {lang_dir}")
         self._print_candidates(candidates, sign_up)
 
         back_translation = BackTranslationCheck(Thresholds(400, 0.25)).usable(sign_up, candidates)
@@ -690,22 +641,21 @@ class AutoOnboarding:
             BookThresholds(),
         )
 
-        print()
         chosen: List[Tuple[str, List[Candidate], BookChoice]] = []
         for sources in choices:
             label = " + ".join(source.name for source in sources)
             problems = [problem for problem in (extracts.problem(source.stem) for source in sources) if problem]
             if problems:
-                print(f"Skipped {label}: {' '.join(problems)}")
+                LOGGER.info(f"Skipped {label}: {' '.join(problems)}")
                 continue
             choice = books.choose(sources[0].name, extracts.parallel_verses(target_stem, sources[0].stem))
             if not choice.training:
-                print(f"Skipped {label}: {choice.reason}.")
+                LOGGER.info(f"Skipped {label}: {choice.reason}.")
                 continue
             chosen.append((label, sources, choice))
 
         if not chosen:
-            print("Nothing created.")
+            LOGGER.info("Nothing created.")
             return []
         main = copier.apply([source for _, sources, _ in chosen for source in sources])
         planned: List[PlannedExperiment] = []
@@ -718,16 +668,16 @@ class AutoOnboarding:
             prefix = "_".join([source.name for source in sources] + [main.iso])
             folder = lang_dir / f"{prefix}_{self._next_index(lang_dir, prefix)}"
             planned.append(PlannedExperiment(sources, folder, config, translate_config))
-            print(f"{label}: {choice.reason}")
-            print(f"  train on {training_books}")
+            LOGGER.info(f"{label}: {choice.reason}")
+            LOGGER.info(f"  train on {training_books}")
             if choice.drafts:
-                print(f"  draft {';'.join(choice.drafts)} from {sources[0].name}")
+                LOGGER.info(f"  draft {';'.join(choice.drafts)} from {sources[0].name}")
             else:
-                print(f"  Warning: {sources[0].name} has no book available to draft; training only.")
-            print(f"  in {folder}")
+                LOGGER.warning(f"  {sources[0].name} has no book available to draft; training only.")
+            LOGGER.info(f"  in {folder}")
 
         if not planned or not self._confirmer.confirm("\nCreate these experiments?"):
-            print("Nothing created.")
+            LOGGER.info("Nothing created.")
             return planned
         copier.execute()
         for experiment in planned:
@@ -743,15 +693,14 @@ class AutoOnboarding:
         language_seg = naming.language_segment(raw_language)
         warning = old_name_folder_warning(naming, self._paths.experiments_dir, raw_country, raw_language)
         if warning is not None:
-            print(warning)
+            LOGGER.warning(warning)
         return self._paths.experiments_dir / country_seg / language_seg, entries
 
     def _print_candidates(self, candidates: Sequence[Candidate], sign_up: SignUp) -> None:
-        print(f"\n{'Source':<24} {'iso':<5} {'script':<6} {'parallel':>9} {'alignment':>10}  role")
+        LOGGER.info(f"{'Source':<24} {'iso':<5} {'script':<6} {'parallel':>9} {'alignment':>10}  role")
         for c in sorted(candidates, key=lambda c: c.alignment, reverse=True):
             role = {sign_up.draft_source: "draft_source", sign_up.bt_project: "bt_project"}.get(c.name, "")
-            print(f"{c.name:<24} {c.iso:<5} {c.script:<6} {c.parallel:>9} {c.alignment:>10.4f}  {role}")
-        print()
+            LOGGER.info(f"{c.name:<24} {c.iso:<5} {c.script:<6} {c.parallel:>9} {c.alignment:>10.4f}  {role}")
 
     def _next_index(self, lang_dir: Path, prefix: str) -> int:
         pattern = re.compile(rf"^{re.escape(prefix)}_(\d+)$")
@@ -763,24 +712,24 @@ class AutoOnboarding:
         write_yaml(experiment.folder / "config.yml", experiment.config)
         if experiment.translate_config is not None:
             write_yaml(experiment.folder / "translate_config.yml", experiment.translate_config)
-        print(f"Created {experiment.folder}")
+        LOGGER.info(f"Created {experiment.folder}")
 
     def _submit(self, planned: Sequence[PlannedExperiment]) -> None:
-        print("\nTo run the experiments:")
+        LOGGER.info("To run the experiments:")
         for experiment in planned:
             translate = experiment.translate_config is not None
             name = experiment.folder.relative_to(self._paths.experiments_dir).as_posix()
-            print(f"  uv run python {' '.join(self._runner.arguments(translate))} {name}")
+            LOGGER.info(f"  uv run python {' '.join(self._runner.arguments(translate))} {name}")
         if not self._confirmer.confirm("\nRun them now?"):
             return
         for experiment in planned:
             name = experiment.folder.relative_to(self._paths.experiments_dir).as_posix()
             code = self._runner.run(name, experiment.translate_config is not None)
             if code != 0:
-                print(f"Experiment {name} exited with code {code}.")
+                LOGGER.info(f"Experiment {name} exited with code {code}.")
 
 
-def process_onboarding_experiments(request_folder: str, tag: str = "") -> None:
+def process_onboarding_experiments(request_folder: str, tag: str = "", auto_confirm: bool = False) -> None:
     environment = SilNlpEnv.create_standard_environment()
     paths = DataPaths(
         experiments_dir=Path(environment.mt_experiments_dir),
@@ -791,9 +740,9 @@ def process_onboarding_experiments(request_folder: str, tag: str = "") -> None:
     )
     folder = RequestFolder(paths.experiments_dir).resolve(request_folder)
     try:
-        AutoOnboarding(paths, Confirmer(), ExperimentRunner(tag=tag)).run(folder)
+        AutoOnboarding(paths, Confirmer(auto_confirm=auto_confirm), ExperimentRunner(tag=tag)).run(folder)
     except OnboardingError as e:
-        print(f"Error processing folder {folder}: {e}")
+        LOGGER.info(f"Error processing folder {folder}: {e}")
         sys.exit(1)
 
 
