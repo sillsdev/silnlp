@@ -565,16 +565,16 @@ class Confirmer:
 
 
 class ExperimentRunner:
-    def __init__(self, auto_onboarding_tag: bool = False):
-        self._auto_onboarding_tag = auto_onboarding_tag
+    def __init__(self, tag: str = ""):
+        self._tag = tag
 
     def run(self, name: str, translate: bool) -> int:
         return subprocess.run([sys.executable] + self.arguments(translate) + [name]).returncode
 
     def arguments(self, translate: bool) -> List[str]:
         args = EXPERIMENT_ARGS
-        if self._auto_onboarding_tag:
-            args = [arg if arg != "eitl" else "auto-onboarding" for arg in args]
+        if self._tag:
+            args = [arg if arg != "eitl" else self._tag for arg in args]
         return [arg for arg in args if translate or arg != "--translate"]
 
 
@@ -718,7 +718,7 @@ class AutoOnboarding:
                 print(f"Experiment {name} exited with code {code}.")
 
 
-def process_onboarding_experiments(request_folder: str, auto_onboarding_tag: bool = False) -> None:
+def process_onboarding_experiments(request_folder: str, tag: str = "") -> None:
     environment = SilNlpEnv.create_standard_environment()
     paths = DataPaths(
         experiments_dir=Path(environment.mt_experiments_dir),
@@ -729,7 +729,7 @@ def process_onboarding_experiments(request_folder: str, auto_onboarding_tag: boo
     )
     folder = RequestFolder(paths.experiments_dir).resolve(request_folder)
     try:
-        AutoOnboarding(paths, Confirmer(), ExperimentRunner(auto_onboarding_tag=auto_onboarding_tag)).run(folder)
+        AutoOnboarding(paths, Confirmer(), ExperimentRunner(tag=tag)).run(folder)
     except OnboardingError as e:
         print(f"Error processing folder {folder}: {e}")
         sys.exit(1)

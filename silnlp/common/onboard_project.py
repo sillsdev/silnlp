@@ -728,7 +728,7 @@ class OnboardingRequest:
         output_folder = onboarding_config.get("output_folder", None)
         self.output_folder: Path | None = Path(output_folder) if output_folder else None
 
-    def process_onboarding_request(self, experiments: bool = False) -> None:
+    def process_onboarding_request(self, experiments: bool = False, clearml_tag: str = "") -> None:
         with self.create_log_file():
             LOGGER.info(f"Processing onboarding request for main project '{self.main_project.project_name}'")
             for project in [self.main_project] + self.reference_projects:
@@ -775,7 +775,7 @@ class OnboardingRequest:
             report_creator.create_report_csv()
 
             if experiments:
-                process_onboarding_experiments(str(self.output_folder), auto_onboarding_tag=True)
+                process_onboarding_experiments(str(self.output_folder), tag=clearml_tag)
 
     def align_main_project(self) -> None:
         iso_codes = set()
@@ -1230,7 +1230,7 @@ def main() -> None:
         )
 
     for onboarding_request in onboarding_requests:
-        onboarding_request.process_onboarding_request(args.experiments)
+        onboarding_request.process_onboarding_request(args.experiments, args.clearml_tag)
 
 
 if __name__ == "__main__":
