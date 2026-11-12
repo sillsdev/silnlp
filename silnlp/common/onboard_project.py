@@ -253,8 +253,8 @@ class OnboardingProject:
                     "corpus_pairs": [
                         {
                             "mapping": "many_to_many",
-                            "src": extract_file,
-                            "trg": list(alignments),
+                            "src": list(alignments),
+                            "trg": extract_file,
                             "type": "train",
                         }
                     ],
@@ -262,13 +262,13 @@ class OnboardingProject:
                 }
             }
         else:
-            alignment_projects = set(align_config.get("data", {}).get("corpus_pairs", [])[0].get("trg", []))
+            alignment_projects = set(align_config.get("data", {}).get("corpus_pairs", [])[0].get("src", []))
             alignment_projects.update(ref_project_extract_file_names)
             if iso_standard_alignments:
                 for standard_alignment in iso_standard_alignments:
                     if standard_alignment not in alignment_projects:
                         alignment_projects.add(standard_alignment)
-            align_config["data"]["corpus_pairs"][0]["trg"] = alignment_projects
+            align_config["data"]["corpus_pairs"][0]["src"] = alignment_projects
 
         with open(align_output_dir / "config.yml", "w", encoding="utf-8") as f:
             yaml.dump(align_config, f, allow_unicode=True)
@@ -525,16 +525,16 @@ class OnboardingReport:
         corpus_stats_file = self.project.output_folder / "corpus-stats.csv"
         if Path(corpus_stats_file).exists():
             corpus_stats_df = pd.read_csv(corpus_stats_file)
-            alignment_row = corpus_stats_df[corpus_stats_df["trg_project"] == self.project.extract_file.stem]
+            alignment_row = corpus_stats_df[corpus_stats_df["src_project"] == self.project.extract_file.stem]
             if not alignment_row.empty:
                 self.alignment = alignment_row["align_score"].values[0]
-                self.script = alignment_row["trg_script"].values[0]
+                self.script = alignment_row["src_script"].values[0]
             else:
-                alignment_row = corpus_stats_df[corpus_stats_df["src_project"] == self.project.extract_file.stem].head(
+                alignment_row = corpus_stats_df[corpus_stats_df["trg_project"] == self.project.extract_file.stem].head(
                     1
                 )
                 if not alignment_row.empty:
-                    self.script = alignment_row["src_script"].values[0]
+                    self.script = alignment_row["trg_script"].values[0]
 
         nllb_tag = NLLB_TAG_FROM_ISO.get(self.iso_code, None)
         self.lang_in_nllb = nllb_tag is not None
