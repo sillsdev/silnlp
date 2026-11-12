@@ -207,7 +207,7 @@ def main() -> None:
         "--multiple-translations",
         default=False,
         action="store_true",
-        help='Produce multiple translations of each verse. '
+        help="Produce multiple translations of each verse. "
         + 'These will be saved in separate files with suffixes like ".1.txt", ".2.txt", etc.',
     )
     parser.add_argument(
@@ -244,7 +244,6 @@ def main() -> None:
             "m-chrf3",
             "m-chrf3+",
             "m-chrf3++",
-            "spbleu",
         ],
         help=f"List of scorers - {SUPPORTED_SCORERS}",
     )
