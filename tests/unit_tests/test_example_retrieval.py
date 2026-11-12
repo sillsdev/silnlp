@@ -3,6 +3,7 @@ import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 import numpy as np
 import pytest
@@ -20,6 +21,7 @@ from silnlp.nmt.example_retrieval import (
     ExampleRetrieverFactory,
     FixedCorpusPairProvider,
     JsonExampleFormatter,
+    LengthRatio,
     PreferredCorpusPairProvider,
     RetrievalTokenizer,
     TargetLanguageProfile,
@@ -28,6 +30,7 @@ from silnlp.nmt.example_retrieval import (
     TranslationMemory,
     XmlExampleFormatter,
 )
+from silnlp.nmt.token_counter import TokenCounter
 
 
 def _examples(*pairs):
@@ -725,3 +728,39 @@ def test_example_pool_profiles_its_target_side(tmp_path):
 
     assert profile.resemblance("en el principio") == 1.0
     assert profile.resemblance("in the beginning") < 0.5
+
+
+class _WordCounter(TokenCounter):
+    def count_tokens(self, text: str) -> Optional[int]:
+        return len(text.split())
+
+
+class _FailingTokenCounter(TokenCounter):
+    def count_tokens(self, text: str) -> Optional[int]:
+        return None
+
+
+def test_length_ratio_scales_a_source_by_the_corpus_target_tokens_per_source_token():
+    ratio = LengthRatio(_examples(("one two three four", "uno dos")), _WordCounter())
+
+    assert ratio.scale(10) == 5
+    assert "0.50 target tokens per source token" in ratio.describe()
+
+
+def test_length_ratio_without_examples_keeps_the_source_length():
+    ratio = LengthRatio([], _WordCounter())
+
+    assert ratio.scale(10) == 10
+    assert "no training corpus" in ratio.describe()
+
+
+def test_length_ratio_keeps_the_source_length_when_the_tokens_cannot_be_counted():
+    ratio = LengthRatio(_examples(("one two", "uno")), _FailingTokenCounter())
+
+    assert ratio.scale(10) == 10
+
+
+def test_example_pool_measures_its_length_ratio(tmp_path):
+    pool = _write_pool(tmp_path, ["in the beginning", "let there be light"], ["en el principio", "luz"])
+
+    assert pool.create_length_ratio(_WordCounter()).scale(7) == 4

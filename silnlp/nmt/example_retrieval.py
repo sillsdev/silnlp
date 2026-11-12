@@ -17,6 +17,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 
 from .corpora import read_parallel_text_pairs
+from .token_counter import TokenCounter
 
 LOGGER = logging.getLogger(__name__)
 
@@ -489,6 +490,30 @@ class TranslationMemory:
         return self._translations.get(source.strip())
 
 
+class LengthRatio:
+    """How many target tokens a corpus has per source token, which estimates a translation's length before it exists."""
+
+    def __init__(self, examples: Sequence[Example], token_counter: TokenCounter) -> None:
+        self._ratio: Optional[float] = None
+        self._has_training_corpus = False
+        if len(examples) == 0:
+            return
+        source_tokens = token_counter.count_tokens("\n".join(example.source for example in examples))
+        target_tokens = token_counter.count_tokens("\n".join(example.target for example in examples))
+        if source_tokens is not None:
+            self._has_training_corpus = True
+            if target_tokens is not None:
+                self._ratio = target_tokens / source_tokens
+
+    def scale(self, source_tokens: int) -> int:
+        return round(source_tokens * (1.0 if self._ratio is None else self._ratio))
+
+    def describe(self) -> str:
+        if not self._has_training_corpus:
+            return "1 target token per source token, as there is no training corpus to measure"
+        return f"{self._ratio:.2f} target tokens per source token, as in the training corpus"
+
+
 @dataclass(frozen=True)
 class CorpusPair:
     """The source and target files of one parallel corpus."""
@@ -590,6 +615,9 @@ class ExamplePool:
 
     def create_translation_memory(self, rng: random.Random) -> "TranslationMemory":
         return TranslationMemory(self.all_examples(), rng)
+
+    def create_length_ratio(self, token_counter: TokenCounter) -> "LengthRatio":
+        return LengthRatio(self.all_examples(), token_counter)
 
     def get_retriever(self) -> ExampleRetriever:
         with self._lock:

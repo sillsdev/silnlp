@@ -71,3 +71,27 @@ def check_translate_step(environment: SilNlpEnv):
     infer_dir = environment.get_mt_exp_dir(EXPERIMENT_NAME) / "infer"
     translated_files = list(infer_dir.glob("*/BSB/653JN.SFM"))
     assert len(translated_files) == 1
+
+
+def test_a_dry_run_of_the_remote_llm_pipeline_sends_and_writes_nothing():
+    environment = set_up_environment()
+    exp_dir = environment.get_mt_exp_dir(EXPERIMENT_NAME)
+    delete_generated_paths(exp_dir, PIPELINE_OUTPUT_PATTERNS)
+    factory = MockCompletionClientFactory()
+    config = load_config(EXPERIMENT_NAME, environment)
+    assert isinstance(config, RemoteLLMConfig)
+
+    experiment = create_full_pipeline_experiment(
+        EXPERIMENT_NAME, config, config.create_dry_run_model(completion_client_factory=factory), environment
+    )
+    experiment.run()
+
+    # Preprocessing and training send nothing, so a dry run still runs them.
+    check_training_step(environment)
+    assert factory.stats.num_requests == 0
+    assert list(exp_dir.glob("test.trg-predictions*")) == []
+    assert list(exp_dir.glob("scores-*")) == []
+    assert list(exp_dir.glob("remote_llm_replies*")) == []
+    assert not (exp_dir / "infer").exists()
+
+    delete_generated_paths(exp_dir, PIPELINE_OUTPUT_PATTERNS)

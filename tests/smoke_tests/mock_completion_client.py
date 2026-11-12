@@ -2,6 +2,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from silnlp.nmt.llm_usage import LLMUsageStatistics
 from silnlp.nmt.remote_llm_config import (
     Completion,
     CompletionClient,
@@ -42,12 +43,18 @@ class MockCompletionClient(CompletionClient):
             text = "translated"
         else:
             text = "\n".join(f"{number}. translated {segment}" for number, segment in segments)
+        usage = LLMUsageStatistics.of_unpriced_request(
+            sum(len(message["content"].split()) for message in messages), len(text.split())
+        )
         if not logprobs:
-            return Completion(text)
-        return Completion(text, [TokenLogprob(token, -0.1) for token in text.split()])
+            return Completion(text, usage=usage)
+        return Completion(text, [TokenLogprob(token, -0.1) for token in text.split()], usage)
 
     def supports_logprobs(self) -> bool:
         return True
+
+    def count_tokens(self, text: str) -> Optional[int]:
+        return len(text.split())
 
     @staticmethod
     def _numbered_segments(user_message: str) -> List[tuple]:
