@@ -27,14 +27,21 @@ class SilNlpEnv:
         self,
         mt_dir: Optional[Path] = None,
         mt_experiments_dir: Optional[Path] = None,
+        data_dir: Optional[Path] = None,
+        mt_terms_dir: Optional[Path] = None,
+        mt_scripture_dir: Optional[Path] = None,
+        assets_dir: Optional[Path] = None,
     ):
         atexit.register(self.delete_path)
         self.path_to_delete: Optional[Path] = None
-        self._data_dir = self._resolve_data_dir()
+        self._data_dir = data_dir if data_dir is not None else self._resolve_data_dir()
         self._pt_dir = self._resolve_paratext_dir()
         self._mt_dir = self._resolve_mt_dir(mt_dir)
         self._mt_experiments_dir = self._resolve_mt_experiments_dir(mt_experiments_dir)
+        self._mt_terms_dir = mt_terms_dir if mt_terms_dir is not None else self._resolve_mt_terms_dir()
+        self._mt_scripture_dir = mt_scripture_dir if mt_scripture_dir is not None else self._resolve_mt_scripture_dir()
         self._align_dir = self._resolve_align_dir()
+        self._assets_dir = assets_dir if assets_dir is not None else Path(__file__).parent.parent / "assets"
 
     def _resolve_data_dir(self) -> Path:
         sil_nlp_data_path = os.getenv("SIL_NLP_DATA_PATH", default="")
@@ -63,6 +70,18 @@ class SilNlpEnv:
             return self._data_dir / mt_experiments_dir
         return self._mt_dir / "experiments"
 
+    def _resolve_mt_terms_dir(self) -> Path:
+        mt_terms_dir = os.getenv("SIL_NLP_MT_TERMS_DIR")
+        if mt_terms_dir:
+            return self._data_dir / mt_terms_dir
+        return self._mt_dir / "terms"
+
+    def _resolve_mt_scripture_dir(self) -> Path:
+        mt_scripture_dir = os.getenv("SIL_NLP_MT_SCRIPTURE_DIR")
+        if mt_scripture_dir:
+            return self._data_dir / mt_scripture_dir
+        return self._mt_dir / "scripture"
+
     def _resolve_align_dir(self) -> Path:
         return self._data_dir / "Alignment"
 
@@ -84,7 +103,7 @@ class SilNlpEnv:
 
     @property
     def assets_dir(self) -> Path:
-        return Path(__file__).parent.parent / "assets"
+        return self._assets_dir
 
     @property
     def data_dir(self) -> Path:
@@ -112,17 +131,11 @@ class SilNlpEnv:
 
     @property
     def mt_terms_dir(self) -> Path:
-        mt_terms_dir = os.getenv("SIL_NLP_MT_TERMS_DIR")
-        if mt_terms_dir:
-            return self._data_dir / mt_terms_dir
-        return self._mt_dir / "terms"
+        return self._mt_terms_dir
 
     @property
     def mt_scripture_dir(self) -> Path:
-        mt_scripture_dir = os.getenv("SIL_NLP_MT_SCRIPTURE_DIR")
-        if mt_scripture_dir:
-            return self._data_dir / mt_scripture_dir
-        return self._mt_dir / "scripture"
+        return self._mt_scripture_dir
 
     @property
     def mt_experiments_dir(self) -> Path:
