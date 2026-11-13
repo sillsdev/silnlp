@@ -38,6 +38,9 @@ class ExperimentRenames:
             ("India", "KhariaThar", "Kharia_Thar"),
             ("India", "BrajBhasha", "Braj_Bhasha"),
             ("India", "KondaDora", "Konda_Dora"),
+            ("India", "Muria_Far_Western", "Far_Western_Muria"),
+            ("Mexico", "Purepecha_Western_Highland", "Western_Highland_Purepecha"),
+            ("Mexico", "SoutheasternPueblaNahuatl", "Southeastern_Puebla_Nahuatl"),
             ("Nepal", "WesternTamang", "Western_Tamang"),
             ("Nigeria", "NyaHuba", "Nya_Huba"),
             ("Algeria", "AlgerianArabic", "Algerian_Arabic"),
@@ -99,7 +102,7 @@ class ExperimentsRemote:
 class Prompt:
     def answer(self, question: str) -> str:
         try:
-            return input(f"{question} [y/N/q]: ").strip().lower()
+            return input(f"{question}: ").strip().lower()
         except EOFError:
             return "q"
 
@@ -110,26 +113,62 @@ class RenameSession:
         self._prompt = prompt
 
     def run(self, renames: List[Rename]) -> int:
-        done = 0
+        todo = self._show_plan(renames)
+        if not todo:
+            return 0
+        reply = self._prompt.answer(
+            f"Rename these {len(todo)} folders one after another? y = all, s = ask for each one, anything else = none"
+        )
+        if reply in ("y", "yes"):
+            return self._move_all(todo)
+        if reply == "s":
+            return self._move_each(todo)
+        print("Nothing renamed.")
+        return 0
+
+    def _show_plan(self, renames: List[Rename]) -> List[Rename]:
+        todo = []
         for rename in renames:
             if not self._remote.exists(rename.old):
-                print(f"Skipping {rename.old}: not found.")
-                continue
-            merging = self._remote.exists(rename.new)
-            note = f"{rename.new} already exists, so files are merged and none overwritten" if merging else rename.new
-            reply = self._prompt.answer(f"Rename {rename.old} -> {note}?")
+                print(f"  not found, skipping: {rename.old}")
+            elif self._remote.exists(rename.new):
+                print(f"  MERGE (existing files are kept): {rename.old} -> {rename.new}")
+                todo.append(rename)
+            else:
+                print(f"  {rename.old} -> {rename.new}")
+                todo.append(rename)
+        return todo
+
+    def _move_all(self, todo: List[Rename]) -> int:
+        failed = []
+        for number, rename in enumerate(todo, 1):
+            print(f"[{number}/{len(todo)}] {rename.old} -> {rename.new}", flush=True)
+            if not self._move(rename):
+                failed.append(rename)
+        done = len(todo) - len(failed)
+        print(f"Renamed {done} of {len(todo)} folders.")
+        for rename in failed:
+            print(f"  failed, run again to retry: {rename.old}")
+        return done
+
+    def _move_each(self, todo: List[Rename]) -> int:
+        done = 0
+        for rename in todo:
+            reply = self._prompt.answer(f"Rename {rename.old} -> {rename.new}? y/N/q")
             if reply == "q":
                 break
-            if reply not in ("y", "yes"):
-                continue
-            if not self._remote.move(rename.old, rename.new):
-                print(f"Failed to move {rename.old}; stopping so nothing is left half-done unnoticed.")
-                break
-            done += 1
-            if self._remote.exists(rename.old):
-                print(f"{rename.old} still holds files that were not moved because {rename.new} has the same names.")
+            if reply in ("y", "yes") and self._move(rename):
+                done += 1
         print(f"Renamed {done} folder(s).")
         return done
+
+    def _move(self, rename: Rename) -> bool:
+        if not self._remote.move(rename.old, rename.new):
+            print(f"Failed to move {rename.old}.")
+            return False
+        if self._remote.exists(rename.old):
+            print(f"{rename.old} still holds files that were not moved because {rename.new} has the same names.")
+        return True
 
 
 def main() -> None:

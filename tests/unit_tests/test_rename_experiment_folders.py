@@ -31,46 +31,75 @@ class ScriptedPrompt(Prompt):
         return self._replies.pop(0)
 
 
-def test_a_confirmed_rename_is_moved():
-    remote = FakeRemote({"CookIslands"})
-    done = RenameSession(remote, ScriptedPrompt("y")).run([Rename("CookIslands", "Cook_Islands")])
-    assert done == 1
-    assert remote.moves == [("CookIslands", "Cook_Islands")]
+def test_approving_all_moves_every_existing_folder():
+    remote = FakeRemote({"CookIslands", "SouthSudan"})
+    renames = [Rename("CookIslands", "Cook_Islands"), Rename("SouthSudan", "South_Sudan")]
+    done = RenameSession(remote, ScriptedPrompt("y")).run(renames)
+    assert done == 2
+    assert remote.moves == [("CookIslands", "Cook_Islands"), ("SouthSudan", "South_Sudan")]
 
 
-def test_a_declined_rename_is_not_moved():
+def test_approving_all_asks_only_once():
+    prompt = ScriptedPrompt("y")
+    remote = FakeRemote({"CookIslands", "SouthSudan"})
+    RenameSession(remote, prompt).run([Rename("CookIslands", "Cook_Islands"), Rename("SouthSudan", "South_Sudan")])
+    assert len(prompt.questions) == 1
+
+
+def test_declining_moves_nothing():
     remote = FakeRemote({"CookIslands"})
     done = RenameSession(remote, ScriptedPrompt("n")).run([Rename("CookIslands", "Cook_Islands")])
     assert done == 0
     assert remote.moves == []
 
 
-def test_a_missing_folder_is_skipped_without_asking():
+def test_a_missing_folder_is_left_out_and_nothing_is_asked_when_none_remain():
     prompt = ScriptedPrompt()
     RenameSession(FakeRemote(set()), prompt).run([Rename("CookIslands", "Cook_Islands")])
     assert prompt.questions == []
 
 
-def test_an_existing_destination_is_described_as_a_merge():
-    prompt = ScriptedPrompt("n")
+def test_the_plan_lists_a_merge_as_one(capsys):
     remote = FakeRemote({"CookIslands", "Cook_Islands"})
-    RenameSession(remote, prompt).run([Rename("CookIslands", "Cook_Islands")])
-    assert "merged" in prompt.questions[0]
+    RenameSession(remote, ScriptedPrompt("n")).run([Rename("CookIslands", "Cook_Islands")])
+    assert "MERGE" in capsys.readouterr().out
 
 
-def test_quitting_stops_before_the_remaining_renames():
+def test_the_plan_lists_every_rename_before_asking(capsys):
     remote = FakeRemote({"CookIslands", "SouthSudan"})
     renames = [Rename("CookIslands", "Cook_Islands"), Rename("SouthSudan", "South_Sudan")]
-    RenameSession(remote, ScriptedPrompt("q")).run(renames)
+    RenameSession(remote, ScriptedPrompt("n")).run(renames)
+    output = capsys.readouterr().out
+    assert "CookIslands -> Cook_Islands" in output
+    assert "SouthSudan -> South_Sudan" in output
+
+
+def test_asking_for_each_moves_only_the_approved_ones():
+    remote = FakeRemote({"CookIslands", "SouthSudan"})
+    renames = [Rename("CookIslands", "Cook_Islands"), Rename("SouthSudan", "South_Sudan")]
+    RenameSession(remote, ScriptedPrompt("s", "n", "y")).run(renames)
+    assert remote.moves == [("SouthSudan", "South_Sudan")]
+
+
+def test_quitting_while_asking_for_each_stops_the_rest():
+    remote = FakeRemote({"CookIslands", "SouthSudan"})
+    renames = [Rename("CookIslands", "Cook_Islands"), Rename("SouthSudan", "South_Sudan")]
+    RenameSession(remote, ScriptedPrompt("s", "q")).run(renames)
     assert remote.moves == []
 
 
-def test_a_failed_move_stops_the_session():
+def test_a_failed_move_does_not_stop_the_others():
     remote = FakeRemote({"CookIslands", "SouthSudan"}, fail_on="CookIslands")
     renames = [Rename("CookIslands", "Cook_Islands"), Rename("SouthSudan", "South_Sudan")]
-    done = RenameSession(remote, ScriptedPrompt("y", "y")).run(renames)
-    assert done == 0
-    assert remote.moves == []
+    done = RenameSession(remote, ScriptedPrompt("y")).run(renames)
+    assert done == 1
+    assert remote.moves == [("SouthSudan", "South_Sudan")]
+
+
+def test_a_failed_move_is_reported(capsys):
+    remote = FakeRemote({"CookIslands"}, fail_on="CookIslands")
+    RenameSession(remote, ScriptedPrompt("y")).run([Rename("CookIslands", "Cook_Islands")])
+    assert "failed, run again to retry: CookIslands" in capsys.readouterr().out
 
 
 def test_country_renames_come_before_language_renames():
