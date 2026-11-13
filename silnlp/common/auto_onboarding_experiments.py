@@ -131,6 +131,44 @@ class Thresholds:
         return f"at least {self._min_parallel} parallel verses and alignment >= {self._min_alignment}"
 
 
+class SourceSummary:
+    def __init__(self, candidate: Candidate):
+        self._candidate = candidate
+
+    def describe(self) -> str:
+        c = self._candidate
+        return (
+            f"{c.name}: alignment {c.alignment:.4f}, {c.parallel + c.src_only} verses,"
+            f" {c.parallel} in parallel with the target, {c.src_only} not in the target."
+        )
+
+    def has_no_more_data_than_target(self) -> bool:
+        # Both totals include the parallel verses, so only the unshared verses differ.
+        return self._candidate.src_only <= self._candidate.trg_only
+
+
+class SameProjectRole:
+    def __init__(self, confirmer: "Confirmer"):
+        self._confirmer = confirmer
+
+    def resolve(self, sign_up: SignUp, candidates: Sequence[Candidate]) -> SignUp:
+        if sign_up.bt_project != sign_up.draft_source:
+            return sign_up
+        project = next((c for c in candidates if c.name == sign_up.bt_project), None)
+        if project is None:
+            return sign_up
+        summary = SourceSummary(project)
+        print(f"Warning: {project.name} is both the back translation and the draft source.")
+        print(summary.describe())
+        default = "back translation" if summary.has_no_more_data_than_target() else None
+        role = self._confirmer.choose(f"Treat {project.name} as", ["back translation", "draft source"], default)
+        if role is None:
+            raise OnboardingError(f"No role chosen for {project.name}, which is both bt_project and draft_source.")
+        if role == "draft source":
+            return dataclasses.replace(sign_up, bt_project=None)
+        return dataclasses.replace(sign_up, draft_source="")
+
+
 class BackTranslationCheck:
     def __init__(self, thresholds: Thresholds):
         self._thresholds = thresholds
@@ -150,10 +188,7 @@ class BackTranslationCheck:
                 f"Back translation '{sign_up.bt_project}' is not in corpus-stats.csv; continuing without it."
             )
             return None
-        LOGGER.info(
-            f"Back translation {bt.name}: alignment {bt.alignment:.4f}, {bt.parallel + bt.src_only} verses,"
-            f" {bt.parallel} in parallel with the target, {bt.src_only} not in the target."
-        )
+        LOGGER.info(f"Back translation {SourceSummary(bt).describe()}")
         if not self._thresholds.passes(bt):
             LOGGER.warning(f"Back translation {bt.name} needs {self._thresholds.describe()}; continuing without it.")
             return None
@@ -561,6 +596,24 @@ class Confirmer:
     def __init__(self, auto_confirm: bool = False):
         self._auto_confirm = auto_confirm
 
+    def choose(self, question: str, options: Sequence[str], default: Optional[str]) -> Optional[str]:
+        suffix = f" (default: {default})" if default else ""
+        while True:
+            try:
+                reply = (
+                    input(f"{question} [{'/'.join(options)}]{suffix}: ").strip().lower()
+                    if not self._auto_confirm
+                    else ""
+                )
+            except EOFError:
+                LOGGER.info("No answer; stopping.")
+                return None
+            if not reply and default:
+                return default
+            matches = [option for option in options if option.startswith(reply)] if reply else []
+            if len(matches) == 1:
+                return matches[0]
+
     def confirm(self, question: str) -> bool:
         if self._auto_confirm:
             return True
@@ -617,6 +670,7 @@ class AutoOnboarding:
         request = OnboardingRequest(folder, self._paths.experiments_dir)
         sign_up = request.sign_up()
         main, candidates = request.corpus_stats(sign_up.main_project)
+        sign_up = SameProjectRole(self._confirmer).resolve(sign_up, candidates)
         lang_dir, language_entries = self._language_dir(main)
         LOGGER.info(f"Target: {main.name} ({main.stem}); planned books: {';'.join(sign_up.planned_books)}")
         LOGGER.info(f"Experiment location: {lang_dir}")
