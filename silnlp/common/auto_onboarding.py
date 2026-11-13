@@ -30,7 +30,6 @@ from .create_onboarding_experiments import (
     build_translate_config,
     compact_canons,
     find_prior_copy,
-    folder_name,
     load_language_entries,
     load_name_overrides,
     load_vref_books,
@@ -42,6 +41,7 @@ from .create_onboarding_experiments import (
     write_yaml,
 )
 from .environment import SilNlpEnv
+from .folder_naming import FolderNaming
 
 
 class OnboardingError(Exception):
@@ -665,15 +665,11 @@ class AutoOnboarding:
 
     def _language_dir(self, main: MainProject) -> Tuple[Path, List[dict]]:
         entries = load_language_entries(self._paths.assets_dir)
-        overrides = load_name_overrides(self._paths.assets_dir)
+        naming = FolderNaming(load_name_overrides(self._paths.assets_dir))
         raw_language, raw_country = lookup_language(main.iso, entries)
-        country = str(overrides["countries"].get(raw_country) or "").strip()
-        language = str(overrides["languages"].get(raw_language) or "").strip()
-        country_seg = folder_name(country or raw_country, keep_case=bool(country))
-        language_seg = folder_name(language or raw_language, keep_case=bool(language))
-        warning = old_name_folder_warning(
-            self._paths.experiments_dir, raw_country, raw_language, country_seg, language_seg
-        )
+        country_seg = naming.country_segment(raw_country)
+        language_seg = naming.language_segment(raw_language)
+        warning = old_name_folder_warning(naming, self._paths.experiments_dir, raw_country, raw_language)
         if warning is not None:
             print(warning)
         return self._paths.experiments_dir / country_seg / language_seg, entries

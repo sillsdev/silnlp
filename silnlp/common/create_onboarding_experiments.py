@@ -29,6 +29,7 @@ from machine.corpora import FileParatextProjectSettingsParser
 from machine.scripture import ALL_BOOK_IDS, book_id_to_number, book_number_to_id, get_chapters, is_nt, is_ot
 
 from .environment import SilNlpEnv
+from .folder_naming import FolderNaming
 from .iso_info import ALT_ISO, NLLB_TAG_FROM_ISO
 
 LOGGER = logging.getLogger(__package__ + ".create_onboarding_experiments")
@@ -430,13 +431,8 @@ def execute_copy(scripture_dir: Path, terms_dir: Optional[Path], old_stem: str, 
             print(f"Copied {path.name} to {target} in {terms_dir}")
 
 
-def folder_name(name: str, keep_case: bool = False) -> str:
-    parts = name.replace(",", "").replace("-", " ").split()
-    return "_".join(parts) if keep_case else "_".join(word.capitalize() for word in parts)
-
-
 def old_name_folder_warning(
-    experiments_dir: Path, raw_country: str, raw_language: str, country_seg: str, language_seg: str
+    naming: FolderNaming, experiments_dir: Path, raw_country: str, raw_language: str
 ) -> Optional[str]:
     """Message to print when experiments already exist under the old official name(s).
 
@@ -445,15 +441,16 @@ def old_name_folder_warning(
     only advises a manual merge, so `find_existing` never re-uses the orphaned folder and
     silently creates duplicates. Returns None when nothing was remapped or no old folder exists.
     """
-    old_country_dir = experiments_dir / folder_name(raw_country)
-    new_country_dir = experiments_dir / country_seg
+    language_seg = naming.language_segment(raw_language)
+    old_country_dir = experiments_dir / naming.previous_segment(raw_country)
+    new_country_dir = experiments_dir / naming.country_segment(raw_country)
     if old_country_dir != new_country_dir and old_country_dir.exists():
         # The whole country folder moved, so warn at that level (all languages under it).
         old, new = old_country_dir, new_country_dir
     else:
         # Language-only rename: prior experiments live under the *current* country segment
         # (which may itself be an override), so look there — not under the official country.
-        old_lang_dir = new_country_dir / folder_name(raw_language)
+        old_lang_dir = new_country_dir / naming.previous_segment(raw_language)
         new_lang_dir = new_country_dir / language_seg
         if old_lang_dir == new_lang_dir or not old_lang_dir.exists():
             return None
@@ -1098,29 +1095,22 @@ def run(
     overrides = load_name_overrides(assets_dir)
     raw_language, raw_country = lookup_language(main.iso, language_entries)
 
-    # Map official names to common ones for friendlier folders; keep the official
-    # (raw) names to detect and warn about folders created under the old naming. A blank
-    # (whitespace-only) override is ignored so it cannot collapse a path level.
-    country_override = overrides["countries"].get(raw_country)
-    language_override = overrides["languages"].get(raw_language)
-    use_country = isinstance(country_override, str) and bool(country_override.strip())
-    use_language = isinstance(language_override, str) and bool(language_override.strip())
-    country = country_override if use_country else raw_country
-    language = language_override if use_language else raw_language
-    # keep_case only for override values (already human-chosen); official names keep the
-    # default title-casing so a blank/absent override collapses to the original behaviour.
-    country_seg = folder_name(country, keep_case=use_country)
-    language_seg = folder_name(language, keep_case=use_language)
+    naming = FolderNaming(overrides)
+    country_seg = naming.country_segment(raw_country)
+    language_seg = naming.language_segment(raw_language)
 
     lang_dir = lang_dir_override or experiments_dir / country_seg / language_seg
-    print(f"Main project: {main.name} ({main.stem}), language: {language} " f"[{main.iso}], country: {country}")
+    print(
+        f"Main project: {main.name} ({main.stem}), language: {naming.language_name(raw_language)} [{main.iso}],"
+        f" country: {naming.country_name(raw_country)}"
+    )
     print(f"Experiment location: {lang_dir}")
 
     # Warn (non-destructive) when a folder under the old official name(s) already exists, so it
     # can be merged manually. Only in the derived-location case — the corpus-stats override path
     # deliberately reuses whatever naming already exists.
     if lang_dir_override is None:
-        warning = old_name_folder_warning(experiments_dir, raw_country, raw_language, country_seg, language_seg)
+        warning = old_name_folder_warning(naming, experiments_dir, raw_country, raw_language)
         if warning is not None:
             print(warning)
 

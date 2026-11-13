@@ -20,7 +20,6 @@ from silnlp.common.create_onboarding_experiments import (
     book_mark,
     extract_book_counts,
     find_existing,
-    folder_name,
     load_language_entries,
     load_name_overrides,
     load_vref_books,
@@ -39,6 +38,7 @@ from silnlp.common.create_onboarding_experiments import (
     submit_experiments,
     synthesize_trg_iso,
 )
+from silnlp.common.folder_naming import FolderNaming
 from silnlp.common.iso_info import NLLB_TAG_FROM_ISO
 
 ASSETS_DIR = Path(__file__).parent.parent.parent / "silnlp" / "assets"
@@ -142,16 +142,6 @@ def test_parse_log(request_dir: Path):
     assert by_name["a55_2026_07_02"].parallel == 1
 
 
-def test_folder_name():
-    assert folder_name("Russian Federation") == "Russian_Federation"
-    assert folder_name("Arabic, Standard") == "Arabic_Standard"
-    assert folder_name("Mari-Hill") == "Mari_Hill"
-    assert folder_name("Saudi Arabian Sign Language") == "Saudi_Arabian_Sign_Language"
-    # keep_case preserves acronyms/interior caps that capitalize() would mangle
-    assert folder_name("DR Congo") == "Dr_Congo"
-    assert folder_name("DR Congo", keep_case=True) == "DR_Congo"
-
-
 def test_name_overrides_keys_exist_in_language_families():
     # Guards against a refreshed languageFamilies.json orphaning an override key.
     entries = load_language_entries(ASSETS_DIR)
@@ -162,16 +152,34 @@ def test_name_overrides_keys_exist_in_language_families():
     assert not [key for key in overrides["languages"] if key not in languages]
 
 
-def test_name_override_applied():
-    overrides = load_name_overrides(ASSETS_DIR)
-    assert overrides["countries"]["Tanzania, United Republic of"] == "Tanzania"
-    assert folder_name(overrides["countries"]["Russian Federation"], keep_case=True) == "Russia"
-    assert folder_name(overrides["countries"]["Virgin Islands, U.S."], keep_case=True) == "US_Virgin_Islands"
-    assert folder_name(overrides["countries"]["Congo, The Democratic Republic of the"], keep_case=True) == "DR_Congo"
-    assert folder_name(overrides["languages"]["German, Standard"], keep_case=True) == "German"
-    assert folder_name(overrides["languages"]["German, Swiss"], keep_case=True) == "Swiss_German"
-    # an unmapped country is not in the override map (passes through unchanged)
-    assert "Peru" not in overrides["countries"]
+def test_the_shipped_overrides_give_these_country_folders():
+    naming = real_naming()
+    assert naming.country_segment("Russian Federation") == "Russia"
+    assert naming.country_segment("Virgin Islands, U.S.") == "US_Virgin_Islands"
+    assert naming.country_segment("Congo, The Democratic Republic of the") == "DR_Congo"
+
+
+def test_the_shipped_overrides_give_these_language_folders():
+    naming = real_naming()
+    assert naming.language_segment("German, Standard") == "German"
+    assert naming.language_segment("German, Swiss") == "Swiss_German"
+
+
+def test_no_two_countries_share_a_folder():
+    naming = real_naming()
+    names = {entry["langCountry"] for entry in load_language_entries(ASSETS_DIR)}
+    assert len({naming.country_segment(name).lower() for name in names}) == len(names)
+
+
+def test_no_two_languages_in_a_country_share_a_folder():
+    naming = real_naming()
+    pairs = {(e["langCountry"], e["language"]) for e in load_language_entries(ASSETS_DIR)}
+    segments = {(country, naming.language_segment(language).lower()) for country, language in pairs}
+    assert len(segments) == len(pairs)
+
+
+def test_an_unmapped_country_is_not_in_the_override_map():
+    assert "Peru" not in load_name_overrides(ASSETS_DIR)["countries"]
 
 
 def test_name_override_values_non_blank():
@@ -183,10 +191,14 @@ def test_name_override_values_non_blank():
             assert value and value.strip(), f"blank override value for {group!r} key {key!r}"
 
 
+def real_naming() -> FolderNaming:
+    return FolderNaming(load_name_overrides(ASSETS_DIR))
+
+
 def test_old_name_folder_warning_country_rename(tmp_path: Path):
     # A renamed country warns at the country level (covers every language under it).
     (tmp_path / "Russian_Federation").mkdir()
-    warning = old_name_folder_warning(tmp_path, "Russian Federation", "Abaza", "Russia", "Abaza")
+    warning = old_name_folder_warning(real_naming(), tmp_path, "Russian Federation", "Abaza")
     assert warning is not None
     assert str(tmp_path / "Russian_Federation") in warning
     assert str(tmp_path / "Russia") in warning
@@ -196,7 +208,7 @@ def test_old_name_folder_warning_language_rename(tmp_path: Path):
     # A language-only rename (country unchanged) must still warn on the old language folder,
     # otherwise find_existing never sees the prior experiments and creates duplicates.
     (tmp_path / "Germany" / "German_Standard").mkdir(parents=True)
-    warning = old_name_folder_warning(tmp_path, "Germany", "German, Standard", "Germany", "German")
+    warning = old_name_folder_warning(real_naming(), tmp_path, "Germany", "German, Standard")
     assert warning is not None
     assert str(tmp_path / "Germany" / "German_Standard") in warning
     assert str(tmp_path / "Germany" / "German") in warning
@@ -206,18 +218,27 @@ def test_old_name_folder_warning_language_rename_under_overridden_country(tmp_pa
     # Country already overridden (Russia) so prior runs live under the override folder; a later
     # language rename must be detected under the *current* country segment, not the official one.
     (tmp_path / "Russia" / "German_Standard").mkdir(parents=True)
-    warning = old_name_folder_warning(tmp_path, "Russian Federation", "German, Standard", "Russia", "German")
+    warning = old_name_folder_warning(real_naming(), tmp_path, "Russian Federation", "German, Standard")
     assert warning is not None
     assert str(tmp_path / "Russia" / "German_Standard") in warning
     assert str(tmp_path / "Russia" / "German") in warning
 
 
+def test_old_name_folder_warning_for_a_folder_made_before_the_naming_rules(tmp_path: Path):
+    # Earlier runs named "Abenaki, Eastern" Abenaki_Eastern; it is now Eastern_Abenaki.
+    (tmp_path / "Canada" / "Abenaki_Eastern").mkdir(parents=True)
+    warning = old_name_folder_warning(real_naming(), tmp_path, "Canada", "Abenaki, Eastern")
+    assert warning is not None
+    assert str(tmp_path / "Canada" / "Abenaki_Eastern") in warning
+    assert str(tmp_path / "Canada" / "Eastern_Abenaki") in warning
+
+
 def test_old_name_folder_warning_none(tmp_path: Path):
     # No old folder present -> no warning.
-    assert old_name_folder_warning(tmp_path, "Georgia", "Abkhaz", "Georgia", "Abkhaz") is None
+    assert old_name_folder_warning(real_naming(), tmp_path, "Georgia", "Abkhaz") is None
     # Nothing remapped (old == new) -> no warning even if the folder exists.
     (tmp_path / "Peru" / "Quechua").mkdir(parents=True)
-    assert old_name_folder_warning(tmp_path, "Peru", "Quechua", "Peru", "Quechua") is None
+    assert old_name_folder_warning(real_naming(), tmp_path, "Peru", "Quechua") is None
 
 
 def test_nllb_tag():
