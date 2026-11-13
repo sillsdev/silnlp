@@ -344,9 +344,12 @@ class OnboardingProject:
 
     def generate_resource_hash(self, resource_path: Path) -> str:
         resource_hash_path = resource_path / ".resource_hash"
+        cache_prefix = "relative-v1:"
         if resource_hash_path.exists():
             with open(resource_hash_path, "r") as f:
-                return f.read().strip()
+                cached_hash = f.read().strip()
+                if cached_hash.startswith(cache_prefix):
+                    return cached_hash[len(cache_prefix) :]
         resource_hash = hashlib.sha256()
         for root, dirs, files in os.walk(resource_path):
             dirs.sort()
@@ -355,16 +358,16 @@ class OnboardingProject:
                 if file == ".resource_hash":
                     continue
                 file_path = os.path.join(root, file)
-                resource_hash.update(file_path.encode())
+                relative_path = os.path.relpath(file_path, resource_path).replace(os.sep, "/")
+                resource_hash.update(relative_path.encode("utf-8"))
                 with open(file_path, "rb") as f:
                     for chunk in iter(lambda: f.read(8192), b""):
                         resource_hash.update(chunk)
 
         resource_hash = resource_hash.hexdigest()
-        resource_hash_path = resource_path / ".resource_hash"
         resource_hash_path.parent.mkdir(parents=True, exist_ok=True)
         with open(resource_hash_path, "w") as f:
-            f.write(resource_hash)
+            f.write(f"{cache_prefix}{resource_hash}")
         return resource_hash
 
     def check_resource_hash(self) -> bool:
