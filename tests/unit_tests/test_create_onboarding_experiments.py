@@ -156,13 +156,19 @@ def test_the_shipped_overrides_give_these_country_folders():
     naming = real_naming()
     assert naming.country_segment("Russian Federation") == "Russia"
     assert naming.country_segment("Virgin Islands, U.S.") == "US_Virgin_Islands"
-    assert naming.country_segment("Congo, The Democratic Republic of the") == "DR_Congo"
+    assert naming.country_segment("Congo, The Democratic Republic of the") == "Democratic_Republic_of_Congo"
 
 
 def test_the_shipped_overrides_give_these_language_folders():
     naming = real_naming()
-    assert naming.language_segment("German, Standard") == "German"
-    assert naming.language_segment("German, Swiss") == "Swiss_German"
+    assert naming.language_segment("Bamanankan") == "Bambara"
+    assert naming.language_segment("Malay, Standard") == "Standard_Malay"
+    assert naming.language_segment("Malay") == "Colloquial_Malay"
+
+
+def test_malay_and_standard_malay_have_different_folders():
+    naming = real_naming()
+    assert naming.language_segment("Malay") != naming.language_segment("Malay, Standard")
 
 
 def test_no_two_countries_share_a_folder():

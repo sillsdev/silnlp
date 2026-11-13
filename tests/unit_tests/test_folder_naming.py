@@ -33,44 +33,36 @@ def test_repeated_underscores_are_collapsed():
     assert naming().language_segment("Abenaki _ Eastern") == "Abenaki_Eastern"
 
 
+def test_the_qualifier_moves_to_the_front():
+    assert naming().language_segment("Adi, Galo") == "Galo_Adi"
+
+
 def test_a_direction_qualifier_moves_to_the_front():
     assert naming().language_segment("Abenaki, Eastern") == "Eastern_Abenaki"
 
 
-def test_a_compound_direction_moves_to_the_front():
-    assert naming().language_segment("Kolami, Northwestern") == "Northwestern_Kolami"
+def test_a_multi_word_qualifier_moves_to_the_front():
+    assert naming().language_segment("Huave, San Mateo del Mar") == "San_Mateo_del_Mar_Huave"
 
 
-def test_a_two_word_direction_moves_to_the_front():
-    assert naming().language_segment("Mixe, West Central") == "West_Central_Mixe"
-
-
-def test_upper_counts_as_a_direction():
-    assert naming().language_segment("Chinantec, Upper") == "Upper_Chinantec"
-
-
-def test_a_qualifier_that_is_not_a_direction_stays_after_the_name():
-    assert naming().language_segment("Adi, Galo") == "Adi_Galo"
-
-
-def test_a_qualifier_that_starts_with_a_direction_moves_to_the_front():
-    assert naming().language_segment("Mixtec, Southern Puebla") == "Southern_Puebla_Mixtec"
-
-
-def test_a_qualifier_that_starts_with_a_compound_direction_moves_to_the_front():
-    assert naming().language_segment("Miao, Southwestern Guiyang") == "Southwestern_Guiyang_Miao"
-
-
-def test_a_direction_after_another_word_moves_the_whole_qualifier_to_the_front():
+def test_a_direction_inside_the_qualifier_needs_no_special_handling():
     assert naming().language_segment("Karen, Pwo Eastern") == "Pwo_Eastern_Karen"
 
 
-def test_a_direction_preceded_by_a_modifier_moves_the_whole_qualifier_to_the_front():
-    assert naming().language_segment("Muria, Far Western") == "Far_Western_Muria"
+def test_a_hyphenated_qualifier_has_its_hyphens_joined():
+    assert naming().language_segment("Arabic, Judeo-Iraqi") == "Judeo_Iraqi_Arabic"
 
 
-def test_a_direction_in_the_middle_of_the_qualifier_moves_it_to_the_front():
-    assert naming().language_segment("Quechua, Cajatambo North Lima") == "Cajatambo_North_Lima_Quechua"
+def test_a_name_without_a_comma_is_left_in_order():
+    assert naming().language_segment("Saudi Arabian Sign Language") == "Saudi_Arabian_Sign_Language"
+
+
+def test_standard_is_dropped_leaving_the_name():
+    assert naming().language_segment("German, Standard") == "German"
+
+
+def test_standard_is_dropped_from_a_longer_qualifier():
+    assert naming().language_segment("Tamazight, Standard Moroccan") == "Moroccan_Tamazight"
 
 
 def test_spoken_is_dropped_and_the_qualifier_moves_to_the_front():
