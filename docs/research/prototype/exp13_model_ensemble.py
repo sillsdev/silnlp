@@ -11,7 +11,8 @@ Experiments are named as under MT/experiments.  The first is the base and each o
   one-model:0:sources 0+<i>     the base model alone reading both sources, equal weights
   all:<rule>                    every model, equal weights
   check:...                     ensembles that must reproduce a single-model decode
-Outputs and chrF3 scores go to a JSON file, which is uploaded as a ClearML artifact when this runs as a task.
+Outputs and chrF3 scores go to a JSON file and, when this runs as a ClearML task, into the task's configuration
+object "ensemble_outputs".
 """
 
 import argparse
@@ -25,6 +26,8 @@ import time
 import traceback
 from pathlib import Path
 
+# Imported before the arguments are parsed, so that ClearML records them and restores them on the worker.
+import clearml  # noqa: F401
 import sacrebleu
 import torch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, LogitsProcessorList
@@ -142,6 +145,20 @@ def chrf3(hypotheses: list[str], references: list[str]) -> float:
     return sacrebleu.corpus_chrf(hypotheses, [references], char_order=6, beta=3, remove_whitespace=True).score
 
 
+def publish(task, results: dict) -> None:
+    if task is None:
+        return
+    text = json.dumps(results, ensure_ascii=False)
+    try:
+        # Stored in the task record, which does not depend on the files server.
+        task.set_configuration_object("ensemble_outputs", config_text=text)
+    except Exception:
+        print(f"could not store the outputs in the task, printing them instead\n{traceback.format_exc()}", flush=True)
+        chunks = [text[i : i + 2000] for i in range(0, len(text), 2000)]
+        for index, chunk in enumerate(chunks):
+            print(f"OUTPUT-CHUNK {index + 1}/{len(chunks)} {chunk}", flush=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--experiments", type=str, default="")
@@ -229,8 +246,7 @@ def main() -> None:
         run(f"ensemble:0+{other}:loglinear:0.50", pair, [(0, 0), (other, other)], [0.5, 0.5], "loglinear")
         run(f"one-model:0:source {other}", pair, [(0, other)], [1.0])
         run(f"one-model:0:sources 0+{other}", pair, [(0, 0), (0, other)], [0.5, 0.5])
-        if task is not None:
-            task.upload_artifact("ensemble_outputs", artifact_object=str(out_path))
+        publish(task, results)
     if len(experiments) > 2:
         everyone = list(range(len(experiments)))
         run("all:linear", everyone, [(i, i) for i in everyone], [1.0 / len(everyone)] * len(everyone))
@@ -245,8 +261,7 @@ def main() -> None:
     out_path.write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
     print(json.dumps({"chrf3": results["chrf3"], "checks": results["checks"]}, indent=1), flush=True)
     print(f"{len(results['errors'])} arms failed", flush=True)
-    if task is not None:
-        task.upload_artifact("ensemble_outputs", artifact_object=str(out_path), wait_on_upload=True)
+    publish(task, results)
 
 
 if __name__ == "__main__":
