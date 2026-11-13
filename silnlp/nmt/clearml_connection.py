@@ -118,7 +118,7 @@ class SILClearML:
             with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
                 config = yaml.safe_load(file)
             if config is None or len(config.keys()) == 0:
-                raise RuntimeError("Config file has no contents.")
+                raise RuntimeError("Config file has no contents. Config file path: " + str(exp_dir / "config.yml"))
             self.config = create_config(exp_dir, config, self.environment)
             return
         # There is a ClearML task - lets' do more complex importing.
@@ -135,7 +135,7 @@ class SILClearML:
         else:
             config = {}
         if config is None or len(config.keys()) == 0:
-            raise RuntimeError("Config file has no contents.")
+            raise RuntimeError("Config file has no contents. Config file path: " + str(exp_dir / "config.yml"))
 
         # connect it with ClearML
         # - if it is run locally, it will set the config parameters in the clearml server

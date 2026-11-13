@@ -9,6 +9,7 @@ import dataclasses
 import fnmatch
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -16,7 +17,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import AbstractSet, Dict, List, Optional, Sequence, Tuple
+from typing import AbstractSet, Callable, Dict, List, Optional, Sequence, Tuple
 
 import yaml
 from machine.corpora import FileParatextProjectSettingsParser
@@ -572,11 +573,24 @@ class Confirmer:
 
 
 class ExperimentRunner:
-    def __init__(self, tag: str = ""):
+    def __init__(
+        self,
+        tag: str = "",
+        process_runner: Optional[Callable[..., subprocess.CompletedProcess]] = None,
+        environment: Optional[Dict[str, str]] = None,
+    ):
         self._tag = tag
+        self._process_runner = process_runner or subprocess.run
+        self._environment = environment
 
     def run(self, name: str, translate: bool) -> int:
-        return subprocess.run([sys.executable] + self.arguments(translate) + [name]).returncode
+        environment = dict(os.environ if self._environment is None else self._environment)
+        for key in ("CLEARML_TASK_ID", "TRAINS_TASK_ID", "CLEARML_PROC_MASTER_ID", "TRAINS_PROC_MASTER_ID"):
+            environment.pop(key, None)
+        return self._process_runner(
+            [sys.executable] + self.arguments(translate) + [name],
+            env=environment,
+        ).returncode
 
     def arguments(self, translate: bool) -> List[str]:
         args = EXPERIMENT_ARGS
