@@ -69,14 +69,27 @@ class Experiment:
         return [self._saved[v] for v in verses] if self._saved else []
 
     def load_model(self, device: str):
-        # A local copy first: the experiments folder may be a network mount, which is slow to read weights from.
-        local = Path(tempfile.mkdtemp()) / "checkpoint"
-        shutil.copytree(self._dir / "run" / f"checkpoint-{self._step}", local)
-        model = AutoModelForSeq2SeqLM.from_pretrained(str(local)).eval().to(device)
-        shutil.rmtree(local.parent)
+        checkpoint = self._dir / "run" / f"checkpoint-{self._step}"
+        try:
+            model = AutoModelForSeq2SeqLM.from_pretrained(str(checkpoint))
+        except Exception:
+            print(f"loading from {checkpoint} failed, retrying from a local copy\n{traceback.format_exc()}", flush=True)
+            local = self._plain_copy(checkpoint)
+            model = AutoModelForSeq2SeqLM.from_pretrained(str(local))
+            shutil.rmtree(local)
+        model = model.eval().to(device)
         # SILNLP raises the limit to 512 for inference, whatever the checkpoint says.
         model.generation_config.max_length = max(model.generation_config.max_length or 0, 512)
         return model
+
+    def _plain_copy(self, checkpoint: Path) -> Path:
+        # Reads and writes only: on a network mount, copying metadata or mapping the file can fail where reads work.
+        local = Path(tempfile.mkdtemp())
+        for path in checkpoint.iterdir():
+            if path.is_file():
+                with path.open("rb") as source, (local / path.name).open("wb") as target:
+                    shutil.copyfileobj(source, target, 64 * 2**20)
+        return local
 
 
 class ModelPool:
