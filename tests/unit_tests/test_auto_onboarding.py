@@ -814,11 +814,18 @@ def test_short_extract_stops(tmp_path: Path):
         ExtractFiles(tmp_path, ["MAT", "MAT"]).parallel_verses("trg", "src")
 
 
-def test_non_scripture_book_id_stops(request_fixture: RequestFixture):
-    request_fixture.config["completed_books"] = ["FRT"]
+def test_front_matter_book_is_ignored(request_fixture: RequestFixture):
+    request_fixture.config["completed_books"] = ["40", "107", "GLO"]
     request_fixture.write()
     request = OnboardingRequest(request_fixture.folder, request_fixture.paths.experiments_dir)
-    with pytest.raises(OnboardingError, match="'FRT' in completed_books"):
+    assert request.sign_up().completed_books == ["MAT"]
+
+
+def test_unrecognised_book_id_stops(request_fixture: RequestFixture):
+    request_fixture.config["completed_books"] = ["ZZZ"]
+    request_fixture.write()
+    request = OnboardingRequest(request_fixture.folder, request_fixture.paths.experiments_dir)
+    with pytest.raises(OnboardingError, match="'ZZZ' in completed_books"):
         request.sign_up()
 
 

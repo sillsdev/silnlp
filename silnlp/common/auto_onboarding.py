@@ -94,10 +94,8 @@ class OnboardingRequest:
         bt_project = onboarding.get("bt_project")
         return SignUp(
             main_project=str(onboarding["main_project"]),
-            planned_books=[self._book_id(book, "planned_books", path) for book in onboarding["planned_books"]],
-            completed_books=[
-                self._book_id(book, "completed_books", path) for book in onboarding.get("completed_books") or []
-            ],
+            planned_books=self._scripture_books(onboarding["planned_books"], "planned_books", path),
+            completed_books=self._scripture_books(onboarding.get("completed_books") or [], "completed_books", path),
             draft_source=str(onboarding["draft_source"]),
             bt_project=str(bt_project) if bt_project else None,
         )
@@ -111,9 +109,17 @@ class OnboardingRequest:
     def _book_id(self, book: object, key: str, path: Path) -> str:
         text = str(book).strip().upper()
         book_id = book_number_to_id(int(text)) if text.isdigit() else text
-        if book_id_to_number(book_id) == 0 or not is_canonical(book_id):
+        if book_id_to_number(book_id) == 0:
             raise OnboardingError(f"'{book}' in {key} of {path} is not a book.")
         return book_id
+
+    def _scripture_books(self, books: Sequence[object], key: str, path: Path) -> List[str]:
+        book_ids = [self._book_id(book, key, path) for book in books]
+        # Front and back matter such as introductions and glossaries can't be drafted.
+        for book_id in book_ids:
+            if not is_canonical(book_id):
+                print(f"Warning: {book_id} in {key} is not an OT, NT or DC book; ignoring it.")
+        return [book_id for book_id in book_ids if is_canonical(book_id)]
 
 
 class Thresholds:
