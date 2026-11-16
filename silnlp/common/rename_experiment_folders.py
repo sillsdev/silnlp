@@ -27,7 +27,7 @@ class ExperimentRenames:
             ("Solomons", "Solomon_Islands"),
             ("Surinam", "Suriname"),
             ("Vietnam", "Viet_Nam"),
-            ("IvoryCoast", "Côte_d'Ivoire"),
+            ("IvoryCoast", "Ivory_Coast"),
             ("CAR", "Central_African_Republic"),
         ]
         languages = [
