@@ -228,7 +228,7 @@ def postprocess_draft(
                 source_usfm, config.rows, remarks, stylesheet=stylesheet
             )
         else:
-            with draft_metadata.draft_path.open(encoding=encoding) as f:
+            with draft_metadata.draft_path.open(encoding=encoding, newline="") as f:
                 target_usfm = f.read()
 
         if config.is_quotation_mark_denormalization_required():
@@ -249,8 +249,9 @@ def postprocess_draft(
             out_dir
             / f"{draft_metadata.draft_path.stem}{config.get_postprocess_suffix()}{draft_metadata.draft_path.suffix}"
         )
+        # machine.py ends every USFM line with \r\n, which newline translation on Windows makes \r\r\n.
         with out_path.open(
-            "w", encoding="utf-8" if encoding == "utf-8-sig" or encoding == "utf_8_sig" else encoding
+            "w", encoding="utf-8" if encoding == "utf-8-sig" or encoding == "utf_8_sig" else encoding, newline=""
         ) as f:
             f.write(target_usfm)
 

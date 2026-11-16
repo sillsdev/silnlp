@@ -541,6 +541,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                 if produce_multiple_translations:
                     trg_draft_file_path = trg_draft_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
 
+                # machine.py ends every USFM line with \r\n, which newline translation on Windows makes \r\r\n.
                 with trg_draft_file_path.open(
                     "w",
                     encoding=(
@@ -550,6 +551,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                         or src_settings.encoding == "utf_8_sig"
                         else src_settings.encoding
                     ),
+                    newline="",
                 ) as f:
                     f.write(usfm_out)
 
