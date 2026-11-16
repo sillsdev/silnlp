@@ -430,11 +430,6 @@ def execute_copy(scripture_dir: Path, terms_dir: Optional[Path], old_stem: str, 
             LOGGER.info(f"Copied {path.name} to {target} in {terms_dir}")
 
 
-def folder_name(name: str, keep_case: bool = False) -> str:
-    parts = name.replace(",", "").replace("-", " ").split()
-    return "_".join(parts) if keep_case else "_".join(word.capitalize() for word in parts)
-
-
 def old_name_folder_warning(
     naming: FolderNaming, experiments_dir: Path, raw_country: str, raw_language: str
 ) -> Optional[str]:
@@ -1104,7 +1099,10 @@ def run(
     language_seg = naming.language_segment(raw_language)
 
     lang_dir = lang_dir_override or experiments_dir / country_seg / language_seg
-    LOGGER.info(f"Main project: {main.name} ({main.stem}), language: {language} " f"[{main.iso}], country: {country}")
+    LOGGER.info(
+        f"Main project: {main.name} ({main.stem}), language: {naming.language_name(raw_language)} [{main.iso}],"
+        f" country: {naming.country_name(raw_country)}"
+    )
     LOGGER.info(f"Experiment location: {lang_dir}")
 
     # Warn (non-destructive) when a folder under the old official name(s) already exists, so it
