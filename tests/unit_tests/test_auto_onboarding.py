@@ -24,6 +24,7 @@ from silnlp.common.auto_onboarding import (
     OnboardingRequest,
     ParatextBooks,
     RequestFolder,
+    SameProjectRole,
     SignUp,
     SourcePreferences,
     SourcePreferencesFile,
@@ -45,6 +46,16 @@ class ScriptedConfirmer(Confirmer):
     def confirm(self, question: str) -> bool:
         self.questions.append(question)
         return self._answers.pop(0)
+
+
+class ChoosingConfirmer(Confirmer):
+    def __init__(self, role: Optional[str]):
+        self._role = role
+        self.defaults: List[Optional[str]] = []
+
+    def choose(self, question: str, options: Sequence[str], default: Optional[str]) -> Optional[str]:
+        self.defaults.append(default)
+        return self._role or default
 
 
 class RecordingRunner(ExperimentRunner):
@@ -324,6 +335,60 @@ def test_back_translation_same_as_draft_source_stops():
     check = BackTranslationCheck(Thresholds(400, 0.25))
     with pytest.raises(OnboardingError, match="never a drafting source"):
         check.usable(sign_up(draft_source="SRCB", bt_project="SRCB"), [candidate("SRCB")])
+
+
+def shared_role_sign_up() -> SignUp:
+    return sign_up(draft_source="SRCB", bt_project="SRCB")
+
+
+def test_distinct_back_translation_and_draft_source_are_not_asked_about():
+    confirmer = ChoosingConfirmer(None)
+    original = sign_up(draft_source="SRCB", bt_project="BTX")
+    assert SameProjectRole(confirmer).resolve(original, [candidate("SRCB"), candidate("BTX")]) is original
+    assert confirmer.defaults == []
+
+
+def test_shared_project_with_no_more_data_than_target_defaults_to_back_translation():
+    shared = candidate("SRCB")
+    shared.src_only = 10
+    shared.trg_only = 10
+    confirmer = ChoosingConfirmer(None)
+    resolved = SameProjectRole(confirmer).resolve(shared_role_sign_up(), [shared])
+    assert confirmer.defaults == ["back translation"]
+    assert resolved.bt_project == "SRCB"
+    assert resolved.draft_source == ""
+
+
+def test_shared_project_with_more_data_than_target_has_no_default():
+    shared = candidate("SRCB")
+    shared.src_only = 11
+    shared.trg_only = 10
+    confirmer = ChoosingConfirmer("draft source")
+    SameProjectRole(confirmer).resolve(shared_role_sign_up(), [shared])
+    assert confirmer.defaults == [None]
+
+
+def test_shared_project_chosen_as_draft_source_loses_its_back_translation_role():
+    resolved = SameProjectRole(ChoosingConfirmer("draft source")).resolve(shared_role_sign_up(), [candidate("SRCB")])
+    assert resolved.bt_project is None
+    assert resolved.draft_source == "SRCB"
+
+
+def test_shared_project_warns_and_prints_alignment_and_verses(capsys):
+    shared = candidate("SRCB", parallel=800, alignment=0.6)
+    shared.src_only = 50
+    SameProjectRole(ChoosingConfirmer("draft source")).resolve(shared_role_sign_up(), [shared])
+    out = capsys.readouterr().out
+    assert "Warning: SRCB is both the back translation and the draft source." in out
+    assert "alignment 0.6000, 850 verses, 800 in parallel with the target, 50 not in the target" in out
+
+
+def test_shared_project_without_a_role_stops():
+    confirmer = ChoosingConfirmer(None)
+    shared = candidate("SRCB")
+    shared.src_only = 11
+    with pytest.raises(OnboardingError, match="No role chosen"):
+        SameProjectRole(confirmer).resolve(shared_role_sign_up(), [shared])
 
 
 def test_back_translation_in_another_language_gives_no_pairs():
