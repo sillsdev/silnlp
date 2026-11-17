@@ -26,6 +26,7 @@ from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
 from silnlp.nmt.config import SUPPORTED_GLOSS_ISOS, Config
 
 from ..nmt.config_utils import create_config
+from .auto_onboarding_experiments import process_onboarding_experiments
 from .collect_verse_counts import collect_verse_counts
 from .environment import SilNlpEnv
 from .extract_corpora import ExtractOutput, extract_corpora
@@ -252,8 +253,8 @@ class OnboardingProject:
                     "corpus_pairs": [
                         {
                             "mapping": "many_to_many",
-                            "src": extract_file,
-                            "trg": list(alignments),
+                            "src": list(alignments),
+                            "trg": extract_file,
                             "type": "train",
                         }
                     ],
@@ -261,13 +262,13 @@ class OnboardingProject:
                 }
             }
         else:
-            alignment_projects = set(align_config.get("data", {}).get("corpus_pairs", [])[0].get("trg", []))
+            alignment_projects = set(align_config.get("data", {}).get("corpus_pairs", [])[0].get("src", []))
             alignment_projects.update(ref_project_extract_file_names)
             if iso_standard_alignments:
                 for standard_alignment in iso_standard_alignments:
                     if standard_alignment not in alignment_projects:
                         alignment_projects.add(standard_alignment)
-            align_config["data"]["corpus_pairs"][0]["trg"] = alignment_projects
+            align_config["data"]["corpus_pairs"][0]["src"] = alignment_projects
 
         with open(align_output_dir / "config.yml", "w", encoding="utf-8") as f:
             yaml.dump(align_config, f, allow_unicode=True)
@@ -343,9 +344,12 @@ class OnboardingProject:
 
     def generate_resource_hash(self, resource_path: Path) -> str:
         resource_hash_path = resource_path / ".resource_hash"
+        cache_prefix = "relative-v1:"
         if resource_hash_path.exists():
             with open(resource_hash_path, "r") as f:
-                return f.read().strip()
+                cached_hash = f.read().strip()
+                if cached_hash.startswith(cache_prefix):
+                    return cached_hash[len(cache_prefix) :]
         resource_hash = hashlib.sha256()
         for root, dirs, files in os.walk(resource_path):
             dirs.sort()
@@ -354,16 +358,16 @@ class OnboardingProject:
                 if file == ".resource_hash":
                     continue
                 file_path = os.path.join(root, file)
-                resource_hash.update(file_path.encode())
+                relative_path = os.path.relpath(file_path, resource_path).replace(os.sep, "/")
+                resource_hash.update(relative_path.encode("utf-8"))
                 with open(file_path, "rb") as f:
                     for chunk in iter(lambda: f.read(8192), b""):
                         resource_hash.update(chunk)
 
         resource_hash = resource_hash.hexdigest()
-        resource_hash_path = resource_path / ".resource_hash"
         resource_hash_path.parent.mkdir(parents=True, exist_ok=True)
         with open(resource_hash_path, "w") as f:
-            f.write(resource_hash)
+            f.write(f"{cache_prefix}{resource_hash}")
         return resource_hash
 
     def check_resource_hash(self) -> bool:
@@ -524,16 +528,16 @@ class OnboardingReport:
         corpus_stats_file = self.project.output_folder / "corpus-stats.csv"
         if Path(corpus_stats_file).exists():
             corpus_stats_df = pd.read_csv(corpus_stats_file)
-            alignment_row = corpus_stats_df[corpus_stats_df["trg_project"] == self.project.extract_file.stem]
+            alignment_row = corpus_stats_df[corpus_stats_df["src_project"] == self.project.extract_file.stem]
             if not alignment_row.empty:
                 self.alignment = alignment_row["align_score"].values[0]
-                self.script = alignment_row["trg_script"].values[0]
+                self.script = alignment_row["src_script"].values[0]
             else:
-                alignment_row = corpus_stats_df[corpus_stats_df["src_project"] == self.project.extract_file.stem].head(
+                alignment_row = corpus_stats_df[corpus_stats_df["trg_project"] == self.project.extract_file.stem].head(
                     1
                 )
                 if not alignment_row.empty:
-                    self.script = alignment_row["src_script"].values[0]
+                    self.script = alignment_row["trg_script"].values[0]
 
         nllb_tag = NLLB_TAG_FROM_ISO.get(self.iso_code, None)
         self.lang_in_nllb = nllb_tag is not None
@@ -620,9 +624,9 @@ class OnboardingReportCreator:
         self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books to Translate"] = ";".join(
             self.planned_books
         )
-        self.report_df.loc[
-            self.report_df["Project Type"] == ProjectType.MAIN.value, "Books Missing/Incomplete"
-        ] = ";".join([book for book in self.completed_books if book not in self.main_project.report.completed_books])
+        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books Missing/Incomplete"] = (
+            ";".join([book for book in self.completed_books if book not in self.main_project.report.completed_books])
+        )
         self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Extra Books"] = ";".join(
             [book for book in self.main_project.report.completed_books if book not in self.completed_books]
         )
@@ -640,9 +644,9 @@ class OnboardingReportCreator:
             self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books to Translate"] = (
                 "yes" if len(books_missing) == 0 else "no"
             )
-            self.report_df.loc[
-                self.report_df["Name on Bucket"] == project.project_name, "Books Missing/Incomplete"
-            ] = ";".join(books_missing)
+            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books Missing/Incomplete"] = (
+                ";".join(books_missing)
+            )
             self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Extra Books"] = ";".join(
                 extra_books
             )
@@ -727,7 +731,7 @@ class OnboardingRequest:
         output_folder = onboarding_config.get("output_folder", None)
         self.output_folder: Path | None = Path(output_folder) if output_folder else None
 
-    def process_onboarding_request(self) -> None:
+    def process_onboarding_request(self, experiments: bool = False, clearml_tag: str = "") -> None:
         with self.create_log_file():
             LOGGER.info(f"Processing onboarding request for main project '{self.main_project.project_name}'")
             for project in [self.main_project] + self.reference_projects:
@@ -772,6 +776,9 @@ class OnboardingRequest:
             )
 
             report_creator.create_report_csv()
+
+            if experiments:
+                process_onboarding_experiments(str(self.output_folder), tag=clearml_tag, auto_confirm=True)
 
     def align_main_project(self) -> None:
         iso_codes = set()
@@ -1125,6 +1132,9 @@ def main() -> None:
     parser.add_argument("--completed-books", nargs="+", help="The ids of books that have been completed.")
     parser.add_argument("--planned-books", nargs="+", help="The ids of books planned for translation.")
     parser.add_argument(
+        "--experiments", default=False, action="store_true", help="Run experiments for the onboarding request."
+    )
+    parser.add_argument(
         "--clearml-queue",
         default=None,
         type=str,
@@ -1164,7 +1174,7 @@ def main() -> None:
         for i, main_project in enumerate(args.main_projects):
             project_configs[main_project] = args.config[i]
 
-    onboarding_requests = []
+    onboarding_requests: list[OnboardingRequest] = []
     for main_project in args.main_projects:
         if args.config:
             config_file = Path(project_configs[main_project])
@@ -1196,7 +1206,7 @@ def main() -> None:
                 "planned_books": args.planned_books if args.planned_books else [],
             }
 
-        onboarding_request = OnboardingRequest(config=config, environment=environment)
+        onboarding_request: OnboardingRequest = OnboardingRequest(config=config, environment=environment)
         onboarding_request.prepare_and_upload_projects()
         onboarding_requests.append(onboarding_request)
 
@@ -1223,7 +1233,7 @@ def main() -> None:
         )
 
     for onboarding_request in onboarding_requests:
-        onboarding_request.process_onboarding_request()
+        onboarding_request.process_onboarding_request(args.experiments, args.clearml_tag)
 
 
 if __name__ == "__main__":

@@ -117,7 +117,7 @@ def get_corpus_stats(
                 corpus["score"] = pair_stats["score"]
             else:
                 aligner_id = config.data["aligner"]
-                LOGGER.info(f"Computing alignment beteween {source} and {target} using {get_aligner_name(aligner_id)}")
+                LOGGER.info(f"Computing alignment between {source} and {target} using {get_aligner_name(aligner_id)}")
                 add_alignment_scores(corpus, aligner_id)
                 corpus.to_csv(pair_stats_path, index=False)
 
