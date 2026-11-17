@@ -145,14 +145,21 @@ def check_last_checkpoint_was_used(
 def check_book_draft(exp_dir: Path, expected_translation: str) -> int:
     lines = read_lines(get_book_draft_path(exp_dir))
     assert lines[0] == f"\\id {BOOK}"
+    check_no_blank_lines(lines)
     check_draft_remark(lines, f"project {SOURCE_PROJECT}", PARAGRAPHS_MOVED_REMARK)
     return check_draft_verses(lines, expected_translation)
 
 
 def check_usfm_file_draft(draft_path: Path, expected_paragraph_remark: str, expected_translation: str) -> int:
     lines = read_lines(draft_path)
+    check_no_blank_lines(lines)
     check_draft_remark(lines, f"file {SOURCE_USFM_FILE_NAME}", expected_paragraph_remark)
     return check_draft_verses(lines, expected_translation)
+
+
+def check_no_blank_lines(lines: List[str]):
+    # A line ending written as \r\r\n reads back as a blank line after every line
+    assert "" not in lines
 
 
 def check_draft_remark(lines: List[str], expected_source: str, expected_paragraph_remark: str):
