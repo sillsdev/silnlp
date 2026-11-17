@@ -1,12 +1,13 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, cast
-from unittest.mock import Mock, create_autospec
 
 import torch
-from transformers import AutoModelForCausalLM, PreTrainedModel
+from transformers import LlamaForCausalLM, PreTrainedModel
 from transformers.generation.utils import GenerateDecoderOnlyOutput
 
-from silnlp.nmt.local_llm_config import CausalLMProvider, CausalLMProviderFactory, LocalLLMConfig
+from silnlp.nmt.causal_lm_provider import CausalLMModelSettings, CausalLMProvider, CausalLMProviderFactory
+from silnlp.nmt.experiment_settings import TrainerSettings
+from silnlp.nmt.finetune_method import FinetuneMethod
 
 _TINY_MODEL_NAME = "hf-internal-testing/tiny-random-LlamaForCausalLM"
 
@@ -21,45 +22,59 @@ class CausalModelTrainingStats:
     num_forward_calls: int = 0
     observed_training_batch_sizes: List[int] = field(default_factory=list)
 
-
-def _build_training_model(stats: CausalModelTrainingStats) -> PreTrainedModel:
-    model = cast(PreTrainedModel, AutoModelForCausalLM.from_pretrained(_TINY_MODEL_NAME))
-    underlying_forward = model.forward
-
-    def mock_forward(input_ids: Optional[torch.Tensor] = None, *args, **kwargs):
-        stats.num_forward_calls += 1
+    def record_forward(self, input_ids: Optional[torch.Tensor]) -> None:
+        self.num_forward_calls += 1
         if input_ids is not None:
-            stats.observed_training_batch_sizes.append(input_ids.shape[0])
-        return underlying_forward(input_ids=input_ids, *args, **kwargs)
-
-    model.forward = create_autospec(mock_forward, side_effect=mock_forward)
-    return model
+            self.observed_training_batch_sizes.append(input_ids.shape[0])
 
 
-def _build_inference_model(stats: CausalModelTrainingStats) -> PreTrainedModel:
-    model = _build_training_model(stats)
+class StandInCausalModel(LlamaForCausalLM):
+    """The tiny test model, recording the batches it is trained on."""
 
-    def mock_generate(*args, **kwargs) -> GenerateDecoderOnlyOutput:
+    @classmethod
+    def create(cls, stats: CausalModelTrainingStats) -> "StandInCausalModel":
+        model = cast("StandInCausalModel", cls.from_pretrained(_TINY_MODEL_NAME))
+        model.stats = stats
+        return model
+
+    # The Trainer reads this signature twice: to choose which dataset columns to keep, and to find
+    # the label argument, so labels has to be named here or the labels column is dropped.
+    def forward(self, input_ids: Optional[torch.Tensor] = None, labels: Optional[torch.Tensor] = None, *args, **kwargs):
+        self.stats.record_forward(input_ids)
+        return super().forward(input_ids=input_ids, labels=labels, *args, **kwargs)
+
+
+class GeneratingStandInCausalModel(StandInCausalModel):
+    """The stand-in used for inference, which appends a fixed block of tokens to every prompt."""
+
+    def generate(self, *args, **kwargs) -> GenerateDecoderOnlyOutput:
         input_ids: torch.Tensor = kwargs["input_ids"]
-        batch_size = input_ids.shape[0]
-        appended = torch.tensor([_MOCK_NEW_TOKEN_IDS], dtype=torch.long, device=input_ids.device).repeat(batch_size, 1)
-        sequences = torch.cat([input_ids, appended], dim=1)
+        prompts = input_ids.repeat_interleave(kwargs.get("num_return_sequences", 1), dim=0)
+        appended = torch.tensor([_MOCK_NEW_TOKEN_IDS], dtype=torch.long, device=input_ids.device).repeat(
+            prompts.shape[0], 1
+        )
+        sequences = torch.cat([prompts, appended], dim=1)
         return GenerateDecoderOnlyOutput(sequences=cast(torch.LongTensor, sequences))
-
-    model.generate = Mock(side_effect=mock_generate)
-    return model
 
 
 class MockCausalLMProvider(CausalLMProvider):
-    def __init__(self, config: LocalLLMConfig, mixed_precision: bool, stats: CausalModelTrainingStats):
-        super().__init__(config, mixed_precision)
+    def __init__(
+        self,
+        model: str,
+        settings: CausalLMModelSettings,
+        finetuning: FinetuneMethod,
+        trainer_settings: TrainerSettings,
+        mixed_precision: bool,
+        stats: CausalModelTrainingStats,
+    ):
+        super().__init__(model, settings, finetuning, trainer_settings, mixed_precision)
         self._stats = stats
 
     def create_model_for_training(self) -> PreTrainedModel:
-        return _build_training_model(self._stats)
+        return StandInCausalModel.create(self._stats)
 
     def create_model_for_inference(self, checkpoint_path) -> PreTrainedModel:
-        return _build_inference_model(self._stats)
+        return GeneratingStandInCausalModel.create(self._stats)
 
 
 class MockCausalLMProviderFactory(CausalLMProviderFactory):
@@ -70,5 +85,12 @@ class MockCausalLMProviderFactory(CausalLMProviderFactory):
     def stats(self) -> CausalModelTrainingStats:
         return self._stats
 
-    def create(self, config: LocalLLMConfig, mixed_precision: bool) -> CausalLMProvider:
-        return MockCausalLMProvider(config, mixed_precision, self._stats)
+    def create(
+        self,
+        model: str,
+        settings: CausalLMModelSettings,
+        finetuning: FinetuneMethod,
+        trainer_settings: TrainerSettings,
+        mixed_precision: bool,
+    ) -> CausalLMProvider:
+        return MockCausalLMProvider(model, settings, finetuning, trainer_settings, mixed_precision, self._stats)

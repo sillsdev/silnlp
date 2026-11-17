@@ -1,13 +1,10 @@
 import logging
-from pathlib import Path
-from tempfile import TemporaryDirectory
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from machine.corpora import (
-    AlignedWordPair,
     PlaceMarkersAlignmentInfo,
     PlaceMarkersUsfmUpdateBlockHandler,
-    ScriptureRef,
     UpdateUsfmMarkerBehavior,
     UpdateUsfmParserHandler,
     UpdateUsfmRow,
@@ -30,12 +27,11 @@ from machine.punctuation_analysis import (
     QuoteConventionDetector,
 )
 from machine.tokenization import LatinWordTokenizer
-from machine.translation import WordAlignmentMatrix
 
-from ..alignment.utils import compute_alignment_scores
+from ..alignment.sentence_aligner import SentenceAligner, ToolSentenceAligner
 from ..nmt.corpora import CorpusPair
-from .corpus import load_corpus, write_corpus
 from .environment import SilNlpEnv
+from .translated_segment import TranslatedSegment
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
 
@@ -268,10 +264,63 @@ class DenormalizeQuotationMarksPostprocessor:
         return tokenizer.detokenize(out_tokens)
 
 
-class PostprocessConfig:
-    def __init__(self, config: dict = {}, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> None:
-        self._config = {}
+class TrainingTargetProjects:
+    """The target projects an experiment trained on. A quote convention is detected from them, which
+    only makes sense for an experiment that trained on exactly one."""
+
+    def __init__(self, corpus_pairs: List[CorpusPair]) -> None:
+        # Conventions are detected from a pair's Paratext project, which basic corpora don't come from.
+        self._corpus_pairs = [corpus_pair for corpus_pair in corpus_pairs if corpus_pair.is_scripture]
+
+    def candidates(self) -> List[Tuple[Optional[str], Optional[Dict[int, List[int]]]]]:
+        self._warn_if_ambiguous()
+        if len(self._corpus_pairs) > 0 and len(self._corpus_pairs[0].trg_files) > 0:
+            return [(pair.trg_files[0].project, pair.corpus_books) for pair in self._corpus_pairs]
+        return [(None, None)]
+
+    def _warn_if_ambiguous(self) -> None:
+        for description, count in (
+            ("corpus pairs", len(self._corpus_pairs)),
+            ("source projects", len(self._corpus_pairs[0].src_files) if self._corpus_pairs else 0),
+            ("target projects", len(self._corpus_pairs[0].trg_files) if self._corpus_pairs else 0),
+        ):
+            if count > 1:
+                LOGGER.warning(
+                    f"The experiment has multiple {description}. "
+                    "Quotation mark denormalization is unlikely to work correctly in this scenario."
+                )
+
+
+class QuoteConventionSource:
+    """Where the quote convention a draft is denormalized to comes from: the one the experiment
+    configured, or one detected in the projects it trained on."""
+
+    def __init__(
+        self, configured_convention: Optional[str], detects_from_training: bool, environment: SilNlpEnv
+    ) -> None:
+        self._configured_convention = configured_convention
+        self._detects_from_training = detects_from_training
         self._environment = environment
+
+    def create_postprocessor(self, corpus_pairs: List[CorpusPair]) -> DenormalizeQuotationMarksPostprocessor:
+        if self._detects_from_training:
+            candidates = TrainingTargetProjects(corpus_pairs).candidates()
+        else:
+            candidates = [(None, None)]
+        for project_name, include_chapters in candidates:
+            try:
+                return DenormalizeQuotationMarksPostprocessor(
+                    self._configured_convention, project_name, include_chapters, self._environment
+                )
+            except NoDetectedQuoteConventionException:
+                LOGGER.warning("No quote convention was detected for project %s" % project_name)
+
+        raise NoDetectedQuoteConventionException([name for name, _ in candidates if name is not None])
+
+
+class PostprocessConfig:
+    def __init__(self, config: dict = {}) -> None:
+        self._config = {}
         for option, default in POSTPROCESS_DEFAULTS.items():
             self._config[option] = config.get(option, default)
 
@@ -282,9 +331,6 @@ class PostprocessConfig:
             self._config["include_style_markers"] = True
         if config.get("include_inline_elements"):
             self._config["include_embeds"] = True
-
-        self.update_block_handlers: List[UsfmUpdateBlockHandler] = []
-        self.rows: List[UpdateUsfmRow] = []
 
     def _get_usfm_marker_behavior(self, preserve: bool) -> UpdateUsfmMarkerBehavior:
         return UpdateUsfmMarkerBehavior.PRESERVE if preserve else UpdateUsfmMarkerBehavior.STRIP
@@ -326,6 +372,12 @@ class PostprocessConfig:
             or self._config["include_embeds"]
         )
 
+    def places_paragraphs(self) -> bool:
+        return self._config["paragraph_behavior"] == "place"
+
+    def target_quote_convention(self) -> Optional[str]:
+        return self._config["target_quote_convention"]
+
     def is_quotation_mark_denormalization_required(self) -> bool:
         return self._config["denormalize_quotation_marks"]
 
@@ -341,59 +393,13 @@ class PostprocessConfig:
             style_behavior=self.get_style_behavior(),
         )
 
-    def create_denormalize_quotation_marks_postprocessor(
-        self, training_corpus_pairs: List[CorpusPair]
-    ) -> DenormalizeQuotationMarksPostprocessor:
-        training_project_info = self._get_training_project_info(
-            training_corpus_pairs,
-        )
-        for training_target_project_name, include_chapters in training_project_info:
 
-            try:
-                return DenormalizeQuotationMarksPostprocessor(
-                    self._config["target_quote_convention"],
-                    training_target_project_name,
-                    include_chapters,
-                    self._environment,
-                )
-            except NoDetectedQuoteConventionException:
-                LOGGER.warning("No quote convention was detected for project %s" % training_target_project_name)
+@dataclass(frozen=True)
+class DocumentUpdate:
+    """The rows a document is updated with under one postprocessing configuration."""
 
-        raise NoDetectedQuoteConventionException(
-            [project_name for project_name, _ in training_project_info if project_name is not None]
-        )
-
-    def _get_training_project_info(
-        self,
-        training_corpus_pairs: List[CorpusPair],
-    ) -> List[Tuple[Optional[str], Optional[Dict[int, List[int]]]]]:
-        # Target project info is only needed for quote convention detection
-        if self.is_quote_convention_detection_required():
-            # Conventions are detected from a pair's Paratext project, which basic corpora don't come from.
-            scripture_pairs = [corpus_pair for corpus_pair in training_corpus_pairs if corpus_pair.is_scripture]
-            if len(scripture_pairs) > 1:
-                LOGGER.warning(
-                    "The experiment has multiple corpus pairs. "
-                    "Quotation mark denormalization is unlikely to work correctly in this scenario."
-                )
-            if len(scripture_pairs) > 0 and len(scripture_pairs[0].src_files) > 1:
-                LOGGER.warning(
-                    "The experiment has multiple source projects. "
-                    "Quotation mark denormalization is unlikely to work correctly in this scenario."
-                )
-            if len(scripture_pairs) > 0 and len(scripture_pairs[0].trg_files) > 1:
-                LOGGER.warning(
-                    "The experiment has multiple target projects. "
-                    "Quotation mark denormalization is unlikely to work correctly in this scenario."
-                )
-
-            if len(scripture_pairs) > 0 and len(scripture_pairs[0].trg_files) > 0:
-                return [(corpus_pair.trg_files[0].project, corpus_pair.corpus_books) for corpus_pair in scripture_pairs]
-
-        return [(None, None)]
-
-    def __getitem__(self, key):
-        return self._config[key]
+    config: PostprocessConfig
+    rows: List[UpdateUsfmRow]
 
 
 class PostprocessHandler:
@@ -402,40 +408,57 @@ class PostprocessHandler:
         configs: Optional[List[PostprocessConfig]] = None,
         include_base: bool = True,
         environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+        aligner: Optional[SentenceAligner] = None,
     ) -> None:
         if configs is None:
             configs = []
-        self.configs = ([PostprocessConfig({}, environment)] if include_base else []) + configs
+
+        self.configs = ([PostprocessConfig({})] if include_base else []) + configs
+        self._aligner = aligner if aligner is not None else ToolSentenceAligner()
 
     # NOTE: Row metadata may need to be created/recreated at different times
     # For example, the marker placement metadata needs to be recreated for each new draft
     # because it uses text alignment, but other metadata may only need to be created once overall,
     # or once per source project. This may change what part of the process we want this function to be called at
-    def construct_rows(self, refs: List[ScriptureRef], source: List[str], translation: List[str], train_source: List[str], train_target: List[str]) -> None:
-        for config in self.configs:
-            config.rows = [UpdateUsfmRow([ref], t, {}) for ref, t in zip(refs, translation)]
-
-        self._construct_place_markers_metadata(source, translation, train_source, train_target)
+    def construct_rows(
+        self, segments: Sequence[TranslatedSegment], train_source: List[str], train_target: List[str]
+    ) -> List[DocumentUpdate]:
+        updates = [
+            DocumentUpdate(
+                config, [UpdateUsfmRow([segment.ref], segment.translation, {}) for segment in segments]
+            )
+            for config in self.configs
+        ]
+        self._construct_place_markers_metadata(updates, segments, train_source, train_target)
+        return updates
 
     def _construct_place_markers_metadata(
-        self, source: List[str], translation: List[str], train_source: List[str], train_target: List[str], aligner: str = "eflomal"
+        self,
+        updates: Sequence["DocumentUpdate"],
+        segments: Sequence[TranslatedSegment],
+        train_source: List[str],
+        train_target: List[str],
     ) -> None:
-        pm_configs = [
-            config
-            for config in self.configs
-            if config["paragraph_behavior"] == "place" or config["include_style_markers"]
+        pm_updates = [
+            update
+            for update in updates
+            if update.config.is_marker_placement_required()
         ]
-        if len(pm_configs) == 0:
+        if len(pm_updates) == 0:
             return
 
         tokenizer = LatinWordTokenizer()
-        alignments = self._get_alignment_matrices(source + train_source, translation + train_target, aligner, only_fetch_alignments_for_first_n=len(source))
-        for i, (s, t, alignment) in enumerate(zip(source, translation, alignments)):
-            source_tokens = list(tokenizer.tokenize(s))
-            translation_tokens = list(tokenizer.tokenize(t))
+        # The training corpus is aligned alongside the draft to give the aligner more to learn from.
+        alignments = self._aligner.align(
+            [segment.source for segment in segments] + list(train_source),
+            [segment.translation for segment in segments] + list(train_target),
+        )[: len(segments)]
+        for i, (segment, alignment) in enumerate(zip(segments, alignments)):
+            source_tokens = list(tokenizer.tokenize(segment.source))
+            translation_tokens = list(tokenizer.tokenize(segment.translation))
 
-            for config in pm_configs:
-                row_metadata = config.rows[i].metadata
+            for update in pm_updates:
+                row_metadata = update.rows[i].metadata
                 if row_metadata is not None:
                     row_metadata["alignment_info"] = PlaceMarkersAlignmentInfo(
                         source_tokens=source_tokens,
@@ -443,30 +466,8 @@ class PostprocessHandler:
                         alignment=alignment,
                         paragraph_behavior=(
                             UpdateUsfmMarkerBehavior.PRESERVE
-                            if config["paragraph_behavior"] == "place"
+                            if update.config.places_paragraphs()
                             else UpdateUsfmMarkerBehavior.STRIP
                         ),
-                        style_behavior=config.get_style_behavior(),
+                        style_behavior=update.config.get_style_behavior(),
                     )
-
-    def _get_alignment_matrices(
-        self, src_sents: List[str], trg_sents: List[str], aligner: str = "eflomal", only_fetch_alignments_for_first_n: int | None = None 
-    ) -> List[WordAlignmentMatrix]:
-        with TemporaryDirectory() as td:
-            align_path = Path(td, "sym-align.txt")
-            write_corpus(Path(td, "src_align.txt"), src_sents)
-            write_corpus(Path(td, "trg_align.txt"), trg_sents)
-            compute_alignment_scores(Path(td, "src_align.txt"), Path(td, "trg_align.txt"), aligner, align_path)
-
-            return [_to_word_alignment_matrix(line) for line in list(load_corpus(align_path))[:only_fetch_alignments_for_first_n]]
-
-def _to_word_alignment_matrix(alignment_str: str) -> WordAlignmentMatrix:
-    word_pairs = AlignedWordPair.from_string(alignment_str)
-    row_count = 0
-    column_count = 0
-    for pair in word_pairs:
-        if pair.source_index + 1 > row_count:
-            row_count = pair.source_index + 1
-        if pair.target_index + 1 > column_count:
-            column_count = pair.target_index + 1
-    return WordAlignmentMatrix.from_word_pairs(row_count, column_count, word_pairs)

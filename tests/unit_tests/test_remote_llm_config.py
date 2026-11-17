@@ -9,9 +9,9 @@ from unittest.mock import Mock
 import pytest
 import yaml
 
-from silnlp.nmt.config import Language
-from silnlp.nmt.config_utils import is_local_llm_config, is_remote_llm_config
+from silnlp.nmt.config_utils import ConfiguredModelType
 from silnlp.nmt.example_retrieval import Example, TargetLanguageProfile
+from silnlp.nmt.experiment_languages import Language
 from silnlp.nmt.remote_llm_config import (
     BatchReplyReader,
     CodeFenceRemover,
@@ -41,18 +41,18 @@ ES = Language("es", "Spanish")
 
 
 def test_is_remote_llm_config_requires_an_explicit_model_type():
-    assert is_remote_llm_config({"model_type": "remote_llm", "model": "anthropic/claude-sonnet-4-5"})
-    assert is_remote_llm_config({"model_type": "REMOTE_LLM", "model": "gpt-4o"})
+    assert ConfiguredModelType({"model_type": "remote_llm", "model": "anthropic/claude-sonnet-4-5"}).is_remote_llm()
+    assert ConfiguredModelType({"model_type": "REMOTE_LLM", "model": "gpt-4o"}).is_remote_llm()
     # A LiteLLM model string is arbitrary, so it is never recognized on its own.
-    assert not is_remote_llm_config({"model": "anthropic/claude-sonnet-4-5"})
-    assert not is_remote_llm_config({})
+    assert not ConfiguredModelType({"model": "anthropic/claude-sonnet-4-5"}).is_remote_llm()
+    assert not ConfiguredModelType({}).is_remote_llm()
 
 
 def test_an_remote_llm_config_is_not_claimed_by_the_llm_dispatch():
     # google/gemma matches LLM_MODEL_PREFIXES, but the explicit model_type has to win.
     config = {"model_type": "remote_llm", "model": "google/gemma-2-2b-it"}
-    assert is_remote_llm_config(config)
-    assert not is_local_llm_config(config)
+    assert ConfiguredModelType(config).is_remote_llm()
+    assert not ConfiguredModelType(config).is_local_llm()
 
 
 # --- response parsing -------------------------------------------------------------------
@@ -246,8 +246,9 @@ def test_config_rejects_a_negative_number_of_examples(tmp_path: Path):
 
 def test_language_falls_back_to_the_iso_code(tmp_path: Path):
     config = make_config(tmp_path)
-    assert config.language("en") == EN
-    assert config.language("xyz") == Language("xyz", "xyz")
+    languages = config.create_languages()
+    assert languages.of("en") == EN
+    assert languages.of("xyz") == Language("xyz", "xyz")
 
 
 def test_create_tokenizer_is_a_no_op(tmp_path: Path):
@@ -514,7 +515,7 @@ def make_model(
         write_training_corpus(tmp_path)
     client = ScriptedClient(responder, logprobs_supported, token_logprobs, tokens_per_word)
     config = make_config(tmp_path, **overrides)
-    return RemoteLLMModel(config, ScriptedClientFactory(client)), client
+    return RemoteLLMModel(config, config.create_languages(), ScriptedClientFactory(client)), client
 
 
 def translations_of(groups, draft: int = 0) -> List[str]:
@@ -633,16 +634,18 @@ def test_a_reply_with_an_aside_still_writes_one_line_per_source(tmp_path: Path):
     assert (tmp_path / "out.txt").read_text(encoding="utf-8").splitlines() == ["sea la luz", "sea la luz"]
 
 
-def test_translate_test_files_writes_one_file_per_draft(tmp_path: Path):
+def test_translate_test_files_writes_each_draft_where_scoring_reads_it(tmp_path: Path):
     (tmp_path / "test.src.txt").write_text("one\n", encoding="utf-8")
     model, _ = make_model(
         tmp_path, lambda messages: "hola", infer={"num_drafts": 2, "temperature": 0.8, "concurrency": 1}
     )
 
-    model.translate_test_files([tmp_path / "test.src.txt"], [tmp_path / "out.txt"], produce_multiple_translations=True)
+    model.translate_test_files(
+        [tmp_path / "test.src.txt"], [tmp_path / "test.trg-predictions.txt.1"], produce_multiple_translations=True
+    )
 
-    assert (tmp_path / "out.1.txt").is_file()
-    assert (tmp_path / "out.2.txt").is_file()
+    assert (tmp_path / "test.trg-predictions.1.txt.1").is_file()
+    assert (tmp_path / "test.trg-predictions.2.txt.1").is_file()
 
 
 # --- training ---------------------------------------------------------------------------
@@ -673,9 +676,9 @@ def test_train_writes_a_checkpoint_so_the_last_checkpoint_resolves(tmp_path: Pat
 
     model.train()
 
-    path, step = model.get_checkpoint_path("last")
-    assert step == 1
-    assert path == tmp_path / "run" / "checkpoint-1"
+    checkpoint = model.resolve_checkpoint("last")
+    assert checkpoint.step == 1
+    assert checkpoint.path == tmp_path / "run" / "checkpoint-1"
 
 
 def test_train_in_full_corpus_mode_writes_a_checkpoint_but_no_index(tmp_path: Path):
@@ -1122,7 +1125,7 @@ def test_translating_logs_the_usage_and_cost(tmp_path: Path, caplog):
     )
     write_training_corpus(tmp_path)
     config = make_config(tmp_path, infer={"concurrency": 1})
-    model = RemoteLLMModel(config, ScriptedClientFactory(client))
+    model = RemoteLLMModel(config, config.create_languages(), ScriptedClientFactory(client))
 
     with caplog.at_level("INFO"):
         list(model.translate(["one", "two"], "en", "es"))

@@ -8,12 +8,12 @@ import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Generic, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Dict, Generic, List, Optional, Sequence, TypeVar, Union
 
 from ..common.environment import SilNlpEnv
 from ..common.utils import merge_dict
-from .config import Config, Language
-from .corpora import DataFile
+from .config import Config
+from .dictionary_writer import DictionaryWriter, NoDictionaryWriter
 from .example_retrieval import (
     CorpusPair,
     CorpusPairProvider,
@@ -21,6 +21,7 @@ from .example_retrieval import (
     ExampleFormatter,
     ExampleFormatterFactory,
     ExamplePool,
+    ExamplePools,
     ExamplePoolSummary,
     ExampleRetriever,
     ExampleRetrieverFactory,
@@ -28,7 +29,9 @@ from .example_retrieval import (
     TargetLanguageProfile,
     TranslationMemory,
 )
+from .experiment_languages import Language
 from .tokenizer import NullTokenizer, Tokenizer
+from .vocabulary_builder import NoVocabularyBuilder, VocabularyBuilder
 
 LOGGER = logging.getLogger(__name__)
 
@@ -373,7 +376,7 @@ class LLMConfig(Config, Generic[TPromptMessages]):
 
         super().__init__(exp_dir, config, environment)
 
-        if len(self.src_isos) > 1 or len(self.trg_isos) > 1:
+        if len(self.corpus_inventory.source_isos()) > 1 or len(self.corpus_inventory.target_isos()) > 1:
             raise RuntimeError(
                 f"{type(self).__name__} experiments only support a single source language and a single "
                 "target language."
@@ -446,7 +449,7 @@ class LLMConfig(Config, Generic[TPromptMessages]):
         return FixedCorpusPairProvider(self._train_corpus_pair())
 
     def _train_corpus_pair(self) -> CorpusPair:
-        return CorpusPair(self.exp_dir / self.train_src_filename(), self.exp_dir / self.train_trg_filename())
+        return CorpusPair(self.files.train_source(), self.files.train_target())
 
     def get_infer_prompt_builder(self) -> PromptBuilder[TPromptMessages]:
         return self._infer_prompt_builder
@@ -455,8 +458,7 @@ class LLMConfig(Config, Generic[TPromptMessages]):
         return [pool for pool in (self._infer_example_pool,) if pool is not None]
 
     def check_example_corpora(self) -> None:
-        for pool in self.example_pools():
-            pool.ensure_available()
+        ExamplePools(self.example_pools()).ensure_available()
 
     def save_example_index(self, directory: Path) -> None:
         if self._infer_example_pool is not None:
@@ -468,29 +470,12 @@ class LLMConfig(Config, Generic[TPromptMessages]):
     def summarize_example_pool(self) -> Optional[ExamplePoolSummary]:
         return None if self._infer_example_pool is None else self._infer_example_pool.summarize()
 
-    def lang_name(self, iso: str) -> str:
-        return self.data["lang_codes"].get(iso, iso)
-
-    def language(self, iso: str) -> Language:
-        return Language(iso=iso, name=self.lang_name(iso))
-
-    def get_train_src_iso(self) -> str:
-        return self.default_test_src_iso or (next(iter(self.src_isos)) if len(self.src_isos) > 0 else "")
-
-    def get_train_trg_iso(self) -> str:
-        return self.default_test_trg_iso or (next(iter(self.trg_isos)) if len(self.trg_isos) > 0 else "")
-
     # We don't need to build a SentencePiece tokenizer for LLMs -- the vocabulary is built in
     def create_tokenizer(self) -> Tokenizer:
         return NullTokenizer()
 
-    def _build_vocabs(self, stats: bool = False) -> None:
-        return
+    def create_vocabulary_builder(self) -> VocabularyBuilder:
+        return NoVocabularyBuilder()
 
-    def _write_dictionary(
-        self,
-        tokenizer: Tokenizer,
-        src_terms_files: List[Tuple[DataFile, List[str]]],
-        trg_terms_files: List[Tuple[DataFile, List[str]]],
-    ) -> int:
-        return 0
+    def _dictionary_writer(self, tokenizer: Tokenizer) -> DictionaryWriter:
+        return NoDictionaryWriter()

@@ -2,7 +2,7 @@ import argparse
 import logging
 import re
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 import yaml
 from attr import dataclass
@@ -21,20 +21,23 @@ from transformers.trainer_utils import get_last_checkpoint
 
 from ..common.corpus import load_corpus
 from ..common.environment import SilNlpEnv
-from ..common.paratext import book_file_name_digits, get_book_path
+from ..common.paratext import get_book_path
 from ..common.postprocessor import (
     NoDetectedQuoteConventionException,
     PostprocessConfig,
     PostprocessHandler,
+    QuoteConventionSource,
     UnknownQuoteConventionException,
 )
+from ..common.translated_segment import TranslatedSegment
 from ..common.usfm_utils import PARAGRAPH_TYPE_EMBEDS
 from ..common.utils import get_git_revision_hash
+from .checkpoints import CheckpointDirectory
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config
 from .config_utils import load_config
 from .corpora import CorpusPair
-from .seq2seq_config import get_best_checkpoint
+from .draft_files import DraftFiles
 
 LOGGER = logging.getLogger(__package__ + ".postprocess")
 
@@ -103,48 +106,62 @@ class DraftMetadata:
     source_project: str
 
 
-# Get the paths of all drafts that would be produced by an experiment's translate config and that exist
-def get_draft_paths_from_exp(config: Config, environment: SilNlpEnv) -> List[DraftMetadata]:
-    with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as translate_config_file:
-        translate_requests = yaml.safe_load(translate_config_file).get("translate", [])
+class ExperimentDrafts:
+    """The drafts an experiment's translate config asks for, as far as they have been written."""
 
-    draft_metadata_list = []
-    for translate_request in translate_requests:
-        src_project = translate_request.get("src_project", next(iter(config.src_projects)))
+    def __init__(
+        self,
+        files: DraftFiles,
+        model_dir: Path,
+        source_projects: Set[str],
+        num_drafts: int,
+        environment: SilNlpEnv,
+    ) -> None:
+        self._files = files
+        self._model_dir = model_dir
+        self._source_projects = source_projects
+        self._num_drafts = num_drafts
+        self._environment = environment
 
-        ckpt = translate_request.get("checkpoint", "last")
-        if ckpt == "best":
-            step_str = get_best_checkpoint(config.model_dir).name[11:]
-        elif ckpt == "last":
-            step_str = Path(get_last_checkpoint(config.model_dir)).name[11:]
-        else:
-            step_str = str(ckpt)
+    def existing(self) -> List[DraftMetadata]:
+        with self._files.translate_config().open("r", encoding="utf-8") as translate_config_file:
+            translate_requests = yaml.safe_load(translate_config_file).get("translate", [])
 
-        book_nums = get_chapters(translate_request.get("books", [])).keys()
-        for book_num in book_nums:
-            book = book_number_to_id(book_num)
+        draft_metadata_list = []
+        for translate_request in translate_requests:
+            src_project = translate_request.get("src_project", next(iter(self._source_projects)))
+            step_str = self._step_of(translate_request.get("checkpoint", "last"))
 
-            src_path = get_book_path(src_project, book, environment)
-            draft_path = (
-                config.exp_dir / "infer" / step_str / src_project / f"{book_file_name_digits(book_num)}{book}.SFM"
-            )
-            if draft_path.exists():
-                draft_metadata_list.append(
-                    DraftMetadata(source_path=src_path, draft_path=draft_path, source_project=src_project)
-                )
-            elif draft_path.with_suffix(f".{1}{draft_path.suffix}").exists():  # multiple drafts
-                for i in range(1, config.infer.get("num_drafts", 1) + 1):
+            book_nums = get_chapters(translate_request.get("books", [])).keys()
+            for book_num in book_nums:
+                book = book_number_to_id(book_num)
+
+                src_path = get_book_path(src_project, book, self._environment)
+                draft_path = self._files.draft(step_str, src_project, book_num)
+                if draft_path.exists():
                     draft_metadata_list.append(
-                        DraftMetadata(
-                            source_path=src_path,
-                            draft_path=draft_path.with_suffix(f".{i}{draft_path.suffix}"),
-                            source_project=src_project,
-                        )
+                        DraftMetadata(source_path=src_path, draft_path=draft_path, source_project=src_project)
                     )
-            else:
-                LOGGER.warning(f"Draft not found: {draft_path}")
+                elif draft_path.with_suffix(f".{1}{draft_path.suffix}").exists():  # multiple drafts
+                    for i in range(1, self._num_drafts + 1):
+                        draft_metadata_list.append(
+                            DraftMetadata(
+                                source_path=src_path,
+                                draft_path=draft_path.with_suffix(f".{i}{draft_path.suffix}"),
+                                source_project=src_project,
+                            )
+                        )
+                else:
+                    LOGGER.warning(f"Draft not found: {draft_path}")
 
-    return draft_metadata_list
+        return draft_metadata_list
+
+    def _step_of(self, checkpoint: str) -> str:
+        if checkpoint == "best":
+            return str(CheckpointDirectory(self._model_dir).best().step)
+        if checkpoint == "last":
+            return Path(get_last_checkpoint(self._model_dir)).name[11:]
+        return str(checkpoint)
 
 
 def postprocess_draft(
@@ -191,22 +208,23 @@ def postprocess_draft(
             )
             return
 
+    train_src_sentences = []
+    train_trg_sentences = []
+    if train_src_filepath is not None and train_trg_filepath is not None:
+        train_src_sentences = list(load_corpus(train_src_filepath))
+        train_trg_sentences = list(load_corpus(train_trg_filepath))
+
+    updates = postprocess_handler.construct_rows(
+        [
+            TranslatedSegment(source.ref, source.text, draft.text)
+            for source, draft in zip(src_sentences.sentences, draft_sentences.sentences)
+        ],
+        train_src_sentences,
+        train_trg_sentences,
+    )
+
     source_usfm = None
-    if any(config.is_marker_processing_required() for config in postprocess_handler.configs):
-        train_src_sentences = []
-        train_trg_sentences = []
-        if train_src_filepath is not None and train_trg_filepath is not None:
-            train_src_sentences = list(load_corpus(train_src_filepath))
-            train_trg_sentences = list(load_corpus(train_trg_filepath))
-
-        postprocess_handler.construct_rows(
-            [s.ref for s in src_sentences.sentences],
-            [s.text for s in src_sentences.sentences],
-            [s.text for s in draft_sentences.sentences],
-            train_src_sentences,
-            train_trg_sentences
-        )
-
+    if any(update.config.is_marker_processing_required() for update in updates):
         with draft_metadata.source_path.open(encoding=encoding) as f:
             source_usfm = f.read()
         if draft_chapters:
@@ -215,7 +233,8 @@ def postprocess_draft(
                 filter_tokens_by_chapter(tokenizer.tokenize(source_usfm), draft_chapters)
             )
 
-    for config in postprocess_handler.configs:
+    for update in updates:
+        config = update.config
         if config.is_marker_processing_required():
             place_markers_postprocessor = config.create_place_markers_postprocessor()
             source_remark_texts = {text.strip() for _, text in src_sentences.remarks}
@@ -225,7 +244,7 @@ def postprocess_draft(
                 if text.strip() not in source_remark_texts
             ]
             target_usfm = place_markers_postprocessor.postprocess_usfm(
-                source_usfm, config.rows, remarks, stylesheet=stylesheet
+                source_usfm, update.rows, remarks, stylesheet=stylesheet
             )
         else:
             with draft_metadata.draft_path.open(encoding=encoding) as f:
@@ -233,9 +252,11 @@ def postprocess_draft(
 
         if config.is_quotation_mark_denormalization_required():
             try:
-                quotation_denormalization_postprocessor = config.create_denormalize_quotation_marks_postprocessor(
-                    training_corpus_pairs,
-                )
+                quotation_denormalization_postprocessor = QuoteConventionSource(
+                    config.target_quote_convention(),
+                    config.is_quote_convention_detection_required(),
+                    environment,
+                ).create_postprocessor(training_corpus_pairs)
                 target_usfm = quotation_denormalization_postprocessor.postprocess_usfm(
                     target_usfm, stylesheet=stylesheet
                 )
@@ -261,11 +282,18 @@ def postprocess_experiment(
     out_dir: Optional[Path] = None,
     environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
 ) -> None:
-    draft_metadata_list = get_draft_paths_from_exp(config, environment)
+    files = DraftFiles(config.exp_dir)
+    draft_metadata_list = ExperimentDrafts(
+        files,
+        config.model_dir,
+        config.corpus_inventory.source_projects(),
+        config.infer.get("num_drafts", 1),
+        environment,
+    ).existing()
 
-    with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
+    with files.translate_config().open("r", encoding="utf-8") as file:
         translate_config = yaml.safe_load(file)
-        postprocess_configs = [PostprocessConfig(pc, environment) for pc in translate_config.get("postprocess", [])]
+        postprocess_configs = [PostprocessConfig(pc) for pc in translate_config.get("postprocess", [])]
 
     if postprocess_handler is None:
         postprocess_handler = PostprocessHandler(postprocess_configs, include_base=False, environment=environment)
@@ -278,8 +306,8 @@ def postprocess_experiment(
                 out_dir=out_dir,
                 training_corpus_pairs=config.corpus_pairs,
                 environment=environment,
-                train_src_filepath=config.exp_dir / config.train_src_detok_filename(),
-                train_trg_filepath=config.exp_dir / config.train_trg_detok_filename()
+                train_src_filepath=config.files.train_source_detokenized(),
+                train_trg_filepath=config.files.train_target_detokenized(),
             )
 
 
@@ -314,7 +342,7 @@ def main() -> None:
 
     if args.clearml_queue is not None:
         clearml = SILClearML(args.experiment, args.clearml_queue, environment=environment)
-        config = clearml.config
+        config = load_config(clearml.name, environment)
     else:
         config = load_config(args.experiment.replace("\\", "/"), environment)
     config.set_seed()

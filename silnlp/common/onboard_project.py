@@ -23,9 +23,11 @@ from machine.scripture.canon import book_id_to_number, book_number_to_id
 from silnlp.common.analyze import analyze
 from silnlp.common.clean_projects import process_single_project_for_cleaning
 from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
-from silnlp.nmt.config import SUPPORTED_GLOSS_ISOS, Config
+from silnlp.nmt.config import Config
+from silnlp.nmt.terms import GlossLanguages
 
 from ..nmt.config_utils import create_config
+from ..nmt.preprocessor import Preprocessor
 from .collect_verse_counts import collect_verse_counts
 from .environment import SilNlpEnv
 from .extract_corpora import ExtractOutput, extract_corpora
@@ -190,7 +192,11 @@ class OnboardingProject:
 
         config.set_seed()
         try:
-            config.preprocess(stats=True, force_align=True)
+            Preprocessor(
+                config.corpus_inventory,
+                config.create_vocabulary_builder(),
+                config.create_data_set_writer(force_align=True),
+            ).run(stats=True)
 
             tokenization_stats_csv = stats_dir / "tokenization_stats.csv"
             tokenization_stats_xlsx = stats_dir / "tokenization_stats.xlsx"
@@ -513,8 +519,9 @@ class OnboardingReport:
         self.name = settings.full_name
         self.short_name = settings.name
         self.iso_code = settings.language_code
-        self.key_terms_glosses_exist = (
-            self.iso_code in SUPPORTED_GLOSS_ISOS or ALT_ISO.get_alternative(self.iso_code) in SUPPORTED_GLOSS_ISOS
+        gloss_languages = GlossLanguages()
+        self.key_terms_glosses_exist = gloss_languages.includes(self.iso_code) or gloss_languages.includes(
+            ALT_ISO.get_alternative(self.iso_code)
         )
         self.key_terms_type = settings.biblical_terms_list_type
 
@@ -620,9 +627,9 @@ class OnboardingReportCreator:
         self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books to Translate"] = ";".join(
             self.planned_books
         )
-        self.report_df.loc[
-            self.report_df["Project Type"] == ProjectType.MAIN.value, "Books Missing/Incomplete"
-        ] = ";".join([book for book in self.completed_books if book not in self.main_project.report.completed_books])
+        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books Missing/Incomplete"] = (
+            ";".join([book for book in self.completed_books if book not in self.main_project.report.completed_books])
+        )
         self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Extra Books"] = ";".join(
             [book for book in self.main_project.report.completed_books if book not in self.completed_books]
         )
@@ -640,9 +647,9 @@ class OnboardingReportCreator:
             self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books to Translate"] = (
                 "yes" if len(books_missing) == 0 else "no"
             )
-            self.report_df.loc[
-                self.report_df["Name on Bucket"] == project.project_name, "Books Missing/Incomplete"
-            ] = ";".join(books_missing)
+            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books Missing/Incomplete"] = (
+                ";".join(books_missing)
+            )
             self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Extra Books"] = ";".join(
                 extra_books
             )
@@ -1218,7 +1225,7 @@ def main() -> None:
             task_name,
             args.clearml_queue,
             tag=args.clearml_tag,
-            skip_config=True,
+            records_config=False,
             environment=environment,
         )
 

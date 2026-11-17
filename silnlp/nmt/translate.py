@@ -8,23 +8,28 @@ from typing import Generator, Iterable, List, Optional, Tuple, Union
 from machine.corpora import UsfmFileTextCorpus, create_versification_ref_corpus, extract_scripture_corpus
 from machine.scripture import book_number_to_id, get_chapters
 
-from silnlp.common.corpus import load_corpus
-
+from ..common.confidence_files import CONFIDENCE_SUFFIX
+from ..common.corpus import load_corpus
 from ..common.environment import SilNlpEnv
 from ..common.paratext import book_file_name_digits
 from ..common.postprocessor import PostprocessConfig, PostprocessHandler
 from ..common.translation_data_structures import SentenceTranslationGroup
-from ..common.translator import CONFIDENCE_SUFFIX, Translator
+from ..common.translator import Translator
+from ..common.usfm_draft_writer import UsfmDraftWriter
 from ..common.utils import get_git_revision_hash, show_attrs
+from .checkpoints import CheckpointType
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import CheckpointType, Config, NMTModel
+from .config import Config, NMTModel
+from .config_utils import load_config
 from .quality_estimation import estimate_quality
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
 
 
 def export_vref_for_output(output_path: Path, produce_multiple_translations: bool, num_drafts: int = 1) -> None:
-    if produce_multiple_translations:
+    # Drafts are only numbered when there is more than one, so a run that fell back to a single
+    # translation writes its draft under the plain name.
+    if produce_multiple_translations and num_drafts > 1:
         for i in range(1, num_drafts + 1):
             draft_path = output_path.with_suffix(f".{i}{output_path.suffix}")
             if draft_path.exists():
@@ -112,9 +117,9 @@ class TranslationTask:
         confidence_files: List[Path] = []
         with translator:
             if src_project is None:
-                if len(config.src_projects) != 1:
+                if len(config.corpus_inventory.source_projects()) != 1:
                     raise RuntimeError("A source project must be specified.")
-                src_project = next(iter(config.src_projects))
+                src_project = next(iter(config.corpus_inventory.source_projects()))
 
             src_project_dir = self.environment.get_paratext_project_dir(src_project)
             if not src_project_dir.is_dir():
@@ -131,9 +136,9 @@ class TranslationTask:
                 trg_project = None
 
             if trg_iso is None:
-                trg_iso = config.default_test_trg_iso
-                if trg_iso == "" and len(config.trg_isos) > 0:
-                    trg_iso = next(iter(config.trg_isos))
+                trg_iso = config.corpus_inventory.default_test_target_iso()
+                if trg_iso == "" and len(config.corpus_inventory.target_isos()) > 0:
+                    trg_iso = next(iter(config.corpus_inventory.target_isos()))
             if trg_iso == "":
                 LOGGER.warning("No language code was set for the target language")
 
@@ -144,8 +149,8 @@ class TranslationTask:
                 output_dir = output_dir / trg_project
             output_dir.mkdir(exist_ok=True, parents=True)
 
-            src_training_rows = list(load_corpus(config.exp_dir / config.train_src_detok_filename()))
-            trg_training_rows = list(load_corpus(config.exp_dir / config.train_trg_detok_filename()))
+            src_training_rows = list(load_corpus(config.files.train_source_detokenized()))
+            trg_training_rows = list(load_corpus(config.files.train_target_detokenized()))
 
             translation_failed: List[str] = []
             for book_num, chapters in book_nums.items():
@@ -153,21 +158,23 @@ class TranslationTask:
                 try:
                     LOGGER.info(f"Translating {book} ...")
                     output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
-                    translator.translate_book(
+                    translated = translator.translate_book(
                         src_project,
                         book,
-                        output_path,
                         trg_iso,
-                        src_training_rows,
-                        trg_training_rows,
                         produce_multiple_translations,
-                        save_confidences,
                         chapters if chapters else None,
-                        trg_project,
-                        postprocess_handler,
-                        config.corpus_pairs,
                         tags,
                     )
+                    if translated is not None:
+                        UsfmDraftWriter(
+                            translated,
+                            self.environment,
+                            trg_project,
+                            config.corpus_pairs,
+                            src_training_rows,
+                            trg_training_rows,
+                        ).write(postprocess_handler, output_path, save_confidences)
                     if vref:
                         num_drafts = config.infer.get("num_drafts", 1)
                         export_vref_for_output(output_path, produce_multiple_translations, num_drafts)
@@ -204,15 +211,15 @@ class TranslationTask:
         confidence_files: List[Path] = []
         with translator:
             if src_iso is None:
-                src_iso = config.default_test_src_iso
-                if src_iso == "" and len(config.src_isos) > 0:
-                    src_iso = next(iter(config.src_isos))
+                src_iso = config.corpus_inventory.default_test_source_iso()
+                if src_iso == "" and len(config.corpus_inventory.source_isos()) > 0:
+                    src_iso = next(iter(config.corpus_inventory.source_isos()))
             if src_iso == "":
                 LOGGER.warning("No language code was set for the source language")
             if trg_iso is None:
-                trg_iso = config.default_test_trg_iso
-                if trg_iso == "" and len(config.trg_isos) > 0:
-                    trg_iso = next(iter(config.trg_isos))
+                trg_iso = config.corpus_inventory.default_test_target_iso()
+                if trg_iso == "" and len(config.corpus_inventory.target_isos()) > 0:
+                    trg_iso = next(iter(config.corpus_inventory.target_isos()))
             if trg_iso == "":
                 LOGGER.warning("No language code was set for the target language")
 
@@ -268,21 +275,23 @@ class TranslationTask:
                     )
                 elif ext == ".usfm" or ext == ".sfm":
                     if src_training_rows is None or trg_training_rows is None:
-                        src_training_rows = list(load_corpus(config.exp_dir / config.train_src_detok_filename()))
-                        trg_training_rows = list(load_corpus(config.exp_dir / config.train_trg_detok_filename()))
-                    translator.translate_usfm(
+                        src_training_rows = list(load_corpus(config.files.train_source_detokenized()))
+                        trg_training_rows = list(load_corpus(config.files.train_target_detokenized()))
+                    translated = translator.translate_usfm(
                         src_file_path,
-                        trg_file_path,
                         src_iso,
                         trg_iso,
-                        src_training_rows=src_training_rows,
-                        trg_training_rows=trg_training_rows,
-                        produce_multiple_translations=produce_multiple_translations,
-                        save_confidences=save_confidences,
-                        postprocess_handler=postprocess_handler,
-                        training_corpus_pairs=config.corpus_pairs,
+                        produce_multiple_translations,
                         tags=tags,
                     )
+                    if translated is not None:
+                        UsfmDraftWriter(
+                            translated,
+                            self.environment,
+                            training_corpus_pairs=config.corpus_pairs,
+                            source_training_rows=src_training_rows,
+                            target_training_rows=trg_training_rows,
+                        ).write(postprocess_handler, trg_file_path, save_confidences)
                     if vref:
                         num_drafts = config.infer.get("num_drafts", 1)
                         export_vref_for_output(trg_file_path, produce_multiple_translations, num_drafts)
@@ -307,16 +316,17 @@ class TranslationTask:
         )
         self.name = clearml.name
 
-        clearml.config.set_seed()
+        config = load_config(self.name, self.environment)
+        config.set_seed()
 
-        model = self.model if self.model is not None else clearml.config.create_model()
+        model = self.model if self.model is not None else config.create_model()
         translator = NMTTranslator(model, self.checkpoint, self.environment)
-        if clearml.config.model_dir.exists():
-            _, step = model.get_checkpoint_path(self.checkpoint)
+        if config.model_dir.exists():
+            step = model.resolve_checkpoint(self.checkpoint).step
             step_str = "avg" if step == -1 else str(step)
         else:
             step_str = "last"
-        return translator, clearml.config, step_str
+        return translator, config, step_str
 
 
 def main() -> None:
@@ -487,7 +497,7 @@ def main() -> None:
         environment=environment,
     )
 
-    postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args), environment)], environment=environment)
+    postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args))], environment=environment)
 
     if len(args.books) > 0:
         if args.debug:

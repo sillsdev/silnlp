@@ -1,15 +1,13 @@
 import logging
-import shutil
 from dataclasses import dataclass
 from typing import Optional
 
-import yaml
 from clearml import Task
 from clearml.backend_api.session.session import LoginError
 
 from silnlp.common.environment import SilNlpEnv
 
-from .config_utils import create_config
+from .config_utils import experiment_config_file
 
 LOGGER = logging.getLogger(__name__)
 
@@ -26,7 +24,7 @@ class SILClearML:
     clearml_project_folder: str = ""
     commit: Optional[str] = None
     tag: Optional[str] = None
-    skip_config: bool = False
+    records_config: bool = True
     environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
 
     def __post_init__(self) -> None:
@@ -38,7 +36,6 @@ class SILClearML:
             exp_name = "/".join(name_parts[1:])
         if self.queue_name is None:
             self.task = None
-            self._load_config()
             LOGGER.info("No ClearML task initiated.")
             return
 
@@ -50,8 +47,8 @@ class SILClearML:
             )
 
             self._determine_clearml_project_name()
-            if not self.skip_config:
-                self._load_config()
+            if self.records_config:
+                self._record_config()
 
             self.task.set_base_docker(
                 docker_image="ghcr.io/sillsdev/silnlp:latest",
@@ -111,38 +108,7 @@ class SILClearML:
         if len(self.experiment_suffix) > 0 and self.name.endswith(self.experiment_suffix):
             self.name = self.name[: -len(self.experiment_suffix)]
 
-    def _load_config(self) -> None:
-        # if the project/experiment yaml file already exists, use it to re-read the config.  If not, write it.
-        exp_dir = self.environment.get_mt_exp_dir(self.name)
-        if self.task is None:
-            with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
-                config = yaml.safe_load(file)
-            if config is None or len(config.keys()) == 0:
-                raise RuntimeError("Config file has no contents.")
-            self.config = create_config(exp_dir, config, self.environment)
-            return
-        # There is a ClearML task - lets' do more complex importing.
-        proj_dir = self.environment.get_mt_exp_dir(self.clearml_project_folder)
-        if (proj_dir / "config.yml").exists():
-            # if there is no experiment yaml, copy the project one to it.
-            if not (exp_dir / "config.yml").exists():
-                exp_dir.mkdir(parents=True, exist_ok=True)
-                shutil.copy(str(proj_dir / "config.yml"), str(exp_dir / "config.yml"))
-        if (exp_dir / "config.yml").exists():
-            # read in the project/experiment yaml file
-            with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
-                config = yaml.safe_load(file)
-        else:
-            config = {}
-        if config is None or len(config.keys()) == 0:
-            raise RuntimeError("Config file has no contents.")
-
-        # connect it with ClearML
-        # - if it is run locally, it will set the config parameters in the clearml server
-        # - if it is run remotely, it will update the params with the remote values
-        self.task.connect(mutable=config, name="config")
-        # then, after connection (and a possible remote update) write it to the experiment folder
-        exp_dir.mkdir(parents=True, exist_ok=True)
-        with (exp_dir / "config.yml").open("w+", encoding="utf-8") as file:
-            yaml.safe_dump(data=config, stream=file)
-        self.config = create_config(exp_dir, config, self.environment)
+    def _record_config(self) -> None:
+        # Recorded one way: an experiment runs from its config.yml, never from edits made in the UI.
+        config = experiment_config_file(self.name, self.environment).read()
+        self.task.connect(mutable=config, name="config", ignore_remote_overrides=True)

@@ -83,14 +83,14 @@ def main() -> None:
     environment = SilNlpEnv.create_standard_environment()
 
     args.output_folder = Path(args.output_folder.replace("\\", "/")) if args.output_folder else None
-    postprocess_config = PostprocessConfig(vars(args), environment)
+    postprocess_config = PostprocessConfig(vars(args))
 
     if args.clearml_queue is not None:
         if "cpu" not in args.clearml_queue:
             raise ValueError("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
         clearml = SILClearML(experiment, args.clearml_queue, tag=args.clearml_tag, environment=environment)
         experiment = clearml.name
-        config = clearml.config
+        config = load_config(experiment, environment)
     else:
         experiment = experiment.replace("\\", "/")
         config = load_config(experiment, environment)

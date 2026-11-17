@@ -3,22 +3,27 @@ import csv
 import logging
 import random
 from contextlib import ExitStack
+from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 from typing import Dict, List, Optional, Set, TextIO, Tuple
 
 import sacrebleu
-from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_id, get_chapters
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_chapters
 from sacrebleu.metrics import BLEUScore
 from scipy.stats import gmean
 
+from ..common.confidence_files import TestConfidenceFile
 from ..common.environment import SilNlpEnv
 from ..common.linear_regression import perform_enhanced_linear_regression
-from ..common.translator import CONFIDENCE_SUFFIX, TestConfidenceFile
-from ..common.utils import get_git_revision_hash
+from ..common.utils import get_git_revision_hash, set_seed
+from .checkpoints import CheckpointType
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import CheckpointType, Config, NMTModel, find_all_checkpoints
+from .config import Config, NMTModel
 from .config_utils import load_config
+from .corpus_inventory import CorpusInventory
+from .experiment_settings import ScoringSettings
+from .score_files import ScoreFiles, TestSetFiles
 from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger((__package__ or "") + ".test")
@@ -48,10 +53,6 @@ SUPPORTED_SENTENCE_SCORERS = [
     "ter",
     "confidence",
 ]
-
-TEST_TRG_PREDICTIONS_PREFIX = "test.trg-predictions"
-VERSE_SCORES_SUFFIX = ".scores.tsv"
-LINREGRESS_PREFIX = "linregress"
 
 
 class PairScore:
@@ -115,15 +116,13 @@ def score_pair(
     pair_sys: List[str],
     pair_refs: List[List[str]],
     book: str,
-    src_iso: str,
-    trg_iso: str,
-    predictions_detok_file_name: str,
-    pair_confs: Optional[List[float]],
+    files: TestSetFiles,
     scorers: Set[str],
-    config: Config,
+    scoring: ScoringSettings,
     ref_projects: Set[str],
     draft_index: int = 1,
-    linregress_file_name: Optional[str] = None,
+    pair_confs: Optional[List[float]] = None,
+    write_linear_regression: bool = False,
 ) -> PairScore:
     bleu_score = None
     if "bleu" in scorers:
@@ -131,7 +130,7 @@ def score_pair(
             pair_sys,
             pair_refs,
             lowercase=True,
-            tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+            tokenize=scoring.sacrebleu_tokenizer(),
         )
 
     other_scores: Dict[str, Optional[float]] = {}
@@ -170,7 +169,7 @@ def score_pair(
                 sentence,
                 references,
                 lowercase=True,
-                tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+                tokenize=scoring.sacrebleu_tokenizer(),
             )
             sentence_bleu_scores.append(sentence_bleu_score.score)
         if len(sentence_bleu_scores) == 0:
@@ -229,35 +228,40 @@ def score_pair(
         write_pair_verse_scores(
             pair_sys,
             pair_refs,
-            trg_iso,
-            predictions_detok_file_name,
+            files,
             scorers,
             other_scores,
-            config,
+            scoring,
             pair_confs if "confidence" in scorers else None,
-            linregress_file_name,
+            write_linear_regression,
         )
 
-    return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores, draft_index)
+    return PairScore(
+        book,
+        files.source_iso(),
+        files.target_iso(),
+        bleu_score,
+        len(pair_sys),
+        ref_projects,
+        other_scores,
+        draft_index,
+    )
 
 
 def write_pair_verse_scores(
     pair_sys: List[str],
     pair_refs: List[List[str]],
-    trg_iso: str,
-    predictions_detok_file_name: str,
+    files: TestSetFiles,
     scorers: Set[str],
-    other_scores: Dict[str, Optional[float]],
-    config: Config,
+    other_scores: Dict[str, float],
+    scoring: ScoringSettings,
     confidences: Optional[List[float]],
-    linregress_file_name: Optional[str] = None,
+    write_linear_regression: bool = False,
 ) -> None:
     scorers = scorers.intersection(SUPPORTED_SENTENCE_SCORERS)
     other_scores = {k: v for k, v in other_scores.items() if k.lower() in scorers and v is not None}
 
-    with open(
-        config.exp_dir / (predictions_detok_file_name + VERSE_SCORES_SUFFIX), "w", encoding="utf-8", newline=""
-    ) as scores_file:
+    with files.verse_scores().open("w", encoding="utf-8", newline="") as scores_file:
         writer = csv.writer(scores_file, delimiter="\t")
         header = ["Verse"]
         if "bleu" in scorers:
@@ -287,7 +291,7 @@ def write_pair_verse_scores(
                     pred,
                     sentences,
                     lowercase=True,
-                    tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+                    tokenize=scoring.sacrebleu_tokenizer(),
                 )
             other_verse_scores: Dict[str, float] = {}
             if "chrf3" in scorers:
@@ -346,12 +350,8 @@ def write_pair_verse_scores(
                 row.append(sentence.rstrip("\n"))
             writer.writerow(row)
 
-    if compute_linregress and linregress_file_name is not None:
-        write_linregress(
-            linregress_chrf3_scores,
-            linregress_confidence_scores,
-            config.exp_dir / linregress_file_name,
-        )
+    if compute_linregress and write_linear_regression:
+        write_linregress(linregress_chrf3_scores, linregress_confidence_scores, files.linregress())
 
 
 def write_linregress(chrf3_scores: List[float], confidence_scores: List[float], output_path: Path) -> None:
@@ -362,30 +362,11 @@ def write_linregress(chrf3_scores: List[float], confidence_scores: List[float], 
         f.write(linear_regression_result.toJSON())
 
 
-def get_linregress_file_name(
-    step_token: str,
-    split_by_pair: bool,
-    src_iso: str,
-    trg_iso: str,
-    produce_multiple_translations: bool,
-    draft_index: int,
-) -> str:
-    parts = [LINREGRESS_PREFIX]
-    if split_by_pair:
-        parts.extend([src_iso, trg_iso])
-    parts.append(step_token)
-    if produce_multiple_translations:
-        parts.append(str(draft_index))
-    return ".".join(parts) + ".json"
-
-
 def score_individual_books(
-    book_dict: Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]]]],
-    src_iso: str,
-    trg_iso: str,
-    predictions_detok_file_name: str,
+    book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]],
+    files: TestSetFiles,
     scorers: Set[str],
-    config: Config,
+    scoring: ScoringSettings,
     ref_projects: Set[str],
     draft_index: int,
 ):
@@ -402,14 +383,12 @@ def score_individual_books(
                 pair_sys,
                 pair_refs,
                 book,
-                src_iso,
-                trg_iso,
-                predictions_detok_file_name,
-                pair_confs,
+                files,
                 scorers,
-                config,
+                scoring,
                 ref_projects,
                 draft_index,
+                pair_confs=pair_confs,
             )
         )
     return book_scores
@@ -476,13 +455,8 @@ def process_individual_books(
 
 def load_test_data(
     tokenizer: Tokenizer,
-    vref_file_name: str,
-    pred_file_name: str,
-    confidence_file: Optional[TestConfidenceFile],
-    ref_pattern: str,
-    output_file_name: str,
+    files: TestSetFiles,
     ref_projects: Set[str],
-    config: Config,
     books: Dict[int, List[int]],
     by_book: bool,
 ) -> Tuple[
@@ -493,26 +467,22 @@ def load_test_data(
 ]:
     sys: List[str] = []
     refs: List[List[str]] = []
-    book_dict: Dict[str, Tuple[List[str], List[List[str]], Optional[List[float]]]] = {}
-    pred_file_path = config.exp_dir / pred_file_name
     kept_line_indices: List[int] = []
+    book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]] = {}
+    pred_file_path = files.predictions()
+    conf_file_path = files.confidences()
+    # A run that did not save confidences leaves no file to read them from.
+    confidence_file = TestConfidenceFile(conf_file_path) if conf_file_path.is_file() else None
     with ExitStack() as stack:
         pred_file = stack.enter_context(pred_file_path.open("r", encoding="utf-8"))
-        out_file = stack.enter_context((config.exp_dir / output_file_name).open("w", encoding="utf-8"))
+        out_file = stack.enter_context(files.predictions_detokenized().open("w", encoding="utf-8"))
 
-        ref_file_paths = list(config.exp_dir.glob(ref_pattern))
-        select_rand_ref_line = False
-        if len(ref_file_paths) > 1:
-            if len(ref_projects) == 0:
-                # no refs specified, so randomly select verses from all available train refs to build one ref
-                select_rand_ref_line = True
-                ref_file_paths = [p for p in ref_file_paths if config.is_train_project(p)]
-            else:
-                # use specified refs only
-                ref_file_paths = [p for p in ref_file_paths if config.is_ref_project(ref_projects, p)]
+        references = files.references(ref_projects)
+        ref_file_paths = references.paths
+        select_rand_ref_line = references.select_random_line
         ref_files: List[TextIO] = []
         vref_file: Optional[TextIO] = None
-        vref_file_path = config.exp_dir / vref_file_name
+        vref_file_path = files.vref()
         if len(books) > 0 and vref_file_path.is_file():
             vref_file = stack.enter_context(vref_file_path.open("r", encoding="utf-8"))
         for ref_file_path in ref_file_paths:
@@ -557,219 +527,133 @@ def load_test_data(
     return sys, refs, confidences, book_dict
 
 
-def test_checkpoint(
-    config: Config,
-    model: NMTModel,
-    tokenizer: Tokenizer,
-    force_infer: bool,
-    by_book: bool,
-    ref_projects: Set[str],
-    checkpoint_type: CheckpointType,
-    step: int,
-    scorers: Set[str],
-    books: Dict[int, List[int]],
-    produce_multiple_translations: bool = False,
-    save_confidences: bool = False,
-) -> List[PairScore]:
-    config.set_seed()
-    vref_file_names: List[str] = []
-    source_file_names: List[str] = []
-    translation_file_names: List[str] = []
-    refs_patterns: List[str] = []
-    translation_detok_file_names: List[str] = []
-    translation_conf_file_names: List[str] = []
-    step_token = "avg" if step == -1 else str(step)
-    suffix_str = "_".join(map(lambda n: book_number_to_id(n), sorted(books.keys())))
-    if len(suffix_str) > 0:
-        suffix_str += "-"
-    suffix_str += step_token
+@dataclass(frozen=True)
+class TestRequest:
+    """What a test run was asked to do: which translations to produce and how to score them."""
 
-    features_file_name = "test.src.txt"
-    if (config.exp_dir / features_file_name).is_file():
-        # all test data is stored in a single file
-        vref_file_names.append("test.vref.txt")
-        source_file_names.append(features_file_name)
-        translation_file_names.append(f"{TEST_TRG_PREDICTIONS_PREFIX}.txt.{suffix_str}")
-        refs_patterns.append("test.trg.detok*.txt")
-        translation_detok_file_names.append(f"{TEST_TRG_PREDICTIONS_PREFIX}.detok.txt.{suffix_str}")
-        translation_conf_file_names.append(f"{TEST_TRG_PREDICTIONS_PREFIX}.txt.{suffix_str}{CONFIDENCE_SUFFIX}")
-    else:
-        # test data is split into separate files
-        for src_iso in sorted(config.test_src_isos):
-            for trg_iso in sorted(config.test_trg_isos):
-                if src_iso == trg_iso:
-                    continue
-                prefix = f"test.{src_iso}.{trg_iso}"
-                features_file_name = f"{prefix}.src.txt"
-                if (config.exp_dir / features_file_name).is_file():
-                    vref_file_names.append(f"{prefix}.vref.txt")
-                    source_file_names.append(features_file_name)
-                    translation_file_names.append(f"{prefix}.trg-predictions.txt.{suffix_str}")
-                    refs_patterns.append(f"{prefix}.trg.detok*.txt")
-                    translation_detok_file_names.append(f"{prefix}.trg-predictions.detok.txt.{suffix_str}")
-                    translation_conf_file_names.append(f"{prefix}.trg-predictions.txt.{suffix_str}{CONFIDENCE_SUFFIX}")
+    scorers: Set[str]
+    ref_projects: Set[str]
+    books: Dict[int, List[int]]
+    by_book: bool = False
+    force_infer: bool = False
+    produce_multiple_translations: bool = False
+    save_confidences: bool = False
 
-    checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
 
-    source_paths: List[Path] = []
-    translation_paths: List[Path] = []
-    for i in range(len(translation_file_names)):
-        predictions_path = config.exp_dir / translation_file_names[i]
-        if force_infer or not model.has_completed_translation(config.exp_dir / source_file_names[i], predictions_path):
-            source_paths.append(config.exp_dir / source_file_names[i])
-            translation_paths.append(predictions_path)
-    if len(translation_paths) > 0:
-        LOGGER.info(f"Inferencing {checkpoint_name}")
-        model.translate_test_files(
-            source_paths,
-            translation_paths,
-            produce_multiple_translations,
-            save_confidences,
-            step if checkpoint_type is CheckpointType.OTHER else checkpoint_type,
-        )
+class TestRun:
+    """Scores an experiment's test sets against one checkpoint of a model at a time."""
 
-    if produce_multiple_translations:
-        num_drafts = model.get_num_drafts()
-        vref_file_names = num_drafts * vref_file_names
-        source_file_names = num_drafts * source_file_names
-        translation_file_names = [
-            str(Path(file_name).with_suffix(f".{draft_index}{Path(file_name).suffix}"))
-            for draft_index in range(1, num_drafts + 1)
-            for file_name in translation_file_names
-        ]
-        translation_conf_file_names = [
-            str(Path(file_name).with_suffix(f"{Path(file_name).suffix}{CONFIDENCE_SUFFIX}"))
-            for file_name in translation_file_names
-        ]
-        refs_patterns = num_drafts * refs_patterns
-        translation_detok_file_names = [
-            str(Path(file_name).with_suffix(f".{draft_index}{Path(file_name).suffix}"))
-            for draft_index in range(1, num_drafts + 1)
-            for file_name in translation_detok_file_names
-        ]
-        draft_indices = num_drafts * list(range(1, num_drafts + 1))
-    else:
-        draft_indices = len(source_file_names) * [1]
+    def __init__(
+        self,
+        files: ScoreFiles,
+        inventory: CorpusInventory,
+        scoring: ScoringSettings,
+        model: NMTModel,
+        tokenizer: Tokenizer,
+        seed: int,
+        request: TestRequest,
+    ) -> None:
+        self._files = files
+        self._inventory = inventory
+        self._scoring = scoring
+        self._model = model
+        self._tokenizer = tokenizer
+        self._seed = seed
+        self._request = request
 
-    confidence_files: List[Optional[TestConfidenceFile]] = [None] * len(translation_conf_file_names)
-    if "confidence" in scorers:
-        confidence_files = [TestConfidenceFile(config.exp_dir / name) for name in translation_conf_file_names]
-        if not any(confidence_file.exists() for confidence_file in confidence_files):
-            raise FileNotFoundError(
-                f"Cannot use confidence as a scorer because no confidences files were found for {checkpoint_name}. "
-                "Include the --save-confidences option, and --force-infer if the predictions already exist. "
-                "Confidences are only calculated for drafts that are translated with beam search."
+    def score_checkpoint(self, checkpoint_type: CheckpointType, step: int) -> List[PairScore]:
+        set_seed(self._seed)
+        test_sets = self._files.test_sets(step, self._request.books)
+        checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
+
+        source_paths: List[Path] = []
+        translation_paths: List[Path] = []
+        for test_set in test_sets:
+            if self._request.force_infer or not self._model.has_completed_translation(
+                test_set.source(), test_set.predictions()
+            ):
+                source_paths.append(test_set.source())
+                translation_paths.append(test_set.predictions())
+        if len(translation_paths) > 0:
+            LOGGER.info(f"Inferencing {checkpoint_name}")
+            self._model.translate_test_files(
+                source_paths,
+                translation_paths,
+                self._request.produce_multiple_translations,
+                self._request.save_confidences,
+                step if checkpoint_type is CheckpointType.OTHER else checkpoint_type,
             )
-        for i, confidence_file in enumerate(confidence_files):
-            if not confidence_file.exists():
-                LOGGER.warning(
-                    f"Not scoring confidence for {translation_file_names[i]}, because it has no confidences file. "
-                    "This is expected for drafts that were not translated with beam search."
-                )
-                confidence_files[i] = None
 
-    LOGGER.info(f"Scoring {checkpoint_name}")
-    scores: List[PairScore] = []
-    overall_sys: List[str] = []
-    overall_refs: List[List[str]] = []
-    for (
-        vref_file_name,
-        features_file_name,
-        predictions_file_name,
-        refs_pattern,
-        predictions_detok_file_name,
-        confidence_file,
-        draft_index,
-    ) in zip(
-        vref_file_names,
-        source_file_names,
-        translation_file_names,
-        refs_patterns,
-        translation_detok_file_names,
-        confidence_files,
-        draft_indices,
-    ):
-        src_iso = config.default_test_src_iso
-        trg_iso = config.default_test_trg_iso
-        split_by_pair = features_file_name != "test.src.txt"
-        if split_by_pair:
-            parts = features_file_name.split(".")
-            src_iso = parts[1]
-            trg_iso = parts[2]
-
-        linregress_file_name = get_linregress_file_name(
-            step_token, split_by_pair, src_iso, trg_iso, produce_multiple_translations, draft_index
-        )
-
-        pair_sys, pair_refs, pair_confs, book_dict = load_test_data(
-            tokenizer,
-            vref_file_name,
-            predictions_file_name,
-            confidence_file,
-            refs_pattern,
-            predictions_detok_file_name,
-            ref_projects,
-            config,
-            books,
-            by_book,
-        )
-
-        start_index = len(overall_sys)
-        overall_sys.extend(pair_sys)
-        for i, ref in enumerate(pair_refs):
-            if i == len(overall_refs):
-                overall_refs.append([""] * start_index)
-            overall_refs[i].extend(ref)
-        # ensure that all refs are the same length as the sys
-        for overall_ref in filter(lambda r: len(r) < len(overall_sys), overall_refs):
-            overall_ref.extend([""] * (len(overall_sys) - len(overall_ref)))
-
-        scores.append(
-            score_pair(
-                pair_sys,
-                pair_refs,
-                "ALL",
-                src_iso,
-                trg_iso,
-                predictions_detok_file_name,
-                pair_confs,
-                scorers,
-                config,
-                ref_projects,
-                draft_index,
-                linregress_file_name=linregress_file_name,
+        if self._request.produce_multiple_translations:
+            test_sets = self._files.test_sets(
+                step,
+                self._request.books,
+                self._request.produce_multiple_translations,
+                self._model.get_num_drafts(),
             )
-        )
 
-        if by_book:
-            if len(book_dict) != 0:
-                book_scores = score_individual_books(
-                    book_dict,
-                    src_iso,
-                    trg_iso,
-                    predictions_detok_file_name,
-                    scorers,
-                    config,
-                    ref_projects,
-                    draft_index,
+        LOGGER.info(f"Scoring {checkpoint_name}")
+        scores: List[PairScore] = []
+        overall_sys: List[str] = []
+        overall_refs: List[List[str]] = []
+        for test_set in test_sets:
+            pair_sys, pair_refs, pair_confs, book_dict = load_test_data(
+                self._tokenizer,
+                test_set,
+                self._request.ref_projects,
+                self._request.books,
+                self._request.by_book,
+            )
+
+            start_index = len(overall_sys)
+            overall_sys.extend(pair_sys)
+            for i, ref in enumerate(pair_refs):
+                if i == len(overall_refs):
+                    overall_refs.append([""] * start_index)
+                overall_refs[i].extend(ref)
+            # ensure that all refs are the same length as the sys
+            for overall_ref in filter(lambda r: len(r) < len(overall_sys), overall_refs):
+                overall_ref.extend([""] * (len(overall_sys) - len(overall_ref)))
+
+            scores.append(
+                score_pair(
+                    pair_sys,
+                    pair_refs,
+                    "ALL",
+                    test_set,
+                    self._request.scorers,
+                    self._scoring,
+                    self._request.ref_projects,
+                    test_set.draft_index(),
+                    pair_confs=pair_confs,
+                    write_linear_regression=True,
                 )
-                scores.extend(book_scores)
-            else:
-                LOGGER.error("Error: book_dict did not load correctly. Not scoring individual books.")
-    if len(config.test_src_isos) > 1 or len(config.test_trg_isos) > 1:
-        bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)
-        scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), ref_projects))
+            )
 
-    scores_file_root = f"scores-{suffix_str}"
-    if len(ref_projects) > 0:
-        ref_projects_suffix = "_".join(sorted(ref_projects))
-        scores_file_root += f"-{ref_projects_suffix}"
-    with (config.exp_dir / f"{scores_file_root}.csv").open("w", encoding="utf-8") as scores_file:
-        if len(scores) > 0:
-            scores[0].writeHeader(scores_file)
-        for results in scores:
-            results.write(scores_file)
-    return scores
+            if self._request.by_book:
+                if len(book_dict) != 0:
+                    book_scores = score_individual_books(
+                        book_dict,
+                        test_set,
+                        self._request.scorers,
+                        self._scoring,
+                        self._request.ref_projects,
+                        test_set.draft_index(),
+                    )
+                    scores.extend(book_scores)
+                else:
+                    LOGGER.error("Error: book_dict did not load correctly. Not scoring individual self._request.books.")
+        if len(self._inventory.test_source_isos()) > 1 or len(self._inventory.test_target_isos()) > 1:
+            bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)
+            scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), self._request.ref_projects))
+
+        scores_path = self._files.scores(step, self._request.books, self._request.ref_projects)
+        with scores_path.open("w", encoding="utf-8") as scores_file:
+            if len(scores) > 0:
+                scores[0].writeHeader(scores_file)
+            for results in scores:
+                results.write(scores_file)
+        return scores
 
 
 def test(
@@ -789,7 +673,8 @@ def test(
     clearml_queue: Optional[str] = None,
     model: Optional[NMTModel] = None,
 ):
-    if not any(config.exp_dir.glob("test*.src.txt")):
+    files = ScoreFiles(config.exp_dir, config.corpus_inventory)
+    if not files.has_test_data():
         LOGGER.info("No test dataset.")
         return
 
@@ -808,119 +693,58 @@ def test(
         model = config.create_model(clearml_queue=clearml_queue)
     if force_infer:
         model.discard_saved_inference()
+    run = TestRun(
+        files,
+        config.corpus_inventory,
+        config.create_scoring_settings(),
+        model,
+        tokenizer,
+        config.seed,
+        TestRequest(
+            scorers=scorers,
+            ref_projects=ref_projects,
+            books=books_nums,
+            by_book=by_book,
+            force_infer=force_infer,
+            produce_multiple_translations=produce_multiple_translations,
+            save_confidences=save_confidences,
+        ),
+    )
     results: Dict[int, List[PairScore]] = {}
     step: int
     if checkpoint is not None:
         step = int(checkpoint)
-        results[step] = test_checkpoint(
-            config,
-            model,
-            tokenizer,
-            force_infer,
-            by_book,
-            ref_projects,
-            CheckpointType.OTHER,
-            step,
-            scorers,
-            books_nums,
-            produce_multiple_translations,
-            save_confidences,
-        )
+        results[step] = run.score_checkpoint(CheckpointType.OTHER, step)
 
     if all_checkpoints:
-        all_steps = find_all_checkpoints(config.model_dir)
+        all_steps = model.checkpoint_steps()
         if len(all_steps) == 0:
             LOGGER.warning("No checkpoints found to test.")
         for step in all_steps:
             if step not in results:
-                results[step] = test_checkpoint(
-                    config,
-                    model,
-                    tokenizer,
-                    force_infer,
-                    by_book,
-                    ref_projects,
-                    CheckpointType.OTHER,
-                    step,
-                    scorers,
-                    books_nums,
-                    produce_multiple_translations,
-                    save_confidences,
-                )
+                results[step] = run.score_checkpoint(CheckpointType.OTHER, step)
 
     if avg:
         try:
             step = -1
-            results[step] = test_checkpoint(
-                config,
-                model,
-                tokenizer,
-                force_infer,
-                by_book,
-                ref_projects,
-                CheckpointType.AVERAGE,
-                step,
-                scorers,
-                books_nums,
-                produce_multiple_translations,
-                save_confidences,
-            )
+            results[step] = run.score_checkpoint(CheckpointType.AVERAGE, step)
         except ValueError:
             LOGGER.warning("No average checkpoint available.")
 
     best_step = 0
-    if best and config.has_best_checkpoint:
-        _, best_step = model.get_checkpoint_path(CheckpointType.BEST)
+    if best and model.has_best_checkpoint():
+        best_step = model.resolve_checkpoint(CheckpointType.BEST).step
         step = best_step
         if step not in results:
-            results[step] = test_checkpoint(
-                config,
-                model,
-                tokenizer,
-                force_infer,
-                by_book,
-                ref_projects,
-                CheckpointType.BEST,
-                step,
-                scorers,
-                books_nums,
-                produce_multiple_translations,
-                save_confidences,
-            )
+            results[step] = run.score_checkpoint(CheckpointType.BEST, step)
 
-    if last or (not best and checkpoint is None and not avg and config.model_dir.exists()):
-        _, step = model.get_checkpoint_path(CheckpointType.LAST)
+    if last or (not best and checkpoint is None and not avg and model.has_been_trained()):
+        step = model.resolve_checkpoint(CheckpointType.LAST).step
         if step not in results:
-            results[step] = test_checkpoint(
-                config,
-                model,
-                tokenizer,
-                force_infer,
-                by_book,
-                ref_projects,
-                CheckpointType.LAST,
-                step,
-                scorers,
-                books_nums,
-                produce_multiple_translations,
-                save_confidences,
-            )
+            results[step] = run.score_checkpoint(CheckpointType.LAST, step)
 
-    if not config.model_dir.exists():
-        results[0] = test_checkpoint(
-            config,
-            model,
-            tokenizer,
-            force_infer,
-            by_book,
-            ref_projects,
-            CheckpointType.OTHER,
-            0,
-            scorers,
-            books_nums,
-            produce_multiple_translations,
-            save_confidences,
-        )
+    if not model.has_been_trained():
+        results[0] = run.score_checkpoint(CheckpointType.OTHER, 0)
 
     for step in sorted(results.keys()):
         num_refs = results[step][0].num_refs

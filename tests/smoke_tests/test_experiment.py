@@ -6,7 +6,8 @@ import torch
 from silnlp.common.environment import SilNlpEnv
 from silnlp.nmt.config_utils import load_config
 from silnlp.nmt.experiment import SILExperiment
-from silnlp.nmt.seq2seq_config import Seq2SeqConfig, Seq2SeqNMTModel
+from silnlp.nmt.seq2seq_config import Seq2SeqNMTModel
+from silnlp.nmt.translation_settings import TranslationSettings
 from tests.smoke_tests.mock_pretrained_model import (
     MockModelOutput,
     MockPreTrainedModelProviderFactory,
@@ -43,7 +44,7 @@ def test_experiment_full_pipeline():
 
 def test_translate_sentences_uses_full_batch_size():
     model = cast(Seq2SeqNMTModel, Mock(spec=Seq2SeqNMTModel))
-    model._config = cast(Seq2SeqConfig, Mock(infer={"infer_batch_size": 4}))
+    model._translation = TranslationSettings({"infer_batch_size": 4}, {})
     captured_sub_batch_size = {}
 
     def fake_translate_sentence_helper(translator, sentences, produce_multiple_translations=False):
@@ -65,7 +66,7 @@ def test_translate_sentences_uses_full_batch_size():
 
 def test_translate_sentences_retries_with_smaller_batch():
     model = cast(Seq2SeqNMTModel, Mock(spec=Seq2SeqNMTModel))
-    model._config = cast(Seq2SeqConfig, Mock(infer={"infer_batch_size": 4, "num_beams": 2}, params={}))
+    model._translation = TranslationSettings({"infer_batch_size": 4, "num_beams": 2}, {})
     call_sub_batch_sizes: list[int] = []
 
     def fake_translate_sentence_helper(translator, sentences, produce_multiple_translations=False):
