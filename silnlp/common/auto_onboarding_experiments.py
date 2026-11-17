@@ -70,7 +70,8 @@ class DataPaths:
 
 
 class RequestFolder:
-    """Finds _OnboardingRequests/NAME_Request from NAME, NAME_, NAME_Request or NAME_Requests, with or without a path."""
+    """Finds _OnboardingRequests/NAME_Request from NAME, NAME_, NAME_Request or NAME_Requests,
+    with or without a path."""
 
     FOLDER = "_OnboardingRequests"
 
