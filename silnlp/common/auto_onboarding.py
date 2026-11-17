@@ -67,14 +67,24 @@ class DataPaths:
 
 
 class RequestFolder:
+    """Finds _OnboardingRequests/NAME_Request from NAME, NAME_, NAME_Request or NAME_Requests, with or without a path."""
+
+    FOLDER = "_OnboardingRequests"
+
     def __init__(self, experiments_dir: Path):
         self._experiments_dir = experiments_dir
 
     def resolve(self, name: str) -> Path:
-        for folder in (self._experiments_dir / name, self._experiments_dir / f"{name.rstrip('/')}_Request"):
-            if folder.is_dir():
-                return folder
-        raise OnboardingError(f"Neither {name} nor {name.rstrip('/')}_Request is a folder in {self._experiments_dir}.")
+        folder = self._experiments_dir / self.FOLDER / f"{self._stem(name)}_Request"
+        if folder.is_dir():
+            return folder
+        raise OnboardingError(f"{folder} is not a folder.")
+
+    @staticmethod
+    def _stem(name: str) -> str:
+        """The folder name with any leading path, trailing _Request or _Requests and trailing underscore removed."""
+        stem = name.replace("\\", "/").rstrip("/").split("/")[-1]
+        return re.sub(r"_Requests?$", "", stem).rstrip("_")
 
 
 class OnboardingRequest:
