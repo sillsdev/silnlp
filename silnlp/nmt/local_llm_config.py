@@ -18,6 +18,7 @@ built with the model's native chat template from ``train.prompt`` and ``infer.pr
 """
 
 import logging
+import os
 import random
 import re
 from dataclasses import dataclass
@@ -893,6 +894,7 @@ class LocalLLMModel(NMTModel):
             raise
 
     def train(self) -> None:
+        os.system("nvidia-smi")
         self._config.check_example_corpora()
         training_args = self._create_training_arguments()
         tokenizer = self._config.get_hf_tokenizer()

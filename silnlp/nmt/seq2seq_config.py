@@ -923,6 +923,7 @@ class Seq2SeqNMTModel(NMTModel):
         )
 
     def train(self) -> None:
+        os.system("nvidia-smi")
         training_args = self._create_training_arguments()
 
         if training_args.should_log:
