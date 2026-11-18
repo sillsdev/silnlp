@@ -4,10 +4,30 @@ import os
 import re
 import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
 import boto3
+
+
+def try_n_times(func: Callable, n=10):
+    for i in range(n):
+        try:
+            return func()
+        except Exception as e:
+            if i < n - 1:
+                print(f"Failed {i+1} of {n} times.  Retrying.")
+                time.sleep(2**i)
+            else:
+                raise e
+
+
+def get_bucket_objects(bucket) -> dict:
+    bucket_objects = {}
+    for obj in bucket.objects.all():
+        bucket_objects[obj.key] = obj.last_modified
+    return bucket_objects
 
 
 def sync_buckets(include_checkpoints: bool, dry_run: bool, output_path: str = None) -> None:
@@ -30,18 +50,13 @@ def sync_buckets(include_checkpoints: bool, dry_run: bool, output_path: str = No
     )
     b2_bucket = b2_resource.Bucket("silnlp")
 
-    b2_objects = {}
-    minio_objects = {}
-
     # Get all objects in the MinIO bucket
     print("Getting objects from MinIO")
-    for obj in minio_bucket.objects.all():
-        minio_objects[obj.key] = obj.last_modified
+    minio_objects: dict[str, datetime] = try_n_times(lambda: get_bucket_objects(minio_bucket))
 
     # Get all objects in the B2 bucket
     print("Getting objects from B2")
-    for obj in b2_bucket.objects.all():
-        b2_objects[obj.key] = obj.last_modified
+    b2_objects: dict[str, datetime] = try_n_times(lambda: get_bucket_objects(b2_bucket))
 
     if not include_checkpoints:
         print("Excluding model checkpoints from the sync")
@@ -92,7 +107,7 @@ def sync_buckets(include_checkpoints: bool, dry_run: bool, output_path: str = No
             for i in range(0, len(objects_to_delete), 1000):
                 batch = objects_to_delete[i : i + 1000]
                 delete_params = {"Objects": [{"Key": key} for key in batch]}
-                b2_bucket.delete_objects(Delete=delete_params)
+                try_n_times(lambda: b2_bucket.delete_objects(Delete=delete_params))
 
         # Sync the objects to the B2 bucket
         length = len(objects_to_sync)
@@ -114,19 +129,6 @@ def sync_buckets(include_checkpoints: bool, dry_run: bool, output_path: str = No
             else:
                 print(f"Would be syncing, {x}/{length}: {key}")
                 csv_writer.writerow([key, "Would be synced to B2"])
-
-
-def try_n_times(func: Callable, n=10):
-    for i in range(n):
-        try:
-            func()
-            break
-        except Exception as e:
-            if i < n - 1:
-                print(f"Failed {i+1} of {n} times.  Retrying.")
-                time.sleep(2**i)
-            else:
-                raise e
 
 
 def main() -> None:
