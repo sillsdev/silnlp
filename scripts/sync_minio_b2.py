@@ -10,7 +10,7 @@ from typing import Callable
 import boto3
 
 
-def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
+def sync_buckets(include_checkpoints: bool, dry_run: bool, output_path: str = None) -> None:
     minio_resource = boto3.resource(
         service_name="s3",
         endpoint_url=os.getenv("MINIO_ENDPOINT_URL"),
@@ -58,8 +58,18 @@ def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
             b2_objects.pop(key, None)
             minio_objects.pop(key, None)
 
-    output_csv = f"sync_output_{time.strftime('%Y%m%d-%H%M%S')}" + ("_dryrun" if dry_run else "") + ".csv"
-    with open(output_csv, mode="w", newline="", encoding="utf-8") as csv_file:
+    output_csv_file_name = f"sync_output_{time.strftime('%Y%m%d-%H%M%S')}" + ("_dryrun" if dry_run else "") + ".csv"
+    if output_path is not None:
+        output_path = Path(output_path)
+        # Create the output path if it doesn't exist
+        if not output_path.exists():
+            output_path.mkdir(parents=True, exist_ok=True)
+        if output_path.is_dir():
+            output_path = Path(output_path / output_csv_file_name)
+    else:
+        output_path = Path(output_csv_file_name)
+
+    with open(output_path, mode="w", newline="", encoding="utf-8") as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(["Filename", "Action"])
         # Get the objects that are in the MinIO bucket but not in the B2 bucket, or have been modified
@@ -130,9 +140,15 @@ def main() -> None:
         action="store_true",
         help="Don't sync any files, just report what would be synced",
     )
+    parser.add_argument(
+        "--output-folder",
+        default=None,
+        type=str,
+        help="The path to the output folder for the CSV file. If not specified, the CSV file will be created in the current working directory.",
+    )
     args = parser.parse_args()
 
-    sync_buckets(args.include_checkpoints, args.dry_run)
+    sync_buckets(args.include_checkpoints, args.dry_run, args.output_folder)
 
 
 if __name__ == "__main__":
