@@ -4,13 +4,33 @@ import os
 import re
 import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
 import boto3
 
 
-def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
+def try_n_times(func: Callable, n=10):
+    for i in range(n):
+        try:
+            return func()
+        except Exception as e:
+            if i < n - 1:
+                print(f"Failed {i+1} of {n} times.  Retrying.")
+                time.sleep(2**i)
+            else:
+                raise e
+
+
+def get_bucket_objects(bucket) -> dict:
+    bucket_objects = {}
+    for obj in bucket.objects.all():
+        bucket_objects[obj.key] = obj.last_modified
+    return bucket_objects
+
+
+def sync_buckets(include_checkpoints: bool, dry_run: bool, output_path: str = None) -> None:
     minio_resource = boto3.resource(
         service_name="s3",
         endpoint_url=os.getenv("MINIO_ENDPOINT_URL"),
@@ -30,18 +50,13 @@ def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
     )
     b2_bucket = b2_resource.Bucket("silnlp")
 
-    b2_objects = {}
-    minio_objects = {}
-
     # Get all objects in the MinIO bucket
     print("Getting objects from MinIO")
-    for obj in minio_bucket.objects.all():
-        minio_objects[obj.key] = obj.last_modified
+    minio_objects: dict[str, datetime] = try_n_times(lambda: get_bucket_objects(minio_bucket))
 
     # Get all objects in the B2 bucket
     print("Getting objects from B2")
-    for obj in b2_bucket.objects.all():
-        b2_objects[obj.key] = obj.last_modified
+    b2_objects: dict[str, datetime] = try_n_times(lambda: get_bucket_objects(b2_bucket))
 
     if not include_checkpoints:
         print("Excluding model checkpoints from the sync")
@@ -58,8 +73,18 @@ def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
             b2_objects.pop(key, None)
             minio_objects.pop(key, None)
 
-    output_csv = f"sync_output_{time.strftime('%Y%m%d-%H%M%S')}" + ("_dryrun" if dry_run else "") + ".csv"
-    with open(output_csv, mode="w", newline="", encoding="utf-8") as csv_file:
+    output_csv_file_name = f"sync_output_{time.strftime('%Y%m%d-%H%M%S')}" + ("_dryrun" if dry_run else "") + ".csv"
+    if output_path is not None:
+        output_path = Path(output_path)
+        # Create the output path if it doesn't exist
+        if not output_path.exists():
+            output_path.mkdir(parents=True, exist_ok=True)
+        if output_path.is_dir():
+            output_path = Path(output_path / output_csv_file_name)
+    else:
+        output_path = Path(output_csv_file_name)
+
+    with open(output_path, mode="w", newline="", encoding="utf-8") as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(["Filename", "Action"])
         # Get the objects that are in the MinIO bucket but not in the B2 bucket, or have been modified
@@ -82,7 +107,7 @@ def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
             for i in range(0, len(objects_to_delete), 1000):
                 batch = objects_to_delete[i : i + 1000]
                 delete_params = {"Objects": [{"Key": key} for key in batch]}
-                b2_bucket.delete_objects(Delete=delete_params)
+                try_n_times(lambda: b2_bucket.delete_objects(Delete=delete_params))
 
         # Sync the objects to the B2 bucket
         length = len(objects_to_sync)
@@ -106,19 +131,6 @@ def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
                 csv_writer.writerow([key, "Would be synced to B2"])
 
 
-def try_n_times(func: Callable, n=10):
-    for i in range(n):
-        try:
-            func()
-            break
-        except Exception as e:
-            if i < n - 1:
-                print(f"Failed {i+1} of {n} times.  Retrying.")
-                time.sleep(2**i)
-            else:
-                raise e
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync MinIO and B2 buckets")
     parser.add_argument(
@@ -130,9 +142,15 @@ def main() -> None:
         action="store_true",
         help="Don't sync any files, just report what would be synced",
     )
+    parser.add_argument(
+        "--output-folder",
+        default=None,
+        type=str,
+        help="The path to the output folder for the CSV file. If not specified, the CSV file will be created in the current working directory.",
+    )
     args = parser.parse_args()
 
-    sync_buckets(args.include_checkpoints, args.dry_run)
+    sync_buckets(args.include_checkpoints, args.dry_run, args.output_folder)
 
 
 if __name__ == "__main__":
