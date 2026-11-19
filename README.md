@@ -50,6 +50,12 @@ Follow these steps if you plan to run silnlp on a Windows machine.
          ```
          ubuntu2404 config --default-user root
          ```
+      * If this command fails, you can also set root as default by adding the following to `/etc/wsl.conf`
+         ```
+         [user]
+         default=root
+         ```
+      * You will need to restart WSL for this to take effect by exiting WSL and running `wsl --terminate Ubuntu-24.04`
 
    3. Run this command to set Ubuntu-24.04 as your default distro:
          ```
